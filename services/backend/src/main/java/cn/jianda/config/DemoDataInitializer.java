@@ -21,6 +21,7 @@ public class DemoDataInitializer implements ApplicationRunner {
     @Transactional
     public void run(ApplicationArguments args) {
         if (jdbc.queryForObject("SELECT COUNT(*) FROM organization", Integer.class) > 0) {
+            seedPublicSources();
             return;
         }
         jdbc.update("INSERT INTO organization(name,code,type) VALUES (?,?,?)", "简达平台运营中心", "PLATFORM", "PLATFORM");
@@ -34,8 +35,22 @@ public class DemoDataInitializer implements ApplicationRunner {
         jdbc.update("INSERT INTO staff_user(organization_id,username,password_hash,display_name,role) VALUES (2,?,?,?,?)",
                 "reviewer", password, "王芳", "REVIEWER");
         seedPublishedGuide();
+        seedPublicSources();
     }
 
+    private void seedPublicSources() {
+        seedSource("国家反诈中心", "GOVERNMENT", "https://www.mps.gov.cn", "国家反诈中心", "用于离线反诈提醒 fixture");
+        seedSource("城市人民医院", "HOSPITAL", "https://www.city-hospital.example", "城市人民医院", "用于离线健康科普 fixture");
+        seedSource("浦江街道办事处", "PUBLIC_INSTITUTION", "https://www.pujiang.gov.cn", "浦江街道办事处", "用于离线社区养老通知 fixture");
+    }
+
+    private void seedSource(String name, String type, String url, String publisher, String notes) {
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM content_source WHERE source_name=?", Integer.class, name);
+        if (count != null && count == 0) {
+            jdbc.update("INSERT INTO content_source(organization_id,source_type,source_name,source_url,publisher,status,whitelist_status,enabled,notes) "
+                    + "VALUES (NULL,?,?,?,?,'ACTIVE','APPROVED',TRUE,?)", type, name, url, publisher, notes);
+        }
+    }
     private void seedPublishedGuide() {
         String raw = "浦江街道老年补贴办理通知\n补贴对象为具有本市户籍且年满八十周岁的老年人。已享受同类补贴待遇的，不重复发放。\n"
                 + "申请材料：身份证及户口簿原件、本人银行卡复印件、近期一寸免冠照片一张。\n"

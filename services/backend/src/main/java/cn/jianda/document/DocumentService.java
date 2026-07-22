@@ -110,7 +110,9 @@ public class DocumentService {
         Long jobId = jdbc.queryForObject("SELECT MAX(id) FROM processing_job WHERE document_id=?", Long.class, id);
         jdbc.update("UPDATE source_document SET processing_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
         try {
-            Map<String, Object> result = aiClient.analyze(document.get("title").toString(), document.get("raw_text").toString(), "guide");
+            boolean publicInformation = document.get("content_source_id") != null;
+            Map<String, Object> result = aiClient.analyze(document.get("title").toString(), document.get("raw_text").toString(),
+                    publicInformation ? "public_news" : "guide");
             List<Map<String, Object>> fields = (List<Map<String, Object>>) result.get("fields");
             for (Map<String, Object> field : fields) {
                 jdbc.update("INSERT INTO extracted_field(document_id,field_type,field_label,field_value,page_no,source_quote,confidence) VALUES (?,?,?,?,?,?,?)",
@@ -121,6 +123,15 @@ public class DocumentService {
             saveGenerated(id, "PLAIN_LANGUAGE", "通俗版", result.get("summary"), result.get("plain_text"));
             saveGenerated(id, "STEP_CARDS", "办理步骤", result.get("steps"), stepsText((List<Map<String, Object>>) result.get("steps")));
             saveGenerated(id, "TERM_EXPLANATION", "专业术语解释", result.get("term_explanations"), "专业术语已生成");
+            if (result.get("warnings") != null) {
+                saveGenerated(id, "RISK_WARNING", "风险提示", result.get("warnings"),
+                        String.valueOf(result.get("warnings")));
+            }
+            if (publicInformation) {
+                Map<String, Object> source = jdbc.queryForMap("SELECT source_name,source_type,source_url,publisher,published_at "
+                        + "FROM content_source WHERE id=?", document.get("content_source_id"));
+                saveGenerated(id, "SOURCE_INFO", "来源信息", source, source.get("source_name"));
+            }
             saveGenerated(id, "AUDIO_SCRIPT", "语音稿", null, result.get("audio_script"));
             jdbc.update("UPDATE processing_job SET status='SUCCEEDED',progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=?", jobId);
             jdbc.update("UPDATE source_document SET processing_status='WAITING_REVIEW',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);

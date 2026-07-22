@@ -1,10 +1,5 @@
 [
-  {
-    "title": "高血压患者夏季日常管理提示",
-    "sourceName": "城市人民医院",
-    "sourceUrl": "https://example.org/health/notice-2026",
-    "publishedAt": "2026-07-20",
-    "category": "健康",
-    "body": "夏季气温较高，高血压患者应按医嘱规律服药，不可自行停药或减量。建议每日早晚测量血压，注意补充水分，避免在午后高温时段长时间外出。如出现持续头痛、胸闷等不适，应及时就医。"
-  }
+  {"id":"anti-fraud-elderly-2026","title":"警惕冒充客服退款诈骗，守好养老钱","sourceName":"国家反诈中心","sourceType":"GOVERNMENT","sourceUrl":"https://www.mps.gov.cn/n2255079/n6865805/c10000001/content.html","publisher":"国家反诈中心","publishedAt":"2026-06-18","category":"反诈","body":"近期有不法分子冒充电商或快递客服，以商品质量问题、快递丢失为由主动联系老年消费者，诱导下载陌生应用、开启屏幕共享或提供短信验证码。正规平台退款不会要求转账到所谓安全账户，也不会索要银行卡密码和验证码。遇到可疑来电应立即挂断，通过官方客服电话核实；如已转账，请保留聊天和转账记录并及时拨打110报警。"},
+  {"id":"hypertension-daily-care-2026","title":"高血压患者夏季日常管理提示","sourceName":"城市人民医院","sourceType":"HOSPITAL","sourceUrl":"https://www.city-hospital.example/health/hypertension-summer-2026","publisher":"城市人民医院心血管内科","publishedAt":"2026-07-20","category":"健康","body":"夏季气温较高，高血压患者应按医嘱规律服药，不可自行停药或减量。建议每日早晚在安静状态下测量血压并做好记录，适量补充水分，避免在午后高温时段长时间外出。饮食注意少盐，起身动作不宜过快。如出现持续头痛、胸闷、肢体无力或血压明显异常等情况，应及时就医。"},
+  {"id":"community-elderly-service-2026","title":"浦江街道社区养老服务站夏季服务安排","sourceName":"浦江街道办事处","sourceType":"PUBLIC_INSTITUTION","sourceUrl":"https://www.pujiang.gov.cn/community/elderly-service/summer-2026","publisher":"浦江街道办事处","publishedAt":"2026-07-15","category":"养老","body":"为方便辖区老年居民，浦江街道社区养老服务站于7月15日至8月31日提供夏季延时服务。工作日开放时间为8时30分至18时，周六上午提供助餐登记、健康咨询和智能手机使用辅导。年满60周岁的辖区居民可携带身份证到服务站登记，行动不便的独居老人可由家属或社区工作人员预约上门评估。服务咨询电话为021-12345，具体安排以服务站现场公告为准。"}
 ]
