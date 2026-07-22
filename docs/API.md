@@ -28,5 +28,9 @@
 - `GET /api/public/items/{slug}`
 - `POST|DELETE /api/public/items/{id}/favorite`
 
-后端启动后 OpenAPI：`http://localhost:8080/swagger-ui.html`。
+本地服务文档与健康检查：
 
+- Spring Boot Swagger：`http://127.0.0.1:8080/swagger-ui/index.html`
+- Spring Boot OpenAPI：`http://127.0.0.1:8080/v3/api-docs`
+- FastAPI 文档：`http://127.0.0.1:8001/docs`
+- FastAPI 健康检查：`http://127.0.0.1:8001/health`

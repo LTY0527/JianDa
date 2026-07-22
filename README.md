@@ -15,26 +15,47 @@ docs                   需求、架构、API、任务与 UI 文档
 scripts                一键开发脚本
 ```
 
-## 环境
+## 环境要求
 
-- Node.js 20+ 与 npm 10+
-- Java 17、Maven 3.9+
-- Python 3.11+
-- Docker 可选；本地开发默认 H2，不需要 MySQL
+- Node.js 20+
+- npm 10+
+- JDK 17
+- Maven 3.9+
+- Python 3.11+；当前已在 Python 3.13 上完成验证，不支持 Python 3.9
+- Docker 可选
+
+本地开发默认使用 H2 + MockProvider，不需要 Docker，也不需要真实模型 Key。Python 3.13 是当前 Windows 验证环境，不是唯一支持版本；开发者可以使用任意 Python 3.11+ 解释器。
 
 ## 首次安装
 
-### PowerShell
+### Windows PowerShell
+
+先检查电脑上可用的 Python 解释器：
+
+```powershell
+py -0p
+python --version
+```
+
+不要使用 Python 3.9 创建 AI 服务虚拟环境。必须确认选中的解释器版本不低于 3.11；电脑同时存在多个 Python 时，应显式指定版本。下面以当前已验证的 Python 3.13 为例：
 
 ```powershell
 npm install
 cd services\ai-service
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+py -3.13 -m venv .venv
+& ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt
 cd ..\..
 ```
 
+如果安装的是 Python 3.11，可将创建命令改为：
+
+```powershell
+py -3.11 -m venv .venv
+```
+
 ### Bash
+
+确认 `python3 --version` 不低于 3.11，再执行：
 
 ```bash
 npm install
@@ -44,18 +65,80 @@ python3 -m venv .venv
 cd ../..
 ```
 
-## 启动
+## 重建 AI 虚拟环境
 
-PowerShell 可运行 `./scripts/dev.ps1`，Bash 可运行 `./scripts/dev.sh`。也可以打开四个终端分别运行：
+虚拟环境版本不正确或依赖损坏时，可在 PowerShell 中完整重建：
 
 ```powershell
-cd services/ai-service; .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8001
-cd services/backend; mvn spring-boot:run
+cd services\ai-service
+deactivate
+Remove-Item -LiteralPath ".\.venv" -Recurse -Force
+py -3.13 -m venv ".\.venv"
+& ".\.venv\Scripts\python.exe" --version
+& ".\.venv\Scripts\python.exe" -m pip install --upgrade pip
+& ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt
+& ".\.venv\Scripts\python.exe" -m pip check
+& ".\.venv\Scripts\python.exe" -m pytest -q
+```
+
+如果当前没有激活虚拟环境，`deactivate` 不可用时可跳过该行。删除 `.venv` 只会删除可重建的隔离环境，不会删除业务代码。Python 3.13 只是当前验证示例，实际可以显式选择任何 Python 3.11+ 解释器。
+
+## 启动
+
+PowerShell 可运行 `./scripts/dev.ps1`，Bash 可运行 `./scripts/dev.sh`。PowerShell 脚本会校验目录与 AI 虚拟环境版本，启动服务后逐项健康检查；只有检查成功的服务才会标记为 `Ready`，并记录实际监听 PID。按 Ctrl+C 时只清理本轮启动的服务；启动前已经健康的服务会显示为 `Ready (existing)`，不会被重复启动或自动停止。也可以打开四个终端分别运行：
+
+```powershell
+cd services\ai-service; & ".\.venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+cd services\backend; mvn spring-boot:run
 npm run dev:institution
 npm run dev:h5
 ```
 
-地址：机构端 `http://localhost:5173`，用户端 `http://localhost:5174`，Swagger `http://localhost:8080/swagger-ui.html`，AI 文档 `http://localhost:8001/docs`。
+服务地址：
+
+- 机构端：`http://127.0.0.1:5173`
+- 用户端：`http://127.0.0.1:5174`
+- Spring Boot Swagger：`http://127.0.0.1:8080/swagger-ui/index.html`
+- Spring Boot OpenAPI：`http://127.0.0.1:8080/v3/api-docs`
+- FastAPI 文档：`http://127.0.0.1:8001/docs`
+- FastAPI 健康检查：`http://127.0.0.1:8001/health`
+
+如果终端关闭后仍有子进程占用开发端口，可运行：
+
+```powershell
+./scripts/stop.ps1
+```
+
+停止脚本会显示 5173、5174、8080、8001 的实际监听 PID、进程名和命令行；只有命令行确认属于当前 JianDa 工作区时才会按进程树停止，并在退出前再次确认端口状态。
+
+## 常见故障排查
+
+### Click 的 `match` 语句出现 `SyntaxError`
+
+如果错误位于 `click/utils.py` 的 `match` 语句，通常是因为 `.venv` 由 Python 3.9 创建。请使用 Python 3.11+ 按上面的流程重建 `.venv`。不要手动修改 `site-packages`，也不要通过长期降级第三方依赖来兼容 Python 3.9。
+
+### 访问 8001 出现 `ERR_CONNECTION_REFUSED`
+
+进入 `services\ai-service` 后依次检查端口、模块导入和前台启动输出：
+
+```powershell
+Test-NetConnection 127.0.0.1 -Port 8001
+& ".\.venv\Scripts\python.exe" -c "from app.main import app; print('AI import OK')"
+& ".\.venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+### pip 提示 `Cannot connect to proxy`
+
+如果当前终端继承了无效代理，可临时清除代理环境变量后重试安装：
+
+```powershell
+Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue
+Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
+Remove-Item Env:ALL_PROXY -ErrorAction SilentlyContinue
+Remove-Item Env:PIP_PROXY -ErrorAction SilentlyContinue
+```
+
+这只影响当前 PowerShell 会话。
 
 ## 演示账号
 
@@ -83,7 +166,7 @@ npm run dev:h5
 npm run typecheck
 npm run build
 cd services\backend; mvn test; mvn package
-cd ..\ai-service; .\.venv\Scripts\python.exe -m pytest -q
+cd ..\ai-service; & ".\.venv\Scripts\python.exe" -m pytest -q
 ```
 
 ## 数据与安全
@@ -92,10 +175,10 @@ cd ..\ai-service; .\.venv\Scripts\python.exe -m pytest -q
 
 ## Docker（可选）
 
-安装 Docker 后运行 `docker compose up --build`，会启动 MySQL 8、AI 服务和后端；两个 Vite 前端仍按上面的 npm 命令启动。
+安装 Docker 后运行 `docker compose up --build`，会启动 MySQL 8、AI 服务和后端；两个 Vite 前端仍按上面的 npm 命令启动。AI 容器使用 Python 3.11，符合项目最低版本要求，不需要与本机验证版本完全一致。
 
 ## 当前限制
 
-- OCR 未安装时，图片材料使用手工正文/稳定演示正文继续处理。
+- OCR 未安装时，图片材料使用手工正文或稳定演示正文继续处理。
 - ExternalLlmProvider 仅保留合规扩展点；默认不访问真实模型。
 - 本地 Collector 使用 fixture，不执行真实网页抓取。

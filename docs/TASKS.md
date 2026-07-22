@@ -1,6 +1,14 @@
 # 任务清单
 
-更新时间：2026-07-22 19:35
+更新时间：2026-07-22
+
+## 运行环境验证记录
+
+- [x] 已解决由 Python 3.9 创建的 AI 虚拟环境与当前 Uvicorn/Click 依赖不兼容的问题；Python 3.9 不受支持。
+- [x] 已使用 Python 3.13 重建 AI 服务 `.venv`；项目最低支持版本仍为 Python 3.11，Python 3.13 为当前已验证版本。
+- [x] FastAPI `/docs` 与 `/health` 已验证可访问。
+- [x] Spring Boot Swagger `http://127.0.0.1:8080/swagger-ui/index.html` 已验证可访问。
+- [x] PowerShell 启停脚本已记录实际监听 PID，区分已有服务与本轮所有权，并可按项目命令行安全清理 5173/5174/8080/8001。
 
 ## Phase 0 — 已完成
 
