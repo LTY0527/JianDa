@@ -1,0 +1,16 @@
+node_modules/
+dist/
+target/
+.idea/
+.vscode/
+.env
+*.log
+uploads/
+__pycache__/
+.pytest_cache/
+.venv/
+
+
+services/backend/data/
+test-results/
+playwright-report/

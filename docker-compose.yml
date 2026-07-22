@@ -1,0 +1,44 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: jianda
+      MYSQL_USER: jianda
+      MYSQL_PASSWORD: jianda_dev_password
+      MYSQL_ROOT_PASSWORD: jianda_root_dev_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - jianda_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pjianda_root_dev_password"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  ai-service:
+    build: ./services/ai-service
+    environment:
+      LLM_PROVIDER: mock
+    ports:
+      - "8001:8001"
+  backend:
+    build: ./services/backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ai-service:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/jianda?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      DB_USERNAME: jianda
+      DB_PASSWORD: jianda_dev_password
+      JWT_SECRET: jianda-compose-development-secret-change-in-production
+      AI_SERVICE_URL: http://ai-service:8001
+    ports:
+      - "8080:8080"
+    volumes:
+      - jianda_uploads:/app/uploads
+volumes:
+  jianda_mysql:
+  jianda_uploads:
+
