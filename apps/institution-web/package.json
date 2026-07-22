@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
-    "build": "vue-tsc -b && vite build",
-    "typecheck": "vue-tsc -b"
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "@jianda/shared-ui": "0.1.0",
     "@jianda/shared-types": "0.1.0",
+    "@jianda/shared-ui": "0.1.0",
     "axios": "^1.7.9",
     "element-plus": "^2.9.3",
     "lucide-vue-next": "^0.468.0",
