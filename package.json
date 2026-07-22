@@ -1,0 +1,20 @@
+{
+  "name": "jianda",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:institution": "npm --workspace @jianda/institution-web run dev",
+    "dev:h5": "npm --workspace @jianda/user-h5 run dev",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "prettier": "^3.9.6"
+  }
+}
