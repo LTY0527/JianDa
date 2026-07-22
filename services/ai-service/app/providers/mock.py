@@ -7,7 +7,7 @@ class MockProvider(LlmProvider):
 
     def analyze(self, request: TextRequest) -> AnalyzeResult:
         if request.document_type == "public_news":
-            return self._public_news()
+            return self._public_news(request)
         return self._elderly_subsidy()
 
     def _elderly_subsidy(self) -> AnalyzeResult:
@@ -44,7 +44,15 @@ class MockProvider(LlmProvider):
             audio_script="。".join(summary + [f"第{step.order}步，{step.title}，{step.description}" for step in steps]),
         )
 
-    def _public_news(self) -> AnalyzeResult:
+    def _public_news(self, request: TextRequest) -> AnalyzeResult:
+        content = f"{request.title}\n{request.text}"
+        if "诈骗" in content or "验证码" in content:
+            return self._anti_fraud_news()
+        if "养老服务" in content or "延时服务" in content:
+            return self._community_service_news()
+        return self._hypertension_news()
+
+    def _hypertension_news(self) -> AnalyzeResult:
         summary = [
             "高血压患者夏季仍要按医嘱规律服药，不可自行停药。",
             "建议每天早晚测量血压，避开午后高温时段长时间外出。",
@@ -59,6 +67,37 @@ class MockProvider(LlmProvider):
             warnings=["不能自行停药或减量。"], audio_script="。".join(summary),
         )
 
+    def _anti_fraud_news(self) -> AnalyzeResult:
+        summary = [
+            "陌生客服以退款为由要求下载应用或共享屏幕时，应立即提高警惕。",
+            "正规退款不会索要银行卡密码、短信验证码，也不会要求转入安全账户。",
+            "遇到可疑来电要通过官方渠道核实，已经转账应保留证据并及时报警。",
+        ]
+        return AnalyzeResult(
+            fields=[self._field("WARNING", "风险提示", "不要共享屏幕、提供验证码或向安全账户转账", 1, 1,
+                                "正规平台退款不会要求转账到所谓安全账户，也不会索要银行卡密码和验证码。", 0.99)],
+            summary=summary, plain_text="接到退款来电时先挂断，再通过平台官方客服核实；不共享屏幕、不提供验证码、不向陌生账户转账。",
+            steps=[], term_explanations={"安全账户": "诈骗分子虚构的说法，正规机构不会要求个人把钱转入所谓安全账户。"},
+            warnings=["开启屏幕共享可能泄露支付密码和验证码。", "已经转账时应立即报警并联系银行。"], audio_script="。".join(summary),
+        )
+
+    def _community_service_news(self) -> AnalyzeResult:
+        summary = [
+            "社区养老服务站在夏季工作日延长开放至十八时。",
+            "周六上午可办理助餐登记、健康咨询和智能手机使用辅导。",
+            "辖区六十岁以上居民可带身份证登记，行动不便者可预约上门评估。",
+        ]
+        return AnalyzeResult(
+            fields=[
+                self._field("TIME", "服务时间", "工作日8时30分至18时，周六上午开放", 1, 1,
+                            "工作日开放时间为8时30分至18时，周六上午提供助餐登记、健康咨询和智能手机使用辅导。", 0.99),
+                self._field("TARGET_AUDIENCE", "服务对象", "辖区年满60周岁的居民", 1, 1,
+                            "年满60周岁的辖区居民可携带身份证到服务站登记。", 0.98),
+            ], summary=summary,
+            plain_text="六十岁以上辖区居民可带身份证到养老服务站登记；工作日延时开放，周六上午也提供部分服务。",
+            steps=[], term_explanations={"上门评估": "工作人员到行动不便居民家中了解照护需求和可提供的服务。"},
+            warnings=["具体开放安排以服务站现场公告为准。"], audio_script="。".join(summary),
+        )
     @staticmethod
     def _field(field_type: str, label: str, value: str, page: int, segment: int,
                quote: str, confidence: float) -> ExtractedField:

@@ -1,25 +1,73 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
-import { documentApi } from "../api/documents";
+import { documentApi, type DocumentDetail, type GeneratedContent } from "../api/documents";
 import { apiMessage } from "../api/http";
-import { CheckCircle2, Eye, Send, ShieldCheck } from "lucide-vue-next";
+import { CheckCircle2, Send, ShieldCheck } from "lucide-vue-next";
+
 const documentId = Number(useRoute().params.id);
-const published = ref(false);
+const document = ref<DocumentDetail | null>(null);
+const fieldCount = ref(0);
+const publishedSlug = ref("");
 const error = ref("");
 const submitting = ref(false);
+const agreed = ref(true);
+const form = reactive({
+  title: "",
+  category: "生活服务",
+  summary: "",
+  sourceName: "",
+  sourceUrl: "",
+  publishedAt: new Date().toISOString().slice(0, 10),
+});
+const h5Url = computed(() =>
+  publishedSlug.value ? `http://127.0.0.1:5174/guide/${publishedSlug.value}` : "",
+);
+
+function parseJson(value?: string): Record<string, string> {
+  if (!value) return {};
+  try {
+    return JSON.parse(value) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+onMounted(async () => {
+  try {
+    const [detailResponse, generatedResponse, fieldsResponse] = await Promise.all([
+      documentApi.detail(documentId),
+      documentApi.generated(documentId),
+      documentApi.fields(documentId),
+    ]);
+    document.value = detailResponse.data.data;
+    const generated = generatedResponse.data.data as GeneratedContent[];
+    const summary = generated.find((item) => item.content_type === "SUMMARY");
+    const source = parseJson(generated.find((item) => item.content_type === "SOURCE_INFO")?.content_json);
+    form.title = document.value.title;
+    form.category = document.value.category || "生活服务";
+    form.summary = summary?.plain_text || "";
+    form.sourceName = source.source_name || document.value.organization_name || "";
+    form.sourceUrl = document.value.import_url || source.source_url || "";
+    form.publishedAt = String(document.value.source_published_at || new Date().toISOString()).slice(0, 10);
+    fieldCount.value = fieldsResponse.data.data.length;
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+});
+
 async function publish() {
   submitting.value = true;
   error.value = "";
   try {
-    await documentApi.publish(documentId, {
-      title: "老年补贴申请指南",
-      category: "养老",
-      sourceName: "浦江街道社区服务中心",
-      sourceUrl: "https://example.org/pujiang",
+    const response = await documentApi.publish(documentId, {
+      title: form.title,
+      category: form.category,
+      sourceName: form.sourceName,
+      sourceUrl: form.sourceUrl,
     });
-    published.value = true;
+    publishedSlug.value = response.data.data.slug;
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -27,70 +75,46 @@ async function publish() {
   }
 }
 </script>
+
 <template>
   <div class="narrow">
-    <PageHeader
-      title="审核与发布"
-      description="确认分类、来源和用户端展示效果后发布。"
-    />
-    <div v-if="published" class="success-panel">
+    <PageHeader title="审核与发布" description="确认分类、来源和用户端展示效果后发布。" />
+    <div v-if="publishedSlug" class="success-panel">
       <CheckCircle2 />
       <h2>内容已成功发布</h2>
-      <p>“老年补贴申请指南”已出现在用户端办事指南中。</p>
+      <p>“{{ form.title }}”已出现在用户端公开内容中。</p>
       <div>
-        <RouterLink class="btn primary" to="/published"
-          >查看已发布内容</RouterLink
-        ><a
-          class="btn secondary"
-          href="http://localhost:5174/guide/elderly-subsidy"
-          >打开用户端</a
-        >
+        <RouterLink class="btn primary" to="/published">查看已发布内容</RouterLink>
+        <a class="btn secondary" :href="h5Url" target="_blank" rel="noreferrer">打开用户端</a>
       </div>
     </div>
-    <template v-else
-      ><section class="panel publish-form">
-        <div class="review-ok">
-          <ShieldCheck /><span
-            ><b>关键字段审核已完成</b
-            ><small>5 个字段已确认，审核记录将随本次发布保存。</small></span
-          >
-        </div>
-        <div class="form-row">
-          <label class="field">发布标题<input value="老年补贴申请指南" /></label
-          ><label class="field"
-            >内容分类<select>
-              <option>办事指南 / 养老</option>
-              <option>健康</option>
-              <option>生活服务</option>
-            </select></label
-          >
-        </div>
-        <label class="field"
-          >摘要<textarea
-            rows="3"
-            value="年满 80 周岁的本市户籍老人，可准备身份证、户口簿等材料到社区申请生活补贴。"
-          ></textarea>
+    <section v-else class="panel publish-form">
+      <div class="review-ok">
+        <ShieldCheck />
+        <span><b>关键字段审核已完成</b><small>{{ fieldCount }} 个字段已确认，审核记录将随本次发布保存。</small></span>
+      </div>
+      <div class="form-row">
+        <label class="field">发布标题<input v-model="form.title" required /></label>
+        <label class="field">
+          内容分类
+          <select v-model="form.category">
+            <option>养老</option><option>健康</option><option>反诈</option><option>生活服务</option><option>时政</option>
+          </select>
         </label>
-        <div class="form-row">
-          <label class="field"
-            >来源名称<input value="浦江街道社区服务中心" /></label
-          ><label class="field"
-            >公开日期<input type="date" value="2026-07-22"
-          /></label>
-        </div>
-        <label class="check"
-          ><input type="checkbox" checked />
-          我已确认内容准确、来源有效，并同意在用户端公开。</label
-        >
-        <p v-if="error" class="form-error">{{ error }}</p>
-
-        <div class="form-actions">
-          <button class="btn secondary"><Eye :size="17" />用户端预览</button
-          ><button class="btn primary" @click="publish" :disabled="submitting">
-            <Send :size="17" />{{ submitting ? "正在发布…" : "审核通过并发布" }}
-          </button>
-        </div>
-      </section></template
-    >
+      </div>
+      <label class="field">摘要<textarea v-model="form.summary" rows="3" readonly></textarea></label>
+      <div class="form-row">
+        <label class="field">来源名称<input v-model="form.sourceName" required /></label>
+        <label class="field">公开日期<input v-model="form.publishedAt" type="date" readonly /></label>
+      </div>
+      <label class="field">来源 URL<input v-model="form.sourceUrl" type="url" /></label>
+      <label class="check"><input v-model="agreed" type="checkbox" />我已确认内容准确、来源有效，并同意在用户端公开。</label>
+      <p v-if="error" class="form-error">{{ error }}</p>
+      <div class="form-actions">
+        <button class="btn primary" :disabled="submitting || !agreed || !form.title || !form.sourceName" @click="publish">
+          <Send :size="17" />{{ submitting ? "正在发布…" : "审核通过并发布" }}
+        </button>
+      </div>
+    </section>
   </div>
 </template>

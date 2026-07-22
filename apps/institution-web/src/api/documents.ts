@@ -20,6 +20,27 @@ export interface ExtractedField {
   review_status: string;
 }
 
+export interface DocumentDetail {
+  id: number;
+  title: string;
+  raw_text?: string;
+  page_count?: number;
+  category?: string;
+  import_url?: string;
+  source_published_at?: string;
+  organization_name: string;
+  processing_status: string;
+}
+
+export interface GeneratedContent {
+  id: number;
+  content_type: string;
+  title: string;
+  content_json?: string;
+  plain_text?: string;
+  status: string;
+}
+
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<ApiResponse<{ token: string; user: Record<string, unknown> }>>(
@@ -47,11 +68,11 @@ export const documentApi = {
       `/documents/${id}/process`,
     ),
   detail: (id: number) =>
-    http.get<ApiResponse<Record<string, unknown>>>(`/documents/${id}`),
+    http.get<ApiResponse<DocumentDetail>>(`/documents/${id}`),
   fields: (id: number) =>
     http.get<ApiResponse<ExtractedField[]>>(`/documents/${id}/fields`),
   generated: (id: number) =>
-    http.get<ApiResponse<Record<string, unknown>[]>>(
+    http.get<ApiResponse<GeneratedContent[]>>(
       `/documents/${id}/generated`,
     ),
   updateField: (

@@ -30,3 +30,12 @@ def test_public_news_has_warning() -> None:
     assert result.steps == []
     assert result.warnings == ["不能自行停药或减量。"]
 
+
+
+def test_public_news_matches_fixture_topic_and_stays_stable() -> None:
+    provider = MockProvider()
+    anti_fraud = TextRequest(title="警惕退款诈骗", text="不要提供验证码", document_type="public_news")
+    community = TextRequest(title="社区养老服务安排", text="提供延时服务", document_type="public_news")
+    assert provider.analyze(anti_fraud) == provider.analyze(anti_fraud)
+    assert "安全账户" in provider.analyze(anti_fraud).term_explanations
+    assert provider.analyze(community).fields[0].field_type == "TIME"
