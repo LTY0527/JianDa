@@ -21,9 +21,23 @@
 - `POST /api/documents/{id}/review|publish|withdraw`
 - `GET /api/documents/{id}/reviews`
 
-## 公开信息与用户端
+## 权威来源与导入
 
-- `POST /api/public-sources/import`，`GET /api/public-sources`
+以下接口仅允许 `PLATFORM_ADMIN`：
+
+- `GET|POST /api/public-sources`：列出或新增白名单来源。
+- `PUT /api/public-sources/{id}/enabled`：启用或停用来源。
+- `GET /api/public-sources/fixtures`：列出稳定离线 fixture。
+- `POST /api/public-sources/import/fixture/{fixtureId}`：导入指定 fixture。
+- `POST /api/public-sources/import/manual`：手工导入白名单域名下的公开正文。
+- `GET /api/public-sources/imports`：查看导入记录、状态与失败原因。
+- `GET /api/public-sources/imports/{documentId}`：预览原文及来源元数据。
+- `POST /api/public-sources/imports/{documentId}/process`：进入现有 AI 处理流程。
+
+导入会校验来源启用状态与 URL 主机名，并以来源 URL 和规范化正文 SHA-256 拦截重复内容。
+
+## 用户端公开接口
+
 - `GET /api/public/items|categories|search`
 - `GET /api/public/items/{slug}`
 - `POST|DELETE /api/public/items/{id}/favorite`
