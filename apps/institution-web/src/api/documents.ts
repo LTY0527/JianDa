@@ -72,9 +72,7 @@ export const documentApi = {
   fields: (id: number) =>
     http.get<ApiResponse<ExtractedField[]>>(`/documents/${id}/fields`),
   generated: (id: number) =>
-    http.get<ApiResponse<GeneratedContent[]>>(
-      `/documents/${id}/generated`,
-    ),
+    http.get<ApiResponse<GeneratedContent[]>>(`/documents/${id}/generated`),
   updateField: (
     documentId: number,
     fieldId: number,

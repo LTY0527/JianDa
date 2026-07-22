@@ -36,7 +36,9 @@ const detail = ref<{
   summary: string[];
   materials: string[];
   steps: string[][];
-}>({ summary: [], materials: [], steps: [] });
+  warnings: string[];
+  terms: Record<string, string>;
+}>({ summary: [], materials: [], steps: [], warnings: [], terms: {} });
 onMounted(async () => {
   try {
     item.value = await fetchDetail(String(route.params.slug));
@@ -48,6 +50,14 @@ onMounted(async () => {
     detail.value.steps = Array.isArray(generated.STEP_CARDS)
       ? generated.STEP_CARDS.map((step: any) => [step.title, step.description])
       : [];
+    detail.value.warnings = Array.isArray(generated.RISK_WARNING)
+      ? generated.RISK_WARNING
+      : [];
+    detail.value.terms =
+      generated.TERM_EXPLANATION &&
+      typeof generated.TERM_EXPLANATION === "object"
+        ? generated.TERM_EXPLANATION
+        : {};
     const material = fields.find(
       (field: any) => field.field_type === "MATERIAL",
     )?.field_value;
@@ -144,7 +154,10 @@ onBeforeUnmount(stop);
           </li>
         </ol>
       </section>
-      <section class="reader-section">
+      <section
+        v-if="detail.materials.length || detail.steps.length"
+        class="reader-section"
+      >
         <h2>我是否符合条件？</h2>
         <div class="answer yes">
           <CheckCircle2 />
@@ -154,7 +167,7 @@ onBeforeUnmount(stop);
           </p>
         </div>
       </section>
-      <section class="reader-section">
+      <section v-if="detail.materials.length" class="reader-section">
         <h2>需要准备什么？</h2>
         <ul class="material-list">
           <li v-for="m in detail.materials"><CheckCircle2 />{{ m }}</li>
@@ -163,7 +176,7 @@ onBeforeUnmount(stop);
           <TriangleAlert />建议出门前把原件和复印件分别装好，避免遗漏。
         </p>
       </section>
-      <section class="quick-info">
+      <section v-if="detail.steps.length" class="quick-info">
         <article>
           <CalendarClock /><span
             ><small>办理时间</small><b>工作日 9:00—17:00</b></span
@@ -178,7 +191,7 @@ onBeforeUnmount(stop);
           <Phone /><span><small>咨询电话</small><b>021-12345</b></span>
         </article>
       </section>
-      <section class="reader-section step-section">
+      <section v-if="detail.steps.length" class="reader-section step-section">
         <h2>办理步骤</h2>
         <ol>
           <li v-for="(s, i) in detail.steps">
@@ -190,18 +203,23 @@ onBeforeUnmount(stop);
           </li>
         </ol>
       </section>
-      <section class="reader-section">
+      <section v-if="detail.warnings.length" class="reader-section">
+        <h2>重要提醒</h2>
+        <p v-for="warning in detail.warnings" :key="warning" class="warm-tip">
+          <TriangleAlert />{{ warning }}
+        </p>
+      </section>
+      <section v-if="Object.keys(detail.terms).length" class="reader-section">
         <h2>专业术语解释</h2>
-        <dl>
-          <dt>同类生活补贴</dt>
-          <dd>
-            指用途和对象相近、不能重复领取的政府补助。拿不准时，可以带上已有补贴凭证到窗口询问。
-          </dd>
+        <dl v-for="(explanation, term) in detail.terms" :key="term">
+          <dt>{{ term }}</dt>
+          <dd>{{ explanation }}</dd>
         </dl>
       </section>
       <RouterLink class="original-link" :to="`/original/${item.slug}`"
         ><FileText /><span
-          ><b>查看原始通知</b><small>共 3 页，可核对原文内容</small></span
+          ><b>查看原始通知</b
+          ><small>共 {{ item.page_count || 1 }} 页，可核对原文内容</small></span
         ><ChevronRight
       /></RouterLink>
       <p class="disclaimer">

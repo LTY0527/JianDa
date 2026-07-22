@@ -2,7 +2,11 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
-import { documentApi, type DocumentDetail, type GeneratedContent } from "../api/documents";
+import {
+  documentApi,
+  type DocumentDetail,
+  type GeneratedContent,
+} from "../api/documents";
 import { apiMessage } from "../api/http";
 import { CheckCircle2, Send, ShieldCheck } from "lucide-vue-next";
 
@@ -22,7 +26,9 @@ const form = reactive({
   publishedAt: new Date().toISOString().slice(0, 10),
 });
 const h5Url = computed(() =>
-  publishedSlug.value ? `http://127.0.0.1:5174/guide/${publishedSlug.value}` : "",
+  publishedSlug.value
+    ? `http://127.0.0.1:5174/guide/${publishedSlug.value}`
+    : "",
 );
 
 function parseJson(value?: string): Record<string, string> {
@@ -36,21 +42,28 @@ function parseJson(value?: string): Record<string, string> {
 
 onMounted(async () => {
   try {
-    const [detailResponse, generatedResponse, fieldsResponse] = await Promise.all([
-      documentApi.detail(documentId),
-      documentApi.generated(documentId),
-      documentApi.fields(documentId),
-    ]);
+    const [detailResponse, generatedResponse, fieldsResponse] =
+      await Promise.all([
+        documentApi.detail(documentId),
+        documentApi.generated(documentId),
+        documentApi.fields(documentId),
+      ]);
     document.value = detailResponse.data.data;
     const generated = generatedResponse.data.data as GeneratedContent[];
     const summary = generated.find((item) => item.content_type === "SUMMARY");
-    const source = parseJson(generated.find((item) => item.content_type === "SOURCE_INFO")?.content_json);
+    const source = parseJson(
+      generated.find((item) => item.content_type === "SOURCE_INFO")
+        ?.content_json,
+    );
     form.title = document.value.title;
     form.category = document.value.category || "生活服务";
     form.summary = summary?.plain_text || "";
-    form.sourceName = source.source_name || document.value.organization_name || "";
+    form.sourceName =
+      source.source_name || document.value.organization_name || "";
     form.sourceUrl = document.value.import_url || source.source_url || "";
-    form.publishedAt = String(document.value.source_published_at || new Date().toISOString()).slice(0, 10);
+    form.publishedAt = String(
+      document.value.source_published_at || new Date().toISOString(),
+    ).slice(0, 10);
     fieldCount.value = fieldsResponse.data.data.length;
   } catch (cause) {
     error.value = apiMessage(cause);
@@ -78,40 +91,75 @@ async function publish() {
 
 <template>
   <div class="narrow">
-    <PageHeader title="审核与发布" description="确认分类、来源和用户端展示效果后发布。" />
+    <PageHeader
+      title="审核与发布"
+      description="确认分类、来源和用户端展示效果后发布。"
+    />
     <div v-if="publishedSlug" class="success-panel">
       <CheckCircle2 />
       <h2>内容已成功发布</h2>
       <p>“{{ form.title }}”已出现在用户端公开内容中。</p>
       <div>
-        <RouterLink class="btn primary" to="/published">查看已发布内容</RouterLink>
-        <a class="btn secondary" :href="h5Url" target="_blank" rel="noreferrer">打开用户端</a>
+        <RouterLink class="btn primary" to="/published"
+          >查看已发布内容</RouterLink
+        >
+        <a class="btn secondary" :href="h5Url" target="_blank" rel="noreferrer"
+          >打开用户端</a
+        >
       </div>
     </div>
     <section v-else class="panel publish-form">
       <div class="review-ok">
         <ShieldCheck />
-        <span><b>关键字段审核已完成</b><small>{{ fieldCount }} 个字段已确认，审核记录将随本次发布保存。</small></span>
+        <span
+          ><b>关键字段审核已完成</b
+          ><small
+            >{{ fieldCount }} 个字段已确认，审核记录将随本次发布保存。</small
+          ></span
+        >
       </div>
       <div class="form-row">
-        <label class="field">发布标题<input v-model="form.title" required /></label>
+        <label class="field"
+          >发布标题<input v-model="form.title" required
+        /></label>
         <label class="field">
           内容分类
           <select v-model="form.category">
-            <option>养老</option><option>健康</option><option>反诈</option><option>生活服务</option><option>时政</option>
+            <option>养老</option>
+            <option>健康</option>
+            <option>反诈</option>
+            <option>生活服务</option>
+            <option>时政</option>
           </select>
         </label>
       </div>
-      <label class="field">摘要<textarea v-model="form.summary" rows="3" readonly></textarea></label>
+      <label class="field"
+        >摘要<textarea v-model="form.summary" rows="3" readonly></textarea>
+      </label>
       <div class="form-row">
-        <label class="field">来源名称<input v-model="form.sourceName" required /></label>
-        <label class="field">公开日期<input v-model="form.publishedAt" type="date" readonly /></label>
+        <label class="field"
+          >来源名称<input v-model="form.sourceName" required
+        /></label>
+        <label class="field"
+          >公开日期<input v-model="form.publishedAt" type="date" readonly
+        /></label>
       </div>
-      <label class="field">来源 URL<input v-model="form.sourceUrl" type="url" /></label>
-      <label class="check"><input v-model="agreed" type="checkbox" />我已确认内容准确、来源有效，并同意在用户端公开。</label>
+      <label class="field"
+        >来源 URL<input v-model="form.sourceUrl" type="url"
+      /></label>
+      <label class="check"
+        ><input
+          v-model="agreed"
+          type="checkbox"
+        />我已确认内容准确、来源有效，并同意在用户端公开。</label
+      >
       <p v-if="error" class="form-error">{{ error }}</p>
       <div class="form-actions">
-        <button class="btn primary" :disabled="submitting || !agreed || !form.title || !form.sourceName" @click="publish">
+        <button
+          class="btn primary"
+          :disabled="submitting || !agreed || !form.title || !form.sourceName"
+          @click="publish"
+        >
           <Send :size="17" />{{ submitting ? "正在发布…" : "审核通过并发布" }}
         </button>
       </div>

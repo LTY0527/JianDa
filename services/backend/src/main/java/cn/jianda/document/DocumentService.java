@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -27,6 +29,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class DocumentService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(DocumentService.class);
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of("pdf", "png", "jpg", "jpeg");
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
@@ -138,6 +141,7 @@ public class DocumentService {
             log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
             return Map.of("documentId", id, "status", "WAITING_REVIEW", "progress", 100);
         } catch (RuntimeException exception) {
+            LOGGER.error("Document processing failed for document {}", id, exception);
             jdbc.update("UPDATE processing_job SET status='FAILED',error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
                     truncate(exception.getMessage()), jobId);
             jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
