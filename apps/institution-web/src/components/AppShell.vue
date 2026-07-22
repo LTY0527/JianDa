@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   LayoutDashboard,
@@ -8,18 +9,28 @@ import {
   ScrollText,
   ChevronDown,
   HeartHandshake,
+  ShieldCheck,
 } from "lucide-vue-next";
+import { currentUser } from "../auth";
 const route = useRoute();
 const router = useRouter();
-const menus = [
+const user = currentUser();
+const menus = computed(() => [
   { path: "/", label: "工作台", icon: LayoutDashboard },
   { path: "/documents", label: "材料管理", icon: Files },
   { path: "/published", label: "已发布内容", icon: FileCheck2 },
-  { path: "/public-import", label: "公开信息导入", icon: CloudDownload },
+  ...(user?.role === "PLATFORM_ADMIN"
+    ? [
+        { path: "/public-sources", label: "权威来源管理", icon: ShieldCheck },
+        { path: "/public-import", label: "公开信息导入", icon: CloudDownload },
+      ]
+    : []),
   { path: "/logs", label: "操作日志", icon: ScrollText },
-];
+]);
 function logout() {
   localStorage.removeItem("jianda_token");
+  localStorage.removeItem("jianda_user_info");
+  localStorage.removeItem("jianda_user");
   router.push("/login");
 }
 </script>
@@ -54,11 +65,11 @@ function logout() {
       <header class="topbar">
         <div>
           <span class="org-label">当前机构</span
-          ><strong>浦江街道社区服务中心</strong>
+          ><strong>{{ user?.organizationName || "当前机构" }}</strong>
         </div>
         <button class="account" @click="logout">
-          <span class="avatar">李</span
-          ><span><b>李敏</b><small>机构管理员</small></span
+          <span class="avatar">{{ user?.displayName?.slice(0, 1) || "简" }}</span
+          ><span><b>{{ user?.displayName || "当前用户" }}</b><small>{{ user?.role === "PLATFORM_ADMIN" ? "平台管理员" : user?.role === "REVIEWER" ? "审核员" : "机构管理员" }}</small></span
           ><ChevronDown :size="16" />
         </button>
       </header>

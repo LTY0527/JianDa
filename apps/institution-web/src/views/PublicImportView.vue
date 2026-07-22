@@ -1,56 +1,30 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
+import { Eye, FileInput, Info, Play, RefreshCw, X } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
-import { Link, Plus, Info } from "lucide-vue-next";
-const done = ref(false);
+import { apiMessage } from "../api/http";
+import { publicSourceApi, type FixtureContent, type ImportRecord, type PublicSource } from "../api/publicSources";
+const router = useRouter();
+const tab = ref<"fixture" | "manual">("fixture"), sources = ref<PublicSource[]>([]), fixtures = ref<FixtureContent[]>([]), imports = ref<ImportRecord[]>([]);
+const preview = ref<Record<string, unknown> | null>(null), loading = ref(true), busyId = ref<string | number | null>(null), error = ref(""), success = ref("");
+const manual = reactive({ sourceId: 0, title: "", sourceUrl: "", publishedAt: new Date().toISOString().slice(0, 10), category: "健康", body: "" });
+const selectedSource = computed(() => sources.value.find((item) => item.id === manual.sourceId));
+const statusText: Record<string, string> = { UPLOADED: "待处理", PROCESSING: "处理中", WAITING_REVIEW: "待审核", REVIEWED: "已审核", PUBLISHED: "已发布", FAILED: "处理失败", WITHDRAWN: "已撤回" };
+async function load() { loading.value = true; error.value = ""; try { const [a,b,c] = await Promise.all([publicSourceApi.sources(), publicSourceApi.fixtures(), publicSourceApi.imports()]); sources.value=a.data.data.filter(s=>s.enabled); fixtures.value=b.data.data; imports.value=c.data.data; if(!manual.sourceId&&sources.value.length) manual.sourceId=sources.value[0].id; } catch(cause){error.value=apiMessage(cause)} finally{loading.value=false} }
+async function importFixture(item: FixtureContent){busyId.value=item.fixtureId;error.value="";success.value="";try{await publicSourceApi.importFixture(item.fixtureId);success.value=`“${item.title}”已导入，等待发起 AI 处理。`;await load()}catch(cause){error.value=apiMessage(cause)}finally{busyId.value=null}}
+async function importManual(){const source=selectedSource.value;if(!source)return;busyId.value="manual";error.value="";success.value="";try{await publicSourceApi.importManual({sourceId:source.id,title:manual.title,sourceName:source.source_name,sourceType:source.source_type,sourceUrl:manual.sourceUrl,publisher:source.publisher,publishedAt:`${manual.publishedAt}T00:00:00`,body:manual.body,category:manual.category});success.value=`“${manual.title}”已导入，等待发起 AI 处理。`;Object.assign(manual,{title:"",sourceUrl:"",body:""});await load()}catch(cause){error.value=apiMessage(cause)}finally{busyId.value=null}}
+async function showPreview(id:number){try{preview.value=(await publicSourceApi.preview(id)).data.data}catch(cause){error.value=apiMessage(cause)}}
+async function process(record:ImportRecord){busyId.value=record.id;error.value="";try{await publicSourceApi.process(record.id);await router.push(`/documents/${record.id}/review`)}catch(cause){error.value=apiMessage(cause);await load()}finally{busyId.value=null}}
+onMounted(load);
 </script>
 <template>
-  <div class="narrow">
-    <PageHeader
-      title="权威公开信息导入"
-      description="平台管理员可手工导入政府、医院和主流媒体的公开信息。"
-    />
-    <section class="panel form-panel">
-      <div class="info-note">
-        <Info /><span
-          >本演示版本不访问真实网页。填写正文后将创建与上传材料相同的 AI
-          处理任务。</span
-        >
-      </div>
-      <label class="field"
-        >信息标题<input value="高血压患者夏季健康管理提示"
-      /></label>
-      <div class="form-row">
-        <label class="field">来源名称<input value="城市人民医院" /></label
-        ><label class="field"
-          >分类<select>
-            <option>健康</option>
-            <option>养老</option>
-            <option>反诈</option>
-            <option>生活服务</option>
-          </select></label
-        >
-      </div>
-      <label class="field"
-        >来源链接
-        <div class="input-icon">
-          <Link /><input
-            value="https://example.org/health/notice-2026"
-          /></div></label
-      ><label class="field"
-        >发布时间<input type="date" value="2026-07-20" /></label
-      ><label class="field"
-        >正文内容<textarea rows="9">
-夏季气温较高，高血压患者应按医嘱规律服药，不可自行停药或减量。建议每日早晚测量血压，注意补充水分，避免在午后高温时段长时间外出。如出现持续头痛、胸闷等不适，应及时就医。</textarea>
-      </label>
-      <div v-if="done" class="inline-success">
-        已创建处理任务，可前往材料管理查看进度。
-      </div>
-      <div class="form-actions">
-        <button class="btn primary" @click="done = true">
-          <Plus />导入并创建 AI 任务
-        </button>
-      </div>
-    </section>
-  </div>
-</template>
+<div><PageHeader title="权威公开信息导入" description="从白名单来源离线导入，复用现有 AI、审核、发布和撤回流程。"><RouterLink class="btn secondary" to="/public-sources">管理权威来源</RouterLink></PageHeader>
+<div class="info-note"><Info :size="20"/><span>系统不会抓取任意网站。URL 必须与已批准来源同域，重复 URL 或相同正文会被拦截；所有内容须人工审核后才能发布。</span></div>
+<div v-if="success" class="inline-success">{{success}}</div><div v-if="error" class="inline-error">{{error}}</div>
+<section class="panel import-workbench"><div class="import-tabs"><button :class="{active:tab==='fixture'}" @click="tab='fixture'">本地示例导入</button><button :class="{active:tab==='manual'}" @click="tab='manual'">手工录入</button></div>
+<div v-if="tab==='fixture'" class="fixture-list"><article v-for="item in fixtures" :key="item.fixtureId"><div class="fixture-category">{{item.category}}</div><div><h3>{{item.title}}</h3><p>{{item.body}}</p><small>{{item.sourceName}} · {{item.publishedAt?.slice(0,10)}}</small></div><button class="btn primary" :disabled="busyId===item.fixtureId" @click="importFixture(item)"><FileInput :size="16"/>{{busyId===item.fixtureId?'正在导入…':'导入'}}</button></article></div>
+<form v-else class="manual-import" @submit.prevent="importManual"><div class="form-row"><label class="field">权威来源<select v-model.number="manual.sourceId" required><option v-for="source in sources" :key="source.id" :value="source.id">{{source.source_name}}</option></select></label><label class="field">内容分类<select v-model="manual.category"><option>健康</option><option>养老</option><option>反诈</option><option>生活服务</option><option>时政</option></select></label></div><label class="field">信息标题<input v-model="manual.title" required placeholder="请输入公开信息标题"/></label><div class="form-row"><label class="field">来源 URL<input v-model="manual.sourceUrl" required type="url" placeholder="必须与所选白名单来源同域"/></label><label class="field">发布时间<input v-model="manual.publishedAt" required type="date"/></label></div><label class="field">原文内容<textarea v-model="manual.body" required rows="8" placeholder="粘贴完整公开信息原文，审核时可追溯查看"/></label><div class="form-actions"><button class="btn primary" :disabled="busyId==='manual'"><FileInput :size="16"/>{{busyId==='manual'?'正在导入…':'保存导入记录'}}</button></div></form></section>
+<section class="panel import-history"><div class="panel-title"><div><h2>导入记录</h2><p>查看原文、处理状态和失败原因。</p></div><button class="text-action" @click="load"><RefreshCw :size="15"/>刷新</button></div><table class="data-table"><thead><tr><th>内容</th><th>来源</th><th>方式</th><th>状态</th><th>导入时间</th><th>操作</th></tr></thead><tbody v-if="!loading"><tr v-for="record in imports" :key="record.id"><td><b>{{record.title}}</b><small v-if="record.failure_reason" class="danger">失败原因：{{record.failure_reason}}</small></td><td>{{record.source_name}}</td><td>{{record.import_method==='FIXTURE'?'本地示例':'手工录入'}}</td><td>{{statusText[record.status]||record.status}}</td><td>{{record.imported_at}}</td><td><div class="row-actions"><button class="text-action" @click="showPreview(record.id)"><Eye :size="15"/>预览</button><button v-if="record.status==='UPLOADED'||record.status==='FAILED'" class="text-action strong" :disabled="busyId===record.id" @click="process(record)"><Play :size="15"/>发起 AI</button><RouterLink v-else-if="record.status==='WAITING_REVIEW'" :to="`/documents/${record.id}/review`">去审核</RouterLink><RouterLink v-else-if="record.status==='REVIEWED'" :to="`/documents/${record.id}/publish`">去发布</RouterLink></div></td></tr></tbody></table><div v-if="loading" class="empty-state">正在加载导入记录…</div><div v-else-if="imports.length===0" class="empty-state">暂无导入记录。</div></section>
+<div v-if="preview" class="preview-mask" @click.self="preview=null"><aside class="preview-drawer"><header><div><h2>{{preview.title}}</h2><p>{{preview.source_name}} · {{String(preview.source_published_at||'')}}</p></div><button @click="preview=null"><X/></button></header><div class="preview-meta"><span>分类：{{preview.category}}</span><a :href="String(preview.import_url)" target="_blank" rel="noreferrer">查看来源 URL</a></div><article>{{preview.raw_text}}</article></aside></div>
+</div></template>
