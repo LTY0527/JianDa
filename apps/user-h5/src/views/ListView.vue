@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
-import H5Header from "../components/H5Header.vue";
+import AppTopBar from "../components/navigation/AppTopBar.vue";
 import BottomNav from "../components/BottomNav.vue";
 import ContentCard from "../components/ContentCard.vue";
 import { fetchItems } from "../api";
-import { ArrowLeft, Search } from "lucide-vue-next";
+import { Search } from "lucide-vue-next";
 const route = useRoute();
 const query = ref("");
 const items = ref<any[]>([]);
@@ -35,11 +35,11 @@ onMounted(async () => {
 </script>
 <template>
   <div class="h5-page">
-    <H5Header />
+    <AppTopBar :title="title" />
     <main class="h5-main list-page">
-      <div class="mobile-title">
-        <button @click="$router.back()"><ArrowLeft /></button>
+      <div class="simple-head list-heading">
         <h1>{{ title }}</h1>
+        <p>只展示经过审核的可靠公共服务信息。</p>
       </div>
       <label class="search-input"
         ><Search /><input

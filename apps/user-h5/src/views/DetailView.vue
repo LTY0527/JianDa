@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import H5Header from "../components/H5Header.vue";
+import AppTopBar from "../components/navigation/AppTopBar.vue";
 import { fetchDetail, setFavorite } from "../api";
 import {
-  ArrowLeft,
+
   ShieldCheck,
   Volume2,
   Pause,
@@ -111,9 +111,9 @@ onBeforeUnmount(stop);
 </script>
 <template>
   <div class="detail-page" :style="{ '--reader-size': font + 'px' }">
-    <H5Header />
+    <AppTopBar />
     <main class="reader">
-      <button class="back" @click="$router.back()"><ArrowLeft />返回</button>
+
       <article class="article-head">
         <span class="category-text">{{ item.category }} · 办事指南</span>
         <h1>{{ item.title }}</h1>

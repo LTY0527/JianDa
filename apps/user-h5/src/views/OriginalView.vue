@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import H5Header from "../components/H5Header.vue";
+import AppTopBar from "../components/navigation/AppTopBar.vue";
 import { fetchDetail } from "../api";
-import { ArrowLeft, Download } from "lucide-vue-next";
+import { Download } from "lucide-vue-next";
 const route = useRoute();
 const title = ref("原始通知");
 const rawText = ref("");
@@ -22,12 +22,11 @@ onMounted(async () => {
 </script>
 <template>
   <div class="detail-page">
-    <H5Header />
+    <AppTopBar title="原始通知" />
     <main class="reader original">
-      <div class="mobile-title">
-        <button @click="$router.back()"><ArrowLeft /></button>
-        <h1>原始通知</h1>
-        <button><Download /></button>
+      <div class="original-heading">
+        <div><span>权威来源原文</span><h1>原始通知</h1></div>
+        <button type="button" aria-label="下载原文"><Download /></button>
       </div>
       <article class="document">
         <h2>{{ title }}</h2>

@@ -1,21 +1,27 @@
 import { createRouter, createWebHistory } from "vue-router";
-import HomeView from "./views/HomeView.vue";
-import ListView from "./views/ListView.vue";
-import DetailView from "./views/DetailView.vue";
-import FavoritesView from "./views/FavoritesView.vue";
-import SettingsView from "./views/SettingsView.vue";
-import OriginalView from "./views/OriginalView.vue";
-export default createRouter({
+
+const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: "/", component: HomeView },
-    { path: "/category/:name", component: ListView },
-    { path: "/search", component: ListView },
-    { path: "/guide/:slug", component: DetailView },
-    { path: "/news/:slug", component: DetailView },
-    { path: "/steps/:slug", component: DetailView },
-    { path: "/favorites", component: FavoritesView },
-    { path: "/settings", component: SettingsView },
-    { path: "/original/:slug", component: OriginalView },
+    { path: "/", component: () => import("./views/HomeView.vue"), meta: { title: "首页", showBack: false } },
+    { path: "/category/:name", component: () => import("./views/ListView.vue"), meta: { title: "内容分类", showBack: false } },
+    { path: "/search", component: () => import("./views/ListView.vue"), meta: { title: "搜索", showBack: true, backTo: "/" } },
+    { path: "/guide/:slug", component: () => import("./views/DetailView.vue"), meta: { title: "办事指南", showBack: true, backTo: "/" } },
+    { path: "/news/:slug", component: () => import("./views/DetailView.vue"), meta: { title: "权威资讯", showBack: true, backTo: "/" } },
+    { path: "/steps/:slug", component: () => import("./views/DetailView.vue"), meta: { title: "办理步骤", showBack: true, backTo: "/" } },
+    { path: "/favorites", component: () => import("./views/FavoritesView.vue"), meta: { title: "我的收藏", showBack: false } },
+    { path: "/settings", component: () => import("./views/SettingsView.vue"), meta: { title: "阅读设置", showBack: false } },
+    {
+      path: "/original/:slug",
+      component: () => import("./views/OriginalView.vue"),
+      meta: { title: "原始通知", showBack: true },
+      beforeEnter: (to) => {
+        if (!to.meta.backTo) {
+          const slug = String(to.params.slug);
+          to.meta.backTo = `/guide/${slug}`;
+        }
+      },
+    },
   ],
 });
+export default router;
