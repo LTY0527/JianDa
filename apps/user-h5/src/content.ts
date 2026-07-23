@@ -1,0 +1,27 @@
+import type { PublicItem } from "./api";
+
+export const newsCategories = ["时政", "健康", "反诈", "文化"];
+export const serviceCategories = ["养老", "生活服务"];
+
+export function contentKind(item: PublicItem): "news" | "guide" {
+  return newsCategories.includes(item.category) ? "news" : "guide";
+}
+
+export function cleanDisplayTitle(title: string): string {
+  return title.replace(/\s+\d{12,}$/, "").trim();
+}
+
+export function isFavorite(id: number): boolean {
+  return localStorage.getItem(`favorite_${id}`) === "1";
+}
+
+export function isRead(id: number): boolean {
+  return localStorage.getItem(`jianda_read_${id}`) === "1";
+}
+
+export function importanceScore(item: PublicItem): number {
+  const categoryScore = item.category === "反诈" ? 40 : item.category === "健康" ? 30 : item.category === "养老" ? 20 : 10;
+  const ageDays = Math.max(0, (Date.now() - new Date(item.published_at).getTime()) / 86_400_000);
+  const freshness = Math.max(0, 30 - ageDays);
+  return categoryScore + freshness - (isRead(item.id) ? 12 : 0);
+}

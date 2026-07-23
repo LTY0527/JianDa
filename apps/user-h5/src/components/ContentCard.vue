@@ -1,18 +1,31 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { ShieldCheck, ChevronRight } from "lucide-vue-next";
-const props = defineProps<{ item: any; kind?: "guide" | "news" }>();
-const newsCategories = ["时政", "健康", "反诈", "文化"];
-const kind = computed(() => props.kind || (newsCategories.includes(props.item.category) ? "news" : "guide"));
+import { computed, ref } from "vue";
+import { ShieldCheck, ChevronRight, Heart, Volume2 } from "lucide-vue-next";
+import { setFavorite } from "../api";
+import { cleanDisplayTitle, contentKind, isFavorite, isRead } from "../content";
+const props = withDefaults(defineProps<{ item: any; kind?: "guide" | "news"; actions?: boolean }>(), { actions: false });
+const kind = computed(() => props.kind || contentKind(props.item));
+const favorite = ref(isFavorite(props.item.id));
+const read = computed(() => isRead(props.item.id));
+async function toggleFavorite() {
+  const next = !favorite.value;
+  await setFavorite(props.item.id, next);
+  favorite.value = next;
+  localStorage.setItem(`favorite_${props.item.id}`, next ? "1" : "0");
+}
 </script>
 <template>
-  <RouterLink class="content-row" :to="`/${kind}/${item.slug}`">
-    <div>
+  <article class="content-row" :class="{ 'content-row--read': read }">
+    <RouterLink class="content-row__body" :to="`/${kind}/${item.slug}`">
       <span class="category-text">{{ item.category }} · {{ kind === "news" ? "权威资讯" : "办事指南" }}</span>
-      <h3>{{ item.title }}</h3>
+      <h3>{{ cleanDisplayTitle(item.title) }}</h3>
       <p>{{ item.summary }}</p>
-      <footer><ShieldCheck />{{ item.source || item.source_name }}<span>· {{ String(item.date || item.published_at).slice(0, 10) }}</span></footer>
+      <footer><ShieldCheck />{{ item.source || item.source_name }}<span>· {{ String(item.date || item.published_at).slice(0, 10) }}</span><span v-if="read">· 已读</span></footer>
+    </RouterLink>
+    <div v-if="actions" class="content-row__actions">
+      <span title="详情支持语音朗读"><Volume2 />可听</span>
+      <button type="button" :aria-label="favorite ? '取消收藏' : '收藏'" @click="toggleFavorite"><Heart :fill="favorite ? 'currentColor' : 'none'" /></button>
     </div>
     <ChevronRight class="row-arrow" />
-  </RouterLink>
+  </article>
 </template>

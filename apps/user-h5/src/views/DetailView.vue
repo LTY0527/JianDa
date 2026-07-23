@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
 import { fetchDetail, setFavorite } from "../api";
+import { cleanDisplayTitle } from "../content";
 import {
 
   ShieldCheck,
@@ -18,6 +19,7 @@ import {
   ChevronRight,
   CheckCircle2,
   TriangleAlert,
+  MessageCircleQuestion,
 } from "lucide-vue-next";
 const route = useRoute();
 const font = ref(Number(localStorage.getItem("jianda_font") || 18));
@@ -124,7 +126,7 @@ onBeforeUnmount(stop);
 
       <article class="article-head">
         <span class="category-text">{{ item.category }} · {{ isNews ? "权威资讯" : "办事指南" }}</span>
-        <h1>{{ item.title }}</h1>
+        <h1>{{ cleanDisplayTitle(item.title) }}</h1>
         <div class="source">
           <ShieldCheck /><span
             ><b>{{ item.source_name }}</b
@@ -229,6 +231,7 @@ onBeforeUnmount(stop);
           <dd>{{ explanation }}</dd>
         </dl>
       </section>
+      <RouterLink v-if="!isNews" class="ask-assistant-link" :to="{ path: '/assistant', query: { about: item.slug } }"><MessageCircleQuestion /><span><b>问问这个事项</b><small>助手将根据这份已审核材料回答</small></span><ChevronRight /></RouterLink>
       <RouterLink class="original-link" :to="`/original/${item.slug}`"
         ><FileText /><span
           ><b>查看原始通知</b
