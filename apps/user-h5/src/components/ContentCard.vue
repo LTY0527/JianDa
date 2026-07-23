@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { ShieldCheck, ChevronRight, Heart, Volume2 } from "lucide-vue-next";
 import { setFavorite } from "../api";
 import { cleanDisplayTitle, contentKind, isFavorite, isRead } from "../content";
+import { saveFavorite } from "../library";
 const props = withDefaults(defineProps<{ item: any; kind?: "guide" | "news"; actions?: boolean }>(), { actions: false });
 const kind = computed(() => props.kind || contentKind(props.item));
 const favorite = ref(isFavorite(props.item.id));
@@ -12,6 +13,7 @@ async function toggleFavorite() {
   await setFavorite(props.item.id, next);
   favorite.value = next;
   localStorage.setItem(`favorite_${props.item.id}`, next ? "1" : "0");
+  saveFavorite(props.item, next);
 }
 </script>
 <template>

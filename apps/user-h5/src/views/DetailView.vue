@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
 import { fetchDetail, setFavorite } from "../api";
 import { cleanDisplayTitle } from "../content";
+import { readerPreferences, recordVisit, saveFavorite } from "../library";
 import {
 
   ShieldCheck,
@@ -72,6 +73,8 @@ onMounted(async () => {
           .filter(Boolean)
       : [];
     favorite.value = localStorage.getItem(`favorite_${item.value.id}`) === "1";
+    recordVisit(item.value as any);
+    if (readerPreferences().autoRead) window.setTimeout(speak, 250);
   } catch {
     error.value = "内容暂时无法读取，可能已撤回";
   } finally {
@@ -84,6 +87,7 @@ async function toggleFav() {
     await setFavorite(item.value.id, next);
     favorite.value = next;
     localStorage.setItem(`favorite_${item.value.id}`, next ? "1" : "0");
+    saveFavorite(item.value as any, next);
   } catch {
     error.value = "收藏操作失败，请稍后重试";
   }
