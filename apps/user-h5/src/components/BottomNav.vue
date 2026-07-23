@@ -1,21 +1,22 @@
 <script setup lang="ts">
-import { Home, Grid2X2, Heart, Settings } from "lucide-vue-next";
+import { Home, Newspaper, MessageCircleQuestion, ClipboardList, UserRound } from "lucide-vue-next";
 import { useRoute } from "vue-router";
 const route = useRoute();
 const links = [
-  ["/", Home, "首页"],
-  ["/category/全部", Grid2X2, "分类"],
-  ["/favorites", Heart, "收藏"],
-  ["/settings", Settings, "设置"],
-] as const;
+  { to: "/", icon: Home, label: "首页", matches: ["/"] },
+  { to: "/news", icon: Newspaper, label: "资讯", matches: ["/news", "/category"] },
+  { to: "/assistant", icon: MessageCircleQuestion, label: "简达助手", primary: true, matches: ["/assistant"] },
+  { to: "/services", icon: ClipboardList, label: "办事", matches: ["/services", "/guide", "/steps"] },
+  { to: "/profile", icon: UserRound, label: "我的", matches: ["/profile", "/favorites", "/history", "/settings"] },
+];
+function isActive(matches: string[]) {
+  return matches.some((path) => path === "/" ? route.path === "/" : route.path.startsWith(path));
+}
 </script>
 <template>
-  <nav class="bottom-nav" aria-label="底部导航">
-    <RouterLink
-      v-for="l in links"
-      :to="l[0]"
-      :class="{ active: route.path === l[0] }"
-      ><component :is="l[1]" /><span>{{ l[2] }}</span></RouterLink
-    >
+  <nav class="bottom-nav" aria-label="主要导航">
+    <RouterLink v-for="link in links" :key="link.to" :to="link.to" :class="{ active: isActive(link.matches), 'bottom-nav__primary': link.primary }" :aria-label="link.label">
+      <span class="bottom-nav__icon"><component :is="link.icon" /></span><span>{{ link.label }}</span>
+    </RouterLink>
   </nav>
 </template>
