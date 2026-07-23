@@ -62,7 +62,7 @@ class PublicImportIntegrationTest {
         long documentId = objectMapper.readTree(imported).path("data").path("documentId").asLong();
 
         mvc.perform(post("/api/public-sources/import/fixture/{fixtureId}", "anti-fraud-elderly-2026")
-                        .header("Authorization", auth)).andExpect(status().isBadRequest())
+                        .header("Authorization", auth)).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409));
         mvc.perform(post("/api/public-sources/imports/{id}/process", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
@@ -87,7 +87,7 @@ class PublicImportIntegrationTest {
                 .andExpect(jsonPath("$.data.generated.RISK_WARNING[0]").value("正规退款不会要求向安全账户转账。"));
         mvc.perform(post("/api/documents/{id}/withdraw", documentId).header("Authorization", auth))
                 .andExpect(status().isOk());
-        mvc.perform(get("/api/public/items/{slug}", slug)).andExpect(status().isBadRequest())
+        mvc.perform(get("/api/public/items/{slug}", slug)).andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
     }
 

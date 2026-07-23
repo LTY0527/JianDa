@@ -1,9 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
+import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
 const institutionUrl = "http://127.0.0.1:5173";
 const h5Url = "http://127.0.0.1:5174";
+const acceptanceArtifactDir = path.resolve("artifacts/phase7-3");
+fs.mkdirSync(acceptanceArtifactDir, { recursive: true });
 
 async function login(page: Page, username: string) {
   await page.goto(`${institutionUrl}/login`);
@@ -14,6 +17,23 @@ async function login(page: Page, username: string) {
 }
 
 test.describe.serial("Phase 7 navigation and public information flow", () => {
+  const ownedDocumentIds = new Set<number>();
+  let ownedToken = "";
+
+  test.afterEach(async ({ request }) => {
+    if (!ownedToken || ownedDocumentIds.size === 0) return;
+    const headers = { Authorization: `Bearer ${ownedToken}` };
+    for (const documentId of [...ownedDocumentIds]) {
+      const response = await request.post(
+        `http://127.0.0.1:8080/api/documents/${documentId}/withdraw`,
+        { headers },
+      );
+      if (response.ok() || response.status() === 404 || response.status() === 409) {
+        ownedDocumentIds.delete(documentId);
+      }
+    }
+  });
+
   test("H5 root pages do not show a back button", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(h5Url);
@@ -92,8 +112,9 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
 
     await expect(page.locator(".fixture-list article")).toHaveCount(3);
     const runId = Date.now();
-    const title = `高血压患者夏季日常管理提示（${runId}）`;
+    const title = "高血压患者夏季日常管理提示（人工验收）";
     const token = await page.evaluate(() => localStorage.getItem("jianda_token"));
+    ownedToken = token || "";
     const headers = { Authorization: `Bearer ${token}` };
     const sourceResponse = await page.request.get("http://127.0.0.1:8080/api/public-sources", { headers });
     const sources = (await sourceResponse.json()).data;
@@ -114,6 +135,7 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     });
     expect(importResponse.ok()).toBeTruthy();
     const documentId = (await importResponse.json()).data.documentId;
+    ownedDocumentIds.add(documentId);
     const processResponse = await page.request.post(`http://127.0.0.1:8080/api/public-sources/imports/${documentId}/process`, { headers });
     expect(processResponse.ok()).toBeTruthy();
     await page.goto(`${institutionUrl}/documents/${documentId}/review`);
@@ -145,6 +167,7 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await expect(
       page.getByRole("heading", { name: "内容已成功发布" }),
     ).toBeVisible();
+    await page.screenshot({ path: path.join(acceptanceArtifactDir, "admin-publish-success-1440.png"), fullPage: true });
     const publicLink = page.getByRole("link", { name: "打开用户端" });
     const href = await publicLink.getAttribute("href");
     expect(href).toMatch(new RegExp("/guide/guide-[0-9]+$"));
@@ -191,7 +214,9 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await expect(
       publicPage.getByRole("button", { name: /22px/ }),
     ).toBeVisible();
-    await publicPage.getByRole("link", { name: /看原文/ }).click();
+    await publicPage
+      .getByRole("link", { name: "查看原文", exact: true })
+      .click();
     await expect(
       publicPage.getByText(/夏季气温较高，高血压患者应按医嘱规律服药/),
     ).toBeVisible();
@@ -223,6 +248,7 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     page.once("dialog", (dialog) => dialog.accept());
     await publishedRow.getByRole("button", { name: "撤回" }).click();
     await expect(publishedRow).toHaveCount(0);
+    ownedDocumentIds.delete(documentId);
 
     await publicPage.goto(href!);
     await expect(
