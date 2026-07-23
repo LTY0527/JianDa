@@ -4,7 +4,7 @@ import PageHeader from "../components/PageHeader.vue";
 import StatusTag from "../components/StatusTag.vue";
 import { documentApi, type DocumentRow } from "../api/documents";
 import { apiMessage } from "../api/http";
-import { Search, Upload, SlidersHorizontal } from "lucide-vue-next";
+import { Search, Upload } from "lucide-vue-next";
 const query = ref("");
 const status = ref("全部状态");
 const loading = ref(true);
@@ -34,6 +34,23 @@ const filtered = computed(() =>
       (status.value === "全部状态" || statusText[d.status] === status.value),
   ),
 );
+function displayProgress(document: DocumentRow) {
+  return ["WAITING_REVIEW", "REVIEWED", "PUBLISHED", "WITHDRAWN"].includes(
+    document.status,
+  )
+    ? 100
+    : document.progress;
+}
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
 onMounted(async () => {
   try {
     documents.value = (await documentApi.list()).data.data;
@@ -59,19 +76,18 @@ onMounted(async () => {
         <div class="search">
           <Search :size="18" /><input
             v-model="query"
+            aria-label="搜索材料标题或文件名"
             placeholder="搜索材料标题或文件名"
           />
         </div>
-        <select v-model="status">
+        <select v-model="status" aria-label="按处理状态筛选">
           <option>全部状态</option>
           <option>处理中</option>
           <option>待审核</option>
           <option>已发布</option>
           <option>失败</option>
           <option>已撤回</option></select
-        ><button class="btn secondary">
-          <SlidersHorizontal :size="17" />更多筛选
-        </button>
+        >
       </div>
       <table class="data-table">
         <thead>
@@ -99,11 +115,11 @@ onMounted(async () => {
             </td>
             <td>
               <div class="progress">
-                <i :style="{ width: d.progress + '%' }"></i>
+                <i :style="{ width: displayProgress(d) + '%' }"></i>
               </div>
-              <small>{{ d.progress }}%</small>
+              <small>{{ displayProgress(d) }}%</small>
             </td>
-            <td>{{ d.updated_at }}</td>
+            <td>{{ formatDate(d.updated_at) }}</td>
             <td>
               <RouterLink
                 :to="
