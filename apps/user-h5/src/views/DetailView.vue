@@ -94,7 +94,7 @@ async function toggleFav() {
 }
 function speak() {
   if (!("speechSynthesis" in window)) {
-    speechError.value = "当前浏览器不支持语音朗读，您仍可使用大字模式阅读。";
+    speechError.value = "当前浏览器不支持语音朗读，您仍可使用大字阅读。";
     return;
   }
   if (speaking.value) {
@@ -154,8 +154,8 @@ onBeforeUnmount(stop);
           <Heart :fill="favorite ? 'currentColor' : 'none'" /><span>{{
             favorite ? "已收藏" : "收藏"
           }}</span></button
-        ><RouterLink :to="`/original/${item.slug}`"
-          ><FileText /><span>看原文</span></RouterLink
+        ><RouterLink :to="{ path: `/original/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"
+          ><FileText /><span>查看原文</span></RouterLink
         >
       </nav>
       <div v-if="loading" class="detail-skeleton" aria-label="正在加载详情"><i v-for="n in 5" :key="n"></i></div>
@@ -236,9 +236,9 @@ onBeforeUnmount(stop);
         </dl>
       </section>
       <RouterLink v-if="!isNews" class="ask-assistant-link" :to="{ path: '/assistant', query: { about: item.slug } }"><MessageCircleQuestion /><span><b>问问这个事项</b><small>助手将根据这份已审核材料回答</small></span><ChevronRight /></RouterLink>
-      <RouterLink class="original-link" :to="`/original/${item.slug}`"
+      <RouterLink class="original-link" :to="{ path: `/original/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"
         ><FileText /><span
-          ><b>查看原始通知</b
+          ><b>查看原文</b
           ><small>共 {{ item.page_count || 1 }} 页，可核对原文内容</small></span
         ><ChevronRight
       /></RouterLink>
@@ -247,7 +247,7 @@ onBeforeUnmount(stop);
         <button type="button" @click="speak"><Volume2 /><span>{{ speaking ? "暂停" : "听全文" }}</span></button>
         <button type="button" @click="grow"><Type /><span>{{ font }}px</span></button>
         <button type="button" @click="toggleFav"><Heart :fill="favorite ? 'currentColor' : 'none'" /><span>{{ favorite ? "已收藏" : "收藏" }}</span></button>
-        <RouterLink :to="`/original/${item.slug}`"><FileText /><span>看原文</span></RouterLink>
+        <RouterLink :to="{ path: `/original/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"><FileText /><span>查看原文</span></RouterLink>
       </nav>
       </template>
     </main>

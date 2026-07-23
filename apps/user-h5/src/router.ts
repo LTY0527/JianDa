@@ -17,7 +17,7 @@ const router = createRouter({
     { path: "/history", component: () => import("./views/HistoryView.vue"), meta: { title: "历史浏览", showBack: true, backTo: "/profile" } },
     { path: "/assistant/history", component: () => import("./views/AssistantHistoryView.vue"), meta: { title: "历史会话", showBack: true, backTo: "/assistant" } },
     { path: "/settings", component: () => import("./views/SettingsView.vue"), meta: { title: "阅读设置", showBack: true, backTo: "/profile" } },
-    { path: "/original/:slug", component: () => import("./views/OriginalView.vue"), meta: { title: "原始通知", showBack: true }, beforeEnter: (to) => { if (!to.meta.backTo) { const slug = String(to.params.slug); to.meta.backTo = `/guide/${slug}`; } } },
+    { path: "/original/:slug", component: () => import("./views/OriginalView.vue"), meta: { title: "查看原文", showBack: true }, beforeEnter: (to) => { const slug = String(to.params.slug); const kind = to.query.from === "news" ? "news" : "guide"; to.meta.backTo = `/${kind}/${slug}`; } },
   ],
 });
 export default router;
