@@ -80,6 +80,7 @@ async function saveDraft() {
         values.value[index],
         confirmed.value.includes(index),
       );
+      fields.value[index].value = values.value[index];
     }
   } catch (cause) {
     error.value = apiMessage(cause);

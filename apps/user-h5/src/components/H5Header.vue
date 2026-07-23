@@ -5,7 +5,7 @@ const router = useRouter();
 </script>
 <template>
   <header class="h5-header">
-    <RouterLink to="/" class="h5-brand"
+    <RouterLink to="/" class="h5-brand" aria-label="简达首页"
       ><span><HeartHandshake /></span><b>简达</b></RouterLink
     >
     <nav>

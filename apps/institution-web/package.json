@@ -12,7 +12,6 @@
     "@jianda/shared-types": "0.1.0",
     "@jianda/shared-ui": "0.1.0",
     "axios": "^1.7.9",
-    "element-plus": "^2.9.3",
     "lucide-vue-next": "^0.468.0",
     "pinia": "^2.3.0",
     "vue": "^3.5.13",

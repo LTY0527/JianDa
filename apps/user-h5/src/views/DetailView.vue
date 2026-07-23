@@ -238,6 +238,7 @@ onBeforeUnmount(stop);
       <p class="disclaimer">内容由简达整理并经人工审核，具体要求以权威来源最新规定为准。</p>
       <nav class="detail-action-bar" aria-label="详情操作">
         <button type="button" @click="speak"><Volume2 /><span>{{ speaking ? "暂停" : "听全文" }}</span></button>
+        <button type="button" @click="grow"><Type /><span>{{ font }}px</span></button>
         <button type="button" @click="toggleFav"><Heart :fill="favorite ? 'currentColor' : 'none'" /><span>{{ favorite ? "已收藏" : "收藏" }}</span></button>
         <RouterLink :to="`/original/${item.slug}`"><FileText /><span>看原文</span></RouterLink>
       </nav>

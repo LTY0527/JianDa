@@ -13,7 +13,13 @@ async function login(page: Page, username: string) {
   await expect(page).toHaveURL(`${institutionUrl}/`);
 }
 
-test.describe.serial("Phase 6 public information flow", () => {
+test.describe.serial("Phase 7 navigation and public information flow", () => {
+  test("H5 root pages do not show a back button", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(h5Url);
+    await expect(page.getByRole("button", { name: "返回" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "简达首页" })).toBeVisible();
+  });
   test("机构管理员不能访问平台公开信息功能", async ({ page }) => {
     await login(page, "org_admin");
     await page.goto(`${institutionUrl}/public-import`);
@@ -23,6 +29,16 @@ test.describe.serial("Phase 6 public information flow", () => {
     await expect(page.getByText("仅对平台管理员开放")).toBeVisible();
   });
 
+  test("机构列表保留筛选且不显示返回", async ({ page }) => {
+    await login(page, "platform_admin");
+    await page.goto(`${institutionUrl}/documents`);
+    await expect(page.getByRole("button", { name: "返回" })).toHaveCount(0);
+    const search = page.getByPlaceholder("搜索材料标题或文件名");
+    await search.fill("养老");
+    await page.goto(`${institutionUrl}/`);
+    await page.goto(`${institutionUrl}/documents`);
+    await expect(search).toHaveValue("养老");
+  });
   test("平台管理员导入、处理、审核、发布并撤回权威公开信息", async ({
     page,
   }) => {
@@ -38,41 +54,56 @@ test.describe.serial("Phase 6 public information flow", () => {
       page.getByRole("heading", { name: "权威公开信息导入" }),
     ).toBeVisible();
 
-    const fixtures = page.locator(".fixture-list article");
-    await expect(fixtures).toHaveCount(3);
-    const fixture = fixtures.filter({ hasText: "警惕冒充客服退款诈骗" });
-    const title = "警惕冒充客服退款诈骗，守好养老钱";
-    const importRow = page
-      .locator(".import-history tbody tr")
-      .filter({ hasText: title });
-    if ((await importRow.count()) === 0) {
-      await fixture.getByRole("button", { name: "导入", exact: true }).click();
-      await expect(page.getByText(`“${title}”已导入`)).toBeVisible();
-    }
-    await expect(importRow).toBeVisible();
-    const processButton = importRow.getByRole("button", { name: "发起 AI" });
-    if ((await processButton.count()) > 0) await processButton.click();
-    else await importRow.getByRole("link", { name: "去审核" }).click();
+    await expect(page.locator(".fixture-list article")).toHaveCount(3);
+    const runId = Date.now();
+    const title = `高血压患者夏季日常管理提示 ${runId}`;
+    const token = await page.evaluate(() => localStorage.getItem("jianda_token"));
+    const headers = { Authorization: `Bearer ${token}` };
+    const sourceResponse = await page.request.get("http://127.0.0.1:8080/api/public-sources", { headers });
+    const sources = (await sourceResponse.json()).data;
+    const source = sources.find((item: any) => item.enabled) || sources[0];
+    const importResponse = await page.request.post("http://127.0.0.1:8080/api/public-sources/import/manual", {
+      headers,
+      data: {
+        sourceId: source.id,
+        title,
+        sourceName: source.source_name,
+        sourceType: source.source_type,
+        sourceUrl: `${source.source_url.replace(/\/$/, "")}/phase7-${runId}`,
+        publisher: source.publisher,
+        publishedAt: "2026-07-20T00:00:00",
+        body: `夏季气温较高，高血压患者应按医嘱规律服药，不可自行停药或减量。建议每日早晚测量血压并记录，适量补充水分，避免高温时段外出。如出现持续头痛、胸闷或血压明显异常，应及时就医。本条校验编号为${runId}。`,
+        category: "健康",
+      },
+    });
+    expect(importResponse.ok()).toBeTruthy();
+    const documentId = (await importResponse.json()).data.documentId;
+    const processResponse = await page.request.post(`http://127.0.0.1:8080/api/public-sources/imports/${documentId}/process`, { headers });
+    expect(processResponse.ok()).toBeTruthy();
+    await page.goto(`${institutionUrl}/documents/${documentId}/review`);
 
     await expect(
       page.getByRole("heading", { name: "原文对照审核" }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: title, exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByText(
-        "“正规平台退款不会要求转账到所谓安全账户，也不会索要银行卡密码和验证码。”",
-        { exact: true },
-      ),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "返回" })).toBeVisible();
+    const firstField = page.locator(".review-fields textarea").first();
+    const originalFieldValue = await firstField.inputValue();
+    await firstField.fill(`${originalFieldValue} `);
+    page.once("dialog", (dialog) => dialog.dismiss());
+    await page.getByRole("button", { name: "返回" }).click();
+    await expect(page).toHaveURL(/\/documents\/\d+\/review$/);
+    await firstField.fill(originalFieldValue);
+    await expect(page.locator(".source-pane").getByText(/夏季气温较高，高血压患者应按医嘱规律服药/).first()).toBeVisible();
+
     await page.getByRole("button", { name: "完成字段审核" }).click();
 
     await expect(
       page.getByRole("heading", { name: "审核与发布" }),
     ).toBeVisible();
     await expect(page.getByLabel("发布标题")).toHaveValue(title);
-    await expect(page.getByLabel("来源名称")).toHaveValue("国家反诈中心");
+    await expect(page.getByLabel("来源名称")).toHaveValue(source.source_name);
+    page.once("dialog", (dialog) => dialog.accept());
     await page.getByRole("button", { name: "审核通过并发布" }).click();
 
     await expect(
@@ -87,7 +118,7 @@ test.describe.serial("Phase 6 public information flow", () => {
     await publicPage.goto(href!);
     await expect(publicPage.locator(".article-head h1")).toHaveText(title);
     await expect(
-      publicPage.getByText("国家反诈中心", { exact: true }),
+      publicPage.getByText(source.source_name, { exact: true }),
     ).toBeVisible();
     await expect(
       publicPage.getByRole("heading", { name: "重要提醒" }),
@@ -98,12 +129,29 @@ test.describe.serial("Phase 6 public information flow", () => {
     ).toBeVisible();
     await publicPage.getByRole("link", { name: /看原文/ }).click();
     await expect(
-      publicPage.getByText(/近期有不法分子冒充电商或快递客服/),
+      publicPage.getByText(/夏季气温较高，高血压患者应按医嘱规律服药/),
     ).toBeVisible();
-    await publicPage.screenshot({
-      path: path.join(os.tmpdir(), "jianda-public-info-h5.png"),
-      fullPage: true,
-    });
+    expect(await publicPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    await publicPage.screenshot({ path: path.join(os.tmpdir(), "jianda-public-info-h5.png"), fullPage: true });
+    await publicPage.getByRole("button", { name: "返回" }).click();
+    await expect(publicPage).toHaveURL(href!);
+
+    const directPage = await page.context().newPage();
+    await directPage.setViewportSize({ width: 768, height: 1024 });
+    await directPage.goto(href!);
+    await directPage.getByRole("button", { name: "返回" }).click();
+    await expect(directPage).toHaveURL(`${h5Url}/`);
+    expect(await directPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    await directPage.screenshot({ path: path.join(os.tmpdir(), "jianda-h5-home-768.png"), fullPage: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    await page.screenshot({ path: path.join(os.tmpdir(), "jianda-institution-1440.png"), fullPage: true });
+    const adminTablet = await page.context().newPage();
+    await adminTablet.setViewportSize({ width: 768, height: 1024 });
+    await adminTablet.goto(`${institutionUrl}/documents`);
+    expect(await adminTablet.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    await adminTablet.screenshot({ path: path.join(os.tmpdir(), "jianda-institution-768.png"), fullPage: true });
+    await adminTablet.close();
+    await directPage.close();
 
     await page.getByRole("link", { name: "查看已发布内容" }).click();
     const publishedRow = page.locator("tbody tr").filter({ hasText: title });
