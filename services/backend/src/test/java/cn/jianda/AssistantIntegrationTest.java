@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -63,6 +64,18 @@ class AssistantIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.citations.length()").value(0))
                 .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("没有找到足够可靠的依据")));
+    }
+
+    @Test
+    void demoCatalogContainsEnoughGuidesAndAuthorityNews() {
+        Integer guides = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM published_item WHERE status='PUBLISHED' AND category IN ('养老','生活服务')",
+                Integer.class);
+        Integer news = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM published_item WHERE status='PUBLISHED' AND category IN ('时政','健康','反诈','文化')",
+                Integer.class);
+        assertTrue(guides != null && guides >= 4, "演示办事指南应不少于4条");
+        assertTrue(news != null && news >= 8, "演示权威资讯应不少于8条");
     }
 
     private long insertDocument(String title, String rawText) {
