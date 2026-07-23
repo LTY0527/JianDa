@@ -20,6 +20,41 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await expect(page.getByRole("button", { name: "返回" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "简达首页" })).toBeVisible();
   });
+
+  test("消费级 App 五项导航、资讯频道和办事筛选可用", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(h5Url);
+    const navigation = page.getByRole("navigation", { name: "主要导航" });
+    for (const label of ["首页", "资讯", "简达助手", "办事", "我的"]) {
+      await expect(navigation.getByRole("link", { name: label, exact: true })).toBeVisible();
+    }
+    await expect(page.getByRole("heading", { name: "重要提醒" })).toBeVisible();
+    await navigation.getByRole("link", { name: "资讯", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "权威资讯" })).toBeVisible();
+    await page.getByRole("button", { name: "健康", exact: true }).click();
+    await page.getByRole("button", { name: "重要", exact: true }).click();
+    await expect(page.locator(".channel-tabs .active")).toHaveText("健康");
+    await navigation.getByRole("link", { name: "办事", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "办事专区" })).toBeVisible();
+    await page.getByLabel("服务对象").selectOption("老年人");
+    await expect(page.getByText(/\d+ 个事项/)).toBeVisible();
+    await navigation.getByRole("link", { name: "简达助手", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "简达助手" })).toBeVisible();
+    await navigation.getByRole("link", { name: "我的", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "游客使用" })).toBeVisible();
+  });
+
+  test("用户端在 375、768 和 1440 宽度无横向溢出", async ({ page }) => {
+    for (const width of [375, 768, 1440]) {
+      await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
+      for (const route of ["/", "/news", "/services", "/assistant", "/profile"]) {
+        await page.goto(`${h5Url}${route}`);
+        await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+      }
+    }
+    await page.goto(h5Url);
+    await page.screenshot({ path: path.join(os.tmpdir(), "jianda-h5-home-1440.png"), fullPage: true });
+  });
   test("机构管理员不能访问平台公开信息功能", async ({ page }) => {
     await login(page, "org_admin");
     await page.goto(`${institutionUrl}/public-import`);
@@ -42,6 +77,7 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
   test("平台管理员导入、处理、审核、发布并撤回权威公开信息", async ({
     page,
   }) => {
+    test.setTimeout(90_000);
     const consoleErrors: string[] = [];
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
@@ -56,7 +92,7 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
 
     await expect(page.locator(".fixture-list article")).toHaveCount(3);
     const runId = Date.now();
-    const title = `高血压患者夏季日常管理提示 ${runId}`;
+    const title = `高血压患者夏季日常管理提示（${runId}）`;
     const token = await page.evaluate(() => localStorage.getItem("jianda_token"));
     const headers = { Authorization: `Bearer ${token}` };
     const sourceResponse = await page.request.get("http://127.0.0.1:8080/api/public-sources", { headers });
@@ -123,9 +159,37 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await expect(
       publicPage.getByRole("heading", { name: "重要提醒" }),
     ).toBeVisible();
-    await publicPage.getByRole("button", { name: /18px/ }).click();
+    await publicPage.getByRole("button", { name: "收藏", exact: true }).click();
+    await expect(publicPage.getByRole("button", { name: "已收藏", exact: true })).toBeVisible();
+    await publicPage.getByRole("link", { name: /问问这个事项/ }).click();
+    await expect(publicPage.getByText("正在询问这项内容")).toBeVisible();
+    await expect(publicPage.getByText(title, { exact: true })).toBeVisible();
+    const assistantQuestion = `这项内容编号${runId}需要注意什么？`;
+    await publicPage.getByLabel("输入您想了解的问题").fill(assistantQuestion);
+    await publicPage.getByRole("button", { name: "发送问题" }).click();
+    await expect(publicPage.getByRole("heading", { name: "回答依据" })).toBeVisible();
+    await expect(publicPage.locator(".assistant-citation").filter({ hasText: title })).toBeVisible();
+    await publicPage.screenshot({ path: path.join(os.tmpdir(), "jianda-h5-assistant-citation-375.png"), fullPage: true });
+    await publicPage.getByRole("link", { name: "历史会话" }).click();
+    await expect(publicPage.getByText(assistantQuestion, { exact: true })).toBeVisible();
+    await publicPage.getByRole("button", { name: "返回" }).click();
+    await expect(publicPage).toHaveURL(new RegExp("/assistant"));
+    await publicPage.goto(`${h5Url}/profile`);
+    await expect(publicPage.getByRole("link", { name: /我的收藏/ })).toContainText("1 条");
+    await expect(publicPage.getByRole("link", { name: /历史浏览/ })).toContainText("1 条");
+    await publicPage.getByRole("link", { name: /历史浏览/ }).click();
+    await expect(publicPage.getByText(title, { exact: true })).toBeVisible();
+    await publicPage.goto(`${h5Url}/settings`);
+    await publicPage.getByRole("button", { name: "20", exact: true }).click();
+    await publicPage.reload();
+    await expect(publicPage.getByText("当前 20 像素")).toBeVisible();
+    expect(await publicPage.evaluate(() => localStorage.getItem("jianda_font"))).toBe("20");
+    await publicPage.goto(`${h5Url}/favorites`);
+    await expect(publicPage.getByText(title, { exact: true })).toBeVisible();
+    await publicPage.goto(href!);
+    await publicPage.getByRole("button", { name: /20px/ }).click();
     await expect(
-      publicPage.getByRole("button", { name: /20px/ }),
+      publicPage.getByRole("button", { name: /22px/ }),
     ).toBeVisible();
     await publicPage.getByRole("link", { name: /看原文/ }).click();
     await expect(
@@ -140,9 +204,9 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await directPage.setViewportSize({ width: 768, height: 1024 });
     await directPage.goto(href!);
     await directPage.getByRole("button", { name: "返回" }).click();
-    await expect(directPage).toHaveURL(`${h5Url}/`);
+    await expect(directPage).toHaveURL(`${h5Url}/services`);
     expect(await directPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
-    await directPage.screenshot({ path: path.join(os.tmpdir(), "jianda-h5-home-768.png"), fullPage: true });
+    await directPage.screenshot({ path: path.join(os.tmpdir(), "jianda-h5-services-768.png"), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
     await page.screenshot({ path: path.join(os.tmpdir(), "jianda-institution-1440.png"), fullPage: true });
     const adminTablet = await page.context().newPage();
@@ -164,6 +228,16 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await expect(
       publicPage.getByText("内容暂时无法读取，可能已撤回"),
     ).toBeVisible();
+    await publicPage.goto(`${h5Url}/`);
+    await expect(publicPage.getByText(title, { exact: true })).toHaveCount(0);
+    await publicPage.goto(`${h5Url}/favorites`);
+    await expect(publicPage.getByText(title, { exact: true })).toHaveCount(0);
+    await publicPage.evaluate(() => localStorage.removeItem("jianda_assistant_session"));
+    await publicPage.goto(`${h5Url}/assistant`);
+    await publicPage.getByLabel("输入您想了解的问题").fill(`校验编号${runId}`);
+    await publicPage.getByRole("button", { name: "发送问题" }).click();
+    await expect(publicPage.getByText(/没有找到足够可靠的依据/)).toBeVisible();
+    await expect(publicPage.locator(".assistant-citation").filter({ hasText: title })).toHaveCount(0);
     expect(consoleErrors).toEqual([]);
   });
 });
