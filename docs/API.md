@@ -41,6 +41,19 @@
 - `GET /api/public/items|categories|search`
 - `GET /api/public/items/{slug}`
 - `POST|DELETE /api/public/items/{id}/favorite`
+- `GET /api/public/assistant/suggestions`：根据当前已发布分类返回稳定推荐问题。
+- `POST /api/public/assistant/chat`：仅检索 `PUBLISHED` 内容并返回回答、来源引用和安全提示。
+
+助手请求示例：
+
+```json
+{
+  "message": "最近有哪些反诈提醒？",
+  "contextSlug": "guide-1"
+}
+```
+
+`contextSlug` 可省略；从办事详情提问时用于优先匹配当前材料。响应 `data` 包含 `answer`、`citations` 和 `disclaimer`。每条引用包含 `title`、`slug`、`kind`、`category`、`sourceName`、`publishedAt` 和 `quote`。找不到可靠依据时 `citations` 为空，回答不会补充未发布事实。
 
 本地服务文档与健康检查：
 
