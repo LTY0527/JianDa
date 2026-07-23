@@ -55,15 +55,15 @@ onMounted(async () => {
     <AppTopBar title="查看原文" />
     <main class="reader original">
       <div class="original-heading">
-        <div><span>权威来源</span><h1>查看原文</h1></div>
+        <div><span>原文来源</span><h1>查看原文</h1></div>
         <button type="button" aria-label="下载原文" :disabled="Boolean(error)" @click="downloadOriginal"><Download /></button>
       </div>
+      <p v-if="downloadStatus" class="page-number" role="status">{{ downloadStatus }}</p>
       <article class="document">
         <h2>{{ title }}</h2>
         <p class="original-text">{{ rawText || "暂无可展示的原文内容。" }}</p>
         <footer>{{ source }}</footer>
       </article>
-      <p v-if="downloadStatus" class="page-number" role="status">{{ downloadStatus }}</p>
       <p v-if="error" class="page-number">{{ error }}</p>
       <p v-else class="page-number">原始材料内容 · 可与通俗版逐项核对</p>
     </main>

@@ -28,3 +28,4 @@
 .assistant-session-bar a,.assistant-session-bar button{min-height:48px}
 :where(a,button,input,select,textarea):focus-visible{outline:3px solid #d97706;outline-offset:3px}
 .switch{position:relative}.switch input{display:block;position:absolute;width:1px;height:1px;opacity:0}.switch input:focus-visible+i{outline:3px solid #d97706;outline-offset:3px}
+.filter-tabs button{min-height:48px}

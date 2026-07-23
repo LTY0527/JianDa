@@ -50,9 +50,14 @@ onMounted(async () => {
     item.value = await fetchDetail(String(route.params.slug));
     const generated = item.value.generated || {};
     const fields = item.value.fields || [];
-    detail.value.summary = Array.isArray(generated.SUMMARY)
+    const generatedSummary = Array.isArray(generated.SUMMARY)
       ? generated.SUMMARY
       : [];
+    detail.value.summary = generatedSummary.length
+      ? generatedSummary
+      : item.value.summary
+        ? [item.value.summary]
+        : [];
     detail.value.steps = Array.isArray(generated.STEP_CARDS)
       ? generated.STEP_CARDS.map((step: any) => [step.title, step.description])
       : [];
