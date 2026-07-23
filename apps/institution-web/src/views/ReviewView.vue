@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
 import { documentApi, type DocumentDetail } from "../api/documents";
 import { apiMessage } from "../api/http";
@@ -16,6 +16,12 @@ const values = ref<string[]>([]);
 const confirmed = ref<number[]>([]);
 const error = ref("");
 const submitting = ref(false);
+const allowLeave = ref(false);
+const isDirty = computed(() => values.value.some((value, index) => value !== fields.value[index]?.value));
+onBeforeRouteLeave(() => {
+  if (allowLeave.value || !isDirty.value) return true;
+  return window.confirm("审核内容尚未保存，确定离开吗？");
+});
 const sourceParagraphs = computed(() =>
   (document.value?.raw_text || "原文暂未录入")
     .split(/\r?\n+/)
@@ -57,6 +63,7 @@ async function confirm(index: number) {
       values.value[index],
       true,
     );
+    fields.value[index].value = values.value[index];
     if (!confirmed.value.includes(index)) confirmed.value.push(index);
   } catch (cause) {
     error.value = apiMessage(cause);
@@ -92,6 +99,7 @@ async function finish() {
       );
     }
     await documentApi.review(documentId);
+    allowLeave.value = true;
     await router.push(`/documents/${documentId}/publish`);
   } catch (cause) {
     error.value = apiMessage(cause);
@@ -106,6 +114,8 @@ async function finish() {
     <PageHeader
       title="原文对照审核"
       description="逐项核对 AI 结果与原文依据，确认无误后提交审核。"
+      :breadcrumbs="['材料管理', '原文对照审核']"
+      status="待审核"
     >
       <button
         class="btn secondary"

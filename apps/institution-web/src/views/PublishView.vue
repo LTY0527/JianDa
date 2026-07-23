@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRoute } from "vue-router";
+import { onBeforeRouteLeave, useRoute } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
 import {
   documentApi,
@@ -17,6 +17,8 @@ const publishedSlug = ref("");
 const error = ref("");
 const submitting = ref(false);
 const agreed = ref(true);
+const initialForm = ref("");
+const allowLeave = ref(false);
 const form = reactive({
   title: "",
   category: "生活服务",
@@ -24,6 +26,11 @@ const form = reactive({
   sourceName: "",
   sourceUrl: "",
   publishedAt: new Date().toISOString().slice(0, 10),
+});
+const isDirty = computed(() => Boolean(initialForm.value) && JSON.stringify(form) !== initialForm.value);
+onBeforeRouteLeave(() => {
+  if (allowLeave.value || publishedSlug.value || !isDirty.value) return true;
+  return window.confirm("发布信息尚未保存，确定离开吗？");
 });
 const h5Url = computed(() =>
   publishedSlug.value
@@ -65,12 +72,14 @@ onMounted(async () => {
       document.value.source_published_at || new Date().toISOString(),
     ).slice(0, 10);
     fieldCount.value = fieldsResponse.data.data.length;
+    initialForm.value = JSON.stringify(form);
   } catch (cause) {
     error.value = apiMessage(cause);
   }
 });
 
 async function publish() {
+  if (!window.confirm("确认审核通过并发布到用户端吗？发布后公众即可查看。")) return;
   submitting.value = true;
   error.value = "";
   try {
@@ -81,6 +90,7 @@ async function publish() {
       sourceUrl: form.sourceUrl,
     });
     publishedSlug.value = response.data.data.slug;
+    allowLeave.value = true;
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -94,6 +104,8 @@ async function publish() {
     <PageHeader
       title="审核与发布"
       description="确认分类、来源和用户端展示效果后发布。"
+      :breadcrumbs="['材料管理', '审核与发布']"
+      status="待发布"
     />
     <div v-if="publishedSlug" class="success-panel">
       <CheckCircle2 />

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import PageHeader from "../components/PageHeader.vue";
 import StatusTag from "../components/StatusTag.vue";
 import { documentApi, type DocumentRow } from "../api/documents";
@@ -10,6 +10,14 @@ const status = ref("全部状态");
 const loading = ref(true);
 const error = ref("");
 const documents = ref<DocumentRow[]>([]);
+const savedState = sessionStorage.getItem("jianda_documents_state");
+if (savedState) {
+  const parsed = JSON.parse(savedState);
+  query.value = parsed.query || "";
+  status.value = parsed.status || "全部状态";
+}
+watch([query, status], () => sessionStorage.setItem("jianda_documents_state", JSON.stringify({ query: query.value, status: status.value, scroll: window.scrollY })));
+onUnmounted(() => sessionStorage.setItem("jianda_documents_state", JSON.stringify({ query: query.value, status: status.value, scroll: window.scrollY })));
 const statusText: Record<string, string> = {
   UPLOADED: "待处理",
   PROCESSING: "处理中",
@@ -33,6 +41,7 @@ onMounted(async () => {
     error.value = apiMessage(cause);
   } finally {
     loading.value = false;
+    requestAnimationFrame(() => window.scrollTo(0, Number(savedState ? JSON.parse(savedState).scroll : 0)));
   }
 });
 </script>
@@ -111,7 +120,8 @@ onMounted(async () => {
 
       <div v-if="loading" class="empty-state">正在加载材料…</div>
 
-      <div v-else-if="error" class="empty-state error-state">{{ error }}</div>
+      <div v-else-if="error" class="empty-state error-state"><b>材料暂时无法读取</b><p>{{ error }}</p></div>
+      <div v-else-if="!filtered.length" class="empty-state"><b>没有符合条件的材料</b><p>请调整关键词或处理状态后再试。</p></div>
       <div class="pagination">
         <span>共 {{ filtered.length }} 条</span>
         <div>

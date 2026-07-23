@@ -43,7 +43,7 @@ onMounted(async () => {
 </script>
 <template>
   <div>
-    <PageHeader title="AI 处理结果" description="浦江街道老年补贴办理通知.pdf"
+    <PageHeader title="AI 处理结果" description="查看结构化字段、通俗版摘要和办理步骤。" :breadcrumbs="['材料管理', '处理结果']" status="待审核"
       ><RouterLink class="btn primary" :to="`/documents/${documentId}/review`"
         >进入对照审核<ArrowRight :size="17" /></RouterLink
     ></PageHeader>
