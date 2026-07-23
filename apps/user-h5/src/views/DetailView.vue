@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
 import { fetchDetail, setFavorite } from "../api";
@@ -23,6 +23,9 @@ const route = useRoute();
 const font = ref(Number(localStorage.getItem("jianda_font") || 18));
 const favorite = ref(false);
 const speaking = ref(false);
+const loading = ref(true);
+const speechError = ref("");
+const isNews = computed(() => route.path.startsWith("/news/"));
 const error = ref("");
 const item = ref<any>({
   id: 0,
@@ -69,6 +72,8 @@ onMounted(async () => {
     favorite.value = localStorage.getItem(`favorite_${item.value.id}`) === "1";
   } catch {
     error.value = "内容暂时无法读取，可能已撤回";
+  } finally {
+    loading.value = false;
   }
 });
 async function toggleFav() {
@@ -82,7 +87,10 @@ async function toggleFav() {
   }
 }
 function speak() {
-  if (!("speechSynthesis" in window)) return;
+  if (!("speechSynthesis" in window)) {
+    speechError.value = "当前浏览器不支持语音朗读，您仍可使用大字模式阅读。";
+    return;
+  }
   if (speaking.value) {
     speechSynthesis.pause();
     speaking.value = false;
@@ -115,7 +123,7 @@ onBeforeUnmount(stop);
     <main class="reader">
 
       <article class="article-head">
-        <span class="category-text">{{ item.category }} · 办事指南</span>
+        <span class="category-text">{{ item.category }} · {{ isNews ? "权威资讯" : "办事指南" }}</span>
         <h1>{{ item.title }}</h1>
         <div class="source">
           <ShieldCheck /><span
@@ -144,7 +152,12 @@ onBeforeUnmount(stop);
           ><FileText /><span>看原文</span></RouterLink
         >
       </nav>
-      <p v-if="error" class="warm-tip">{{ error }}</p>
+      <div v-if="loading" class="detail-skeleton" aria-label="正在加载详情"><i v-for="n in 5" :key="n"></i></div>
+      <section v-else-if="error" class="withdrawn-state" role="status">
+        <TriangleAlert /><h2>这条内容当前无法查看</h2><p>{{ error }}</p><RouterLink to="/">返回首页查看其他信息</RouterLink>
+      </section>
+      <p v-if="speechError" class="warm-tip">{{ speechError }}</p>
+      <template v-if="!loading && !error">
       <section class="summary-block">
         <h2>三句话看懂</h2>
         <ol>
@@ -222,9 +235,13 @@ onBeforeUnmount(stop);
           ><small>共 {{ item.page_count || 1 }} 页，可核对原文内容</small></span
         ><ChevronRight
       /></RouterLink>
-      <p class="disclaimer">
-        内容由简达整理并经人工审核，具体办理要求以服务窗口最新规定为准。
-      </p>
+      <p class="disclaimer">内容由简达整理并经人工审核，具体要求以权威来源最新规定为准。</p>
+      <nav class="detail-action-bar" aria-label="详情操作">
+        <button type="button" @click="speak"><Volume2 /><span>{{ speaking ? "暂停" : "听全文" }}</span></button>
+        <button type="button" @click="toggleFav"><Heart :fill="favorite ? 'currentColor' : 'none'" /><span>{{ favorite ? "已收藏" : "收藏" }}</span></button>
+        <RouterLink :to="`/original/${item.slug}`"><FileText /><span>看原文</span></RouterLink>
+      </nav>
+      </template>
     </main>
   </div>
 </template>
