@@ -102,6 +102,62 @@ class CoreFlowIntegrationTest {
                 .andExpect(jsonPath("$.data.generated.STEP_CARDS[0].title").value("准备材料"));
     }
 
+    @Test
+    void aiFailureMarksDocumentAndJobFailedWithNaturalMessage() throws Exception {
+        String auth = "Bearer " + login();
+        String created = mvc.perform(post("/api/documents").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"AI不可用验收材料\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "验收材料.png", "image/png", "image-content".getBytes());
+        mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(file)
+                        .header("Authorization", auth).param("manualText", "用于验证 AI 服务不可用时的任务状态。"))
+                .andExpect(status().isOk());
+
+        when(aiClient.analyze(anyString(), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("AI service unavailable"));
+        mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value("AI 服务暂时不可用，任务已标记失败，可稍后重试"));
+        mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.processing_status").value("FAILED"));
+        mvc.perform(get("/api/documents/{id}/jobs", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].status").value("FAILED"))
+                .andExpect(jsonPath("$.data[0].error_message").isNotEmpty());
+    }
+
+    @Test
+    void uploadAcceptsImagesAndRejectsUnsupportedFileType() throws Exception {
+        String auth = "Bearer " + login();
+        for (String extension : List.of("png", "jpg")) {
+            String created = mvc.perform(post("/api/documents").header("Authorization", auth)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"title\":\"图片上传验收-" + extension + "\"}"))
+                    .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+            MockMultipartFile image = new MockMultipartFile(
+                    "file", "材料." + extension, "image/" + extension, "image-content".getBytes());
+            mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(image)
+                            .header("Authorization", auth))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.file_name").value("材料." + extension));
+        }
+
+        String created = mvc.perform(post("/api/documents").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"非法格式验收\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+        MockMultipartFile text = new MockMultipartFile(
+                "file", "材料.txt", "text/plain", "not-supported".getBytes());
+        mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(text)
+                        .header("Authorization", auth))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("仅支持 PDF、PNG、JPG 文件"));
+    }
+
     private String login() throws Exception {
         String body = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"org_admin\",\"password\":\"Jianda@123\"}"))

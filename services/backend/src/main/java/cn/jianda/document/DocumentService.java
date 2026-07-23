@@ -103,7 +103,7 @@ public class DocumentService {
         return detail(id, user);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     @SuppressWarnings("unchecked")
     public Map<String, Object> process(long id, AuthUser user) {
         Map<String, Object> document = detail(id, user);

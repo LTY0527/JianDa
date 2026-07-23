@@ -13,7 +13,9 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> business(BusinessException exception) {
-        return ResponseEntity.badRequest().body(ApiResponse.error(exception.getCode(), exception.getMessage()));
+        HttpStatus status = HttpStatus.resolve(exception.getCode());
+        return ResponseEntity.status(status == null ? HttpStatus.BAD_REQUEST : status)
+                .body(ApiResponse.error(exception.getCode(), exception.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -38,4 +40,3 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.error(500, "服务暂时不可用，请稍后重试"));
     }
 }
-
