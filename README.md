@@ -190,9 +190,19 @@ Remove-Item Env:PIP_PROXY -ErrorAction SilentlyContinue
 ```powershell
 npm run typecheck
 npm run build
+npm run test:e2e
 cd services\backend; mvn test; mvn package
 cd ..\ai-service; & ".\.venv\Scripts\python.exe" -m pytest -q
 ```
+
+Phase 7.3 已完成 375×812、768×1024、1440×900 三档视口和核心业务闭环验收。验收清单、缺陷台账、最终报告及 19 张真实运行截图分别位于：
+
+- `docs/PHASE7_3_ACCEPTANCE_CHECKLIST.md`
+- `docs/PHASE7_3_ISSUES.md`
+- `docs/PHASE7_3_ACCEPTANCE_REPORT.md`
+- `artifacts/phase7-3/`
+
+当前结论为“通过：可以进入 Phase 8”；真实 iPhone/Android、目标老年用户可用性和业务发布口径仍需人工确认。
 
 ## 数据与安全
 
