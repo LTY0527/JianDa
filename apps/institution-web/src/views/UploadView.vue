@@ -60,7 +60,7 @@ async function submit() {
             <b>{{ file.name }}</b
             ><small>{{ (file.size / 1024).toFixed(1) }} KB · 等待上传</small>
           </div>
-          <button @click="file = null"><X /></button>
+          <button type="button" aria-label="移除已选文件" @click="file = null"><X /></button>
         </div>
       </div>
       <label class="field"
