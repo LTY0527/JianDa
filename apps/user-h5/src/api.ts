@@ -1,12 +1,11 @@
 import axios from "axios";
+import { getOrCreateAnonymousUserId } from "./utils/visitorId";
 
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8080/api",
   timeout: 10000,
 });
-const anonymousUser =
-  localStorage.getItem("jianda_anonymous_user") || crypto.randomUUID();
-localStorage.setItem("jianda_anonymous_user", anonymousUser);
+const anonymousUser = getOrCreateAnonymousUserId();
 client.defaults.headers.common["X-Anonymous-User"] = anonymousUser;
 
 export interface PublicItem {

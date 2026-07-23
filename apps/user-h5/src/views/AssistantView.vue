@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
 import { askAssistant, fetchAssistantSuggestions, fetchDetail, type AssistantCitation } from "../api";
+import { createUuid } from "../utils/visitorId";
 import { BookOpenCheck, ChevronRight, CircleAlert, Clock3, MessageCircleQuestion, Mic, Send, Trash2 } from "lucide-vue-next";
 
 interface ConversationMessage {
@@ -43,14 +44,14 @@ async function submit(value = question.value) {
   if (!text || busy.value) return;
   question.value = "";
   error.value = "";
-  messages.value.push({ id: crypto.randomUUID(), role: "user", text, createdAt: new Date().toISOString() });
+  messages.value.push({ id: createUuid(), role: "user", text, createdAt: new Date().toISOString() });
   saveSession();
   busy.value = true;
   await scrollToLatest();
   try {
     const reply = await askAssistant(text, contextSlug.value);
     messages.value.push({
-      id: crypto.randomUUID(),
+      id: createUuid(),
       role: "assistant",
       text: reply.answer,
       citations: reply.citations,
