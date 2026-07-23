@@ -19,6 +19,22 @@ export interface PublicItem {
   published_at: string;
 }
 
+export interface AssistantCitation {
+  title: string;
+  slug: string;
+  kind: "news" | "guide";
+  category: string;
+  sourceName: string;
+  publishedAt: string;
+  quote: string;
+}
+
+export interface AssistantReply {
+  answer: string;
+  citations: AssistantCitation[];
+  disclaimer: string;
+}
+
 export async function fetchItems(category?: string): Promise<PublicItem[]> {
   const response = await client.get("/public/items", {
     params: category && category !== "全部" ? { category } : {},
@@ -44,4 +60,20 @@ export async function setFavorite(
     url: `/public/items/${id}/favorite`,
     method: favorite ? "POST" : "DELETE",
   });
+}
+
+export async function fetchAssistantSuggestions(): Promise<string[]> {
+  const response = await client.get("/public/assistant/suggestions");
+  return response.data.data;
+}
+
+export async function askAssistant(
+  message: string,
+  contextSlug?: string,
+): Promise<AssistantReply> {
+  const response = await client.post("/public/assistant/chat", {
+    message,
+    contextSlug: contextSlug || undefined,
+  });
+  return response.data.data;
 }
