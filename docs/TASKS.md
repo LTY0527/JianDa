@@ -186,4 +186,14 @@
 
 ## 当前最早未完成任务
 
-Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户明确启动；进入前先完成 iPhone Safari、Android Chrome 与目标老年用户真机抽检，并由业务人员确认医疗、反诈和政策文案。本轮未修改 Docker、Nginx、生产环境变量、服务端口或启停脚本。
+Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户明确启动；进入前先完成 iPhone Safari、Android Chrome 与目标老年用户真机抽检，并由业务人员确认医疗、反诈和政策文案。Phase 7.3 验收阶段未修改 Docker、Nginx、生产环境变量、服务端口或启停脚本。
+
+## Phase 7.3 局域网真机兼容补充
+
+- [x] 游客 ID 独立封装，依次使用 `crypto.randomUUID`、`crypto.getRandomValues` 和 UUID 格式最终兜底。
+- [x] 已有游客 ID 直接复用；明确其只用于匿名收藏、历史和偏好，不作为认证凭证。
+- [x] 助手会话消息 ID 复用同一兼容生成函数，普通 HTTP 下不再直接依赖 `randomUUID`。
+- [x] 增加 `dev:h5:lan`、环境变量 API 地址和可配置的 Spring Boot CORS 显式白名单。
+- [x] 生产配置拒绝任意 Origin 通配符，新增允许/拒绝 Origin 的后端集成测试。
+- [x] 增加普通 HTTP 缺失或异常 Web Crypto 场景，以及收藏、历史、偏好持久化的 Playwright 回归。
+- [ ] 待项目所在真实局域网完成 iPhone Safari / Android Chrome 人工访问抽检。

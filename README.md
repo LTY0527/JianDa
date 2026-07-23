@@ -106,6 +106,34 @@ npm run dev:h5
 - FastAPI 文档：`http://127.0.0.1:8001/docs`
 - FastAPI 健康检查：`http://127.0.0.1:8001/health`
 
+## 手机真机测试
+
+手机和电脑需连接同一局域网。先用 `ipconfig` 或下面的 PowerShell 命令确认电脑的局域网 IPv4 地址，不要把具体 `192.168.*` 地址提交到仓库：
+
+```powershell
+Get-NetIPAddress -AddressFamily IPv4 |
+  Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
+  Select-Object InterfaceAlias, IPAddress
+```
+
+在启动服务的同一个 PowerShell 会话中配置手机实际访问的 API 地址和后端显式 CORS 白名单。将占位文字替换为本机当前局域网 IP：
+
+```powershell
+$lanIp = "电脑局域网IP"
+$env:VITE_API_BASE_URL = "http://${lanIp}:8080/api"
+$env:JIANDA_CORS_ALLOWED_ORIGINS = "http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5173,http://localhost:5174,http://${lanIp}:5174"
+./scripts/dev.ps1
+```
+
+只启动用户端时也可运行 `npm run dev:h5:lan`；后端仍需在带有上述 CORS 环境变量的终端中启动。随后在手机浏览器验证：
+
+- 用户端：`http://电脑局域网IP:5174`
+- 公开内容接口：`http://电脑局域网IP:8080/api/public/items`
+
+`VITE_API_BASE_URL` 必须在启动 Vite 前设置，因为手机上的 `127.0.0.1` 指向手机自身。开发和生产环境均采用显式 Origin 白名单，禁止使用 `*`；生产部署应只填写真实受信域名。若页面或接口无法连接，请检查 Windows 防火墙是否允许当前 Node.js、Java 进程或 5174、8080 端口的局域网入站访问。
+
+普通 HTTP 局域网下部分浏览器不提供 `crypto.randomUUID`，用户端会自动改用 Web Crypto 随机字节并提供最终兼容兜底，不会在 Vue 挂载前白屏。已保存的游客 ID 会直接复用，它只关联当前浏览器中的匿名收藏、历史和偏好，不是身份认证凭证。原有 `npm run dev:h5` 和 localhost 开发方式保持不变。
+
 如果终端关闭后仍有子进程占用开发端口，可运行：
 
 ```powershell
