@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
 import { AssistantApiError, askAssistant, fetchAssistantSuggestions, fetchDetail, type AssistantCitation } from "../api";
 import { createUuid } from "../utils/visitorId";
-import { BookOpenCheck, ChevronRight, CircleAlert, Clock3, MessageCircleQuestion, Mic, Send, Trash2 } from "lucide-vue-next";
+import SpeechRateSelector from "../components/SpeechRateSelector.vue";
+import { useSpeechPlayer } from "../composables/useSpeechPlayer";
+import { BookOpenCheck, ChevronRight, CircleAlert, Clock3, MessageCircleQuestion, Mic, Pause, Play, Send, Square, Trash2, Volume2 } from "lucide-vue-next";
 
 interface ConversationMessage {
   id: string;
@@ -27,6 +29,8 @@ const error = ref("");
 const failedQuestion = ref("");
 const conversation = ref<HTMLElement>();
 const contextTitle = ref("");
+const spokenMessageId = ref("");
+const speech = useSpeechPlayer(() => { spokenMessageId.value = ""; });
 const contextSlug = computed(() => String(route.query.about || ""));
 const speechSupported = "SpeechRecognition" in window || "webkitSpeechRecognition" in window;
 
@@ -88,6 +92,24 @@ async function submit(value = question.value, recordUser = true) {
 function retryFailedQuestion() {
   if (failedQuestion.value) void submit(failedQuestion.value, false);
 }
+function answerSpeechText(message: ConversationMessage) {
+  return [message.text, message.disclaimer].filter(Boolean).join("。");
+}
+function toggleAnswerSpeech(message: ConversationMessage) {
+  if (spokenMessageId.value === message.id) {
+    speech.toggle(answerSpeechText(message));
+    return;
+  }
+  spokenMessageId.value = message.id;
+  speech.play(answerSpeechText(message));
+}
+function stopAnswerSpeech() {
+  speech.stop();
+  spokenMessageId.value = "";
+}
+watch(speech.status, (status) => {
+  if (status === "idle") spokenMessageId.value = "";
+});
 function clearSession() {
   if (messages.value.length && !window.confirm("确定清空本机保存的本次问答记录吗？")) return;
   messages.value = [];
@@ -161,6 +183,14 @@ onMounted(async () => {
           <p v-if="message.role === 'assistant' && message.mode === 'retrieval'" class="assistant-mode">
             当前使用已审核内容检索回答
           </p>
+          <div v-if="message.role === 'assistant'" class="assistant-speech">
+            <button type="button" @click="toggleAnswerSpeech(message)">
+              <component :is="spokenMessageId === message.id && speech.status.value === 'playing' ? Pause : spokenMessageId === message.id && speech.status.value === 'paused' ? Play : Volume2" />
+              {{ spokenMessageId === message.id && speech.status.value === "playing" ? "暂停播报" : spokenMessageId === message.id && speech.status.value === "paused" ? "继续播报" : "朗读回答" }}
+            </button>
+            <button v-if="spokenMessageId === message.id && speech.isActive.value" type="button" @click="stopAnswerSpeech"><Square />停止</button>
+            <SpeechRateSelector :model-value="speech.rate.value" @select="speech.setRate" />
+          </div>
           <div v-if="message.citations?.length" class="assistant-citations">
             <h3>回答依据</h3>
             <RouterLink v-for="citation in message.citations" :key="citation.slug" :to="detailPath(citation)" class="assistant-citation">
@@ -178,6 +208,7 @@ onMounted(async () => {
         <span>{{ error }}</span>
         <button v-if="failedQuestion" type="button" :disabled="busy" @click="retryFailedQuestion">重新发送</button>
       </div>
+      <p v-if="speech.error.value" class="assistant-error" role="status">{{ speech.error.value }}</p>
 
       <section class="assistant-composer">
         <div class="assistant-session-bar">

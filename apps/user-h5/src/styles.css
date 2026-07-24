@@ -35,3 +35,7 @@
 .assistant-error{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .assistant-error button{flex:0 0 auto;min-height:48px;padding:0 14px;border:1px solid #b8594d;border-radius:7px;background:#fff;color:#8f352e;font-weight:700}
 @media(max-width:768px){.assistant-error{align-items:stretch;flex-direction:column}.assistant-error button{width:100%}}
+
+/* Phase 7.4 shared speech player */
+.speech-rate-selector{display:flex;align-items:center;gap:4px}.speech-rate-selector button{min-width:48px;min-height:48px;border:1px solid #c8d7d3;border-radius:7px;background:#fff;color:#415a54;font-size:14px}.speech-rate-selector button.active{border-color:#176b63;background:#e7f2f0;color:#155f57;font-weight:700}.reader-tools>.speech-rate-selector{flex:1.7;justify-content:center}.reader-tools>.speech-rate-selector button{flex:1;min-width:48px;padding:0 5px}.assistant-speech{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:10px}.assistant-speech>button{display:flex;align-items:center;gap:5px;min-height:48px;padding:0 12px;border:1px solid #bdd0cb;border-radius:7px;background:#fff;color:#176b63;font-weight:700}.assistant-speech>button svg{width:18px}.assistant-speech .speech-rate-selector{margin-left:auto}
+@media(max-width:768px){.assistant-speech .speech-rate-selector{width:100%;margin-left:0}.assistant-speech .speech-rate-selector button{flex:1}.reader-tools>.speech-rate-selector{display:none}}

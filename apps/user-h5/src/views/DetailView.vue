@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
 import { fetchDetail, setFavorite } from "../api";
 import { cleanDisplayTitle } from "../content";
 import { readerPreferences, recordVisit, saveFavorite } from "../library";
+import SpeechRateSelector from "../components/SpeechRateSelector.vue";
+import { useSpeechPlayer } from "../composables/useSpeechPlayer";
 import {
 
   ShieldCheck,
@@ -25,9 +27,8 @@ import {
 const route = useRoute();
 const font = ref(Number(localStorage.getItem("jianda_font") || 18));
 const favorite = ref(false);
-const speaking = ref(false);
 const loading = ref(true);
-const speechError = ref("");
+const speech = useSpeechPlayer();
 const isNews = computed(() => route.path.startsWith("/news/"));
 const error = ref("");
 const item = ref<any>({
@@ -45,6 +46,13 @@ const detail = ref<{
   warnings: string[];
   terms: Record<string, string>;
 }>({ summary: [], materials: [], steps: [], warnings: [], terms: {} });
+const speechText = computed(() =>
+  [
+    cleanDisplayTitle(item.value.title),
+    ...detail.value.summary,
+    ...detail.value.steps.flatMap((step) => step),
+  ].join("。"),
+);
 onMounted(async () => {
   try {
     item.value = await fetchDetail(String(route.params.slug));
@@ -79,7 +87,9 @@ onMounted(async () => {
       : [];
     favorite.value = localStorage.getItem(`favorite_${item.value.id}`) === "1";
     recordVisit(item.value as any);
-    if (readerPreferences().autoRead) window.setTimeout(speak, 250);
+    if (readerPreferences().autoRead) {
+      window.setTimeout(() => speech.play(speechText.value), 250);
+    }
   } catch {
     error.value = "内容暂时无法读取，可能已撤回";
   } finally {
@@ -97,36 +107,10 @@ async function toggleFav() {
     error.value = "收藏操作失败，请稍后重试";
   }
 }
-function speak() {
-  if (!("speechSynthesis" in window)) {
-    speechError.value = "当前浏览器不支持语音朗读，您仍可使用大字阅读。";
-    return;
-  }
-  if (speaking.value) {
-    speechSynthesis.pause();
-    speaking.value = false;
-    return;
-  }
-  const utterance = new SpeechSynthesisUtterance(
-    detail.value.summary.join("。") +
-      detail.value.steps.map((step) => step.join("。")).join("。"),
-  );
-  utterance.lang = "zh-CN";
-  utterance.rate = Number(localStorage.getItem("jianda_rate") || 0.9);
-  utterance.onend = () => (speaking.value = false);
-  speechSynthesis.cancel();
-  speechSynthesis.speak(utterance);
-  speaking.value = true;
-}
-function stop() {
-  speechSynthesis?.cancel();
-  speaking.value = false;
-}
 function grow() {
   font.value = font.value >= 24 ? 18 : font.value + 2;
   localStorage.setItem("jianda_font", String(font.value));
 }
-onBeforeUnmount(stop);
 </script>
 <template>
   <div class="detail-page" :style="{ '--reader-size': font + 'px' }">
@@ -147,13 +131,13 @@ onBeforeUnmount(stop);
         </div>
       </article>
       <nav class="reader-tools">
-        <button @click="speak" :class="{ active: speaking }">
-          <component :is="speaking ? Pause : Volume2" /><span>{{
-            speaking ? "暂停" : "听全文"
+        <button @click="speech.toggle(speechText)" :class="{ active: speech.isActive.value }">
+          <component :is="speech.status.value === 'playing' ? Pause : Volume2" /><span>{{
+            speech.status.value === "playing" ? "暂停" : speech.status.value === "paused" ? "继续" : "听全文"
           }}</span></button
-        ><button v-if="speaking" @click="stop">
+        ><button v-if="speech.isActive.value" @click="speech.stop">
           <Square /><span>停止</span></button
-        ><button @click="grow">
+        ><SpeechRateSelector :model-value="speech.rate.value" @select="speech.setRate" /><button @click="grow">
           <Type /><span>{{ font }}px</span></button
         ><button @click="toggleFav" :class="{ active: favorite }">
           <Heart :fill="favorite ? 'currentColor' : 'none'" /><span>{{
@@ -167,7 +151,7 @@ onBeforeUnmount(stop);
       <section v-else-if="error" class="withdrawn-state" role="status">
         <TriangleAlert /><h2>这条内容当前无法查看</h2><p>{{ error }}</p><RouterLink to="/">返回首页查看其他信息</RouterLink>
       </section>
-      <p v-if="speechError" class="warm-tip">{{ speechError }}</p>
+      <p v-if="speech.error.value" class="warm-tip">{{ speech.error.value }}</p>
       <template v-if="!loading && !error">
       <section class="summary-block">
         <h2>三句话看懂</h2>
@@ -249,7 +233,7 @@ onBeforeUnmount(stop);
       /></RouterLink>
       <p class="disclaimer">内容由简达整理并经人工审核，具体要求以权威来源最新规定为准。</p>
       <nav class="detail-action-bar" aria-label="详情操作">
-        <button type="button" @click="speak"><Volume2 /><span>{{ speaking ? "暂停" : "听全文" }}</span></button>
+        <button type="button" @click="speech.toggle(speechText)"><Volume2 /><span>{{ speech.status.value === "playing" ? "暂停" : speech.status.value === "paused" ? "继续" : "听全文" }}</span></button>
         <button type="button" @click="grow"><Type /><span>{{ font }}px</span></button>
         <button type="button" @click="toggleFav"><Heart :fill="favorite ? 'currentColor' : 'none'" /><span>{{ favorite ? "已收藏" : "收藏" }}</span></button>
         <RouterLink :to="{ path: `/original/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"><FileText /><span>查看原文</span></RouterLink>
