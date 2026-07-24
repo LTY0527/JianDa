@@ -5,7 +5,7 @@ import BottomNav from "../components/BottomNav.vue";
 import ContentCard from "../components/ContentCard.vue";
 import { fetchItems, type PublicItem } from "../api";
 import { contentKind, importanceScore } from "../content";
-import { historyItems, readerPreferences } from "../library";
+import { readerPreferences } from "../library";
 import { Search, Landmark, HeartPulse, HandHeart, ShieldAlert, Wrench, Drama, ChevronRight, Volume2, Type, CalendarDays, BellRing, ArrowRight, WifiOff } from "lucide-vue-next";
 const items = ref<PublicItem[]>([]);
 const loading = ref(true);
@@ -15,10 +15,8 @@ const today = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", 
 const hour = new Date().getHours();
 const greeting = hour < 11 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
 const alerts = computed(() => [...items.value].filter((item) => ["反诈", "健康", "生活服务"].includes(item.category)).sort((a,b) => importanceScore(b)-importanceScore(a)).slice(0,2));
-const todayReads = computed(() => { const preferred = readerPreferences().channels.map((item) => item === "政策" ? "时政" : item === "生活" ? "生活服务" : item); return [...items.value].sort((a,b) => (importanceScore(b) + (preferred.includes(b.category) ? 15 : 0)) - (importanceScore(a) + (preferred.includes(a.category) ? 15 : 0))).slice(0,4); });
-const guides = computed(() => items.value.filter((item) => ["养老", "生活服务", "健康"].includes(item.category)).slice(0,3));
-const news = computed(() => items.value.filter((item) => contentKind(item) === "news").slice(0,4));
-const recent = computed(() => { if (!readerPreferences().showRecent) return []; const ids = new Set(items.value.map((item) => item.id)); return historyItems().filter((item) => ids.has(item.id)).slice(0,4); });
+const todayReads = computed(() => { const preferred = readerPreferences().channels.map((item) => item === "政策" ? "时政" : item === "生活" ? "生活服务" : item); return [...items.value].filter((item) => contentKind(item) === "news").sort((a,b) => (importanceScore(b) + (preferred.includes(b.category) ? 15 : 0)) - (importanceScore(a) + (preferred.includes(a.category) ? 15 : 0))).slice(0,3); });
+const guides = computed(() => items.value.filter((item) => ["养老", "生活服务", "健康"].includes(item.category)).slice(0,2));
 async function load() { loading.value = true; error.value = ""; try { items.value = await fetchItems(); } catch { error.value = "暂时无法读取权威内容，请稍后再试"; } finally { loading.value = false; } }
 onMounted(load);
 </script>
@@ -31,7 +29,6 @@ onMounted(load);
     <section v-if="alerts.length" class="important-alerts"><header><BellRing /><div><h2>重要提醒</h2><p>请优先留意安全、健康和公共服务变化</p></div></header><article v-for="alert in alerts" :key="alert.id"><span>{{ alert.category }}</span><div><h3>{{ alert.title }}</h3><p>{{ alert.summary }}</p><small>{{ alert.source_name }} · {{ String(alert.published_at).slice(0,10) }}</small></div><RouterLink :to="`/${contentKind(alert)}/${alert.slug}`">立即查看<ArrowRight /></RouterLink></article></section>
     <section class="home-stream"><header class="stream-heading"><div><h2>今日必看</h2><p>按重要程度、新鲜度和已读状态排序</p></div><RouterLink to="/news">进入资讯<ChevronRight /></RouterLink></header><ContentCard v-for="item in todayReads" :key="item.id" :item="item" actions /></section>
     <section class="service-brief"><header class="stream-heading"><div><h2>办事快报</h2><p>材料、地点和步骤，提前看清楚</p></div><RouterLink to="/services">全部事项<ChevronRight /></RouterLink></header><div class="service-brief__grid"><RouterLink v-for="item in guides" :key="item.id" :to="`/guide/${item.slug}`"><span>{{ item.category }}</span><h3>{{ item.title }}</h3><p>{{ item.summary }}</p><small>{{ item.source_name }}</small><b>查看怎么做<ArrowRight /></b></RouterLink></div><div v-if="!guides.length" class="compact-empty">当前没有已发布办事事项</div></section>
-    <section v-if="recent.length" class="home-stream recent-stream"><header class="stream-heading"><div><h2>最近浏览</h2><p>继续查看您在本机打开过的内容</p></div><RouterLink to="/history">查看历史<ChevronRight /></RouterLink></header><ContentCard v-for="item in recent" :key="item.id" :item="item" /></section>
-    <section class="home-stream"><header class="stream-heading"><div><h2>权威资讯</h2><p>来自政府、医院和公共服务机构</p></div><RouterLink to="/news">查看更多<ChevronRight /></RouterLink></header><ContentCard v-for="item in news" :key="item.id" :item="item" kind="news" actions /><div v-if="!news.length" class="compact-empty">当前没有已发布资讯</div></section>
+    <RouterLink class="home-all-news" to="/news">查看全部权威资讯<ChevronRight /></RouterLink>
   </template>
 </main><BottomNav /></div></template>
