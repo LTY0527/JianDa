@@ -29,3 +29,9 @@
 :where(a,button,input,select,textarea):focus-visible{outline:3px solid #d97706;outline-offset:3px}
 .switch{position:relative}.switch input{display:block;position:absolute;width:1px;height:1px;opacity:0}.switch input:focus-visible+i{outline:3px solid #d97706;outline-offset:3px}
 .filter-tabs button{min-height:48px}
+
+/* Phase 7.4 assistant resilience */
+.assistant-mode{display:inline-flex;margin:8px 0 0;padding:5px 8px;border-radius:6px;background:#eaf4f1;color:#245f57;font-size:13px}
+.assistant-error{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.assistant-error button{flex:0 0 auto;min-height:48px;padding:0 14px;border:1px solid #b8594d;border-radius:7px;background:#fff;color:#8f352e;font-weight:700}
+@media(max-width:768px){.assistant-error{align-items:stretch;flex-direction:column}.assistant-error button{width:100%}}

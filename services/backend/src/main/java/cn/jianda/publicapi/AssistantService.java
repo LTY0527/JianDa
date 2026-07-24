@@ -76,6 +76,7 @@ public class AssistantService {
         result.put("answer", answer);
         result.put("citations", citations);
         result.put("disclaimer", DISCLAIMER);
+        result.put("mode", "retrieval");
         return result;
     }
 

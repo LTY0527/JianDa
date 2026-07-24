@@ -32,6 +32,24 @@ export interface AssistantReply {
   answer: string;
   citations: AssistantCitation[];
   disclaimer: string;
+  mode: "retrieval" | "ai";
+}
+
+export type AssistantFailureReason =
+  | "network"
+  | "server"
+  | "withdrawn"
+  | "busy"
+  | "format";
+
+export class AssistantApiError extends Error {
+  constructor(
+    public readonly reason: AssistantFailureReason,
+    public readonly status?: number,
+  ) {
+    super(reason);
+    this.name = "AssistantApiError";
+  }
 }
 
 export async function fetchItems(category?: string): Promise<PublicItem[]> {
@@ -70,9 +88,34 @@ export async function askAssistant(
   message: string,
   contextSlug?: string,
 ): Promise<AssistantReply> {
-  const response = await client.post("/public/assistant/chat", {
-    message,
-    contextSlug: contextSlug || undefined,
-  });
-  return response.data.data;
+  try {
+    const response = await client.post("/public/assistant/chat", {
+      message,
+      contextSlug: contextSlug || undefined,
+    });
+    const data = response.data?.data;
+    if (
+      !data ||
+      typeof data.answer !== "string" ||
+      !Array.isArray(data.citations) ||
+      typeof data.disclaimer !== "string" ||
+      !["retrieval", "ai"].includes(data.mode)
+    ) {
+      throw new AssistantApiError("format");
+    }
+    return data as AssistantReply;
+  } catch (error) {
+    if (error instanceof AssistantApiError) throw error;
+    if (!axios.isAxiosError(error) || !error.response) {
+      throw new AssistantApiError("network");
+    }
+    const status = error.response.status;
+    if (status === 404 || status === 410) {
+      throw new AssistantApiError("withdrawn", status);
+    }
+    if (status === 429 || status === 503 || status === 504) {
+      throw new AssistantApiError("busy", status);
+    }
+    throw new AssistantApiError("server", status);
+  }
 }

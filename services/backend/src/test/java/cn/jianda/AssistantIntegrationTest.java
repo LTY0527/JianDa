@@ -46,8 +46,9 @@ class AssistantIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"message":"有哪些反诈提醒？"}
-                                """))
+                """))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
                 .andExpect(jsonPath("$.data.citations[0].slug").value("assistant-test-published"))
                 .andExpect(jsonPath("$.data.citations[0].quote").value(org.hamcrest.Matchers.containsString("验证码")))
                 .andExpect(jsonPath("$.data.citations[*].slug",
@@ -60,8 +61,9 @@ class AssistantIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"message":"火星房产投资收益是多少？"}
-                                """))
+                """))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
                 .andExpect(jsonPath("$.data.citations.length()").value(0))
                 .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("没有找到足够可靠的依据")));
     }

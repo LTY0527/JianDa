@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
-import { askAssistant, fetchAssistantSuggestions, fetchDetail, type AssistantCitation } from "../api";
+import { AssistantApiError, askAssistant, fetchAssistantSuggestions, fetchDetail, type AssistantCitation } from "../api";
 import { createUuid } from "../utils/visitorId";
 import { BookOpenCheck, ChevronRight, CircleAlert, Clock3, MessageCircleQuestion, Mic, Send, Trash2 } from "lucide-vue-next";
 
@@ -13,6 +13,7 @@ interface ConversationMessage {
   text: string;
   citations?: AssistantCitation[];
   disclaimer?: string;
+  mode?: "retrieval" | "ai";
   createdAt: string;
 }
 
@@ -23,6 +24,7 @@ const suggestions = ref<string[]>([]);
 const messages = ref<ConversationMessage[]>(readSession());
 const busy = ref(false);
 const error = ref("");
+const failedQuestion = ref("");
 const conversation = ref<HTMLElement>();
 const contextTitle = ref("");
 const contextSlug = computed(() => String(route.query.about || ""));
@@ -39,13 +41,26 @@ async function scrollToLatest() {
   await nextTick();
   conversation.value?.scrollTo({ top: conversation.value.scrollHeight, behavior: "smooth" });
 }
-async function submit(value = question.value) {
+function assistantErrorMessage(reason: AssistantApiError["reason"]) {
+  const messages: Record<AssistantApiError["reason"], string> = {
+    network: "网络连接失败，请检查当前网络后重新发送。",
+    server: "助手服务返回异常，已保留您的问题，请稍后重新发送。",
+    withdrawn: "您询问的内容可能已经撤回，请返回已发布内容后重新选择。",
+    busy: "助手服务繁忙，请稍后重新发送。",
+    format: "助手返回的内容格式异常，请稍后重新发送。",
+  };
+  return messages[reason];
+}
+async function submit(value = question.value, recordUser = true) {
   const text = value.trim();
   if (!text || busy.value) return;
-  question.value = "";
+  if (recordUser) question.value = "";
   error.value = "";
-  messages.value.push({ id: createUuid(), role: "user", text, createdAt: new Date().toISOString() });
-  saveSession();
+  failedQuestion.value = "";
+  if (recordUser) {
+    messages.value.push({ id: createUuid(), role: "user", text, createdAt: new Date().toISOString() });
+    saveSession();
+  }
   busy.value = true;
   await scrollToLatest();
   try {
@@ -56,15 +71,22 @@ async function submit(value = question.value) {
       text: reply.answer,
       citations: reply.citations,
       disclaimer: reply.disclaimer,
+      mode: reply.mode,
       createdAt: new Date().toISOString(),
     });
     saveSession();
-  } catch {
-    error.value = "暂时无法连接简达助手，请稍后重试。已输入的问题仍保存在本机。";
+  } catch (requestError) {
+    failedQuestion.value = text;
+    error.value = requestError instanceof AssistantApiError
+      ? assistantErrorMessage(requestError.reason)
+      : assistantErrorMessage("format");
   } finally {
     busy.value = false;
     await scrollToLatest();
   }
+}
+function retryFailedQuestion() {
+  if (failedQuestion.value) void submit(failedQuestion.value, false);
 }
 function clearSession() {
   if (messages.value.length && !window.confirm("确定清空本机保存的本次问答记录吗？")) return;
@@ -136,6 +158,9 @@ onMounted(async () => {
         <article v-for="message in messages" :key="message.id" class="assistant-message" :class="`assistant-message--${message.role}`">
           <small>{{ message.role === "user" ? "您" : "简达助手" }}</small>
           <div class="assistant-bubble">{{ message.text }}</div>
+          <p v-if="message.role === 'assistant' && message.mode === 'retrieval'" class="assistant-mode">
+            当前使用已审核内容检索回答
+          </p>
           <div v-if="message.citations?.length" class="assistant-citations">
             <h3>回答依据</h3>
             <RouterLink v-for="citation in message.citations" :key="citation.slug" :to="detailPath(citation)" class="assistant-citation">
@@ -149,7 +174,10 @@ onMounted(async () => {
         <div v-if="busy" class="assistant-thinking">正在查找已审核内容并核对来源…</div>
       </section>
 
-      <p v-if="error" class="assistant-error" role="alert">{{ error }}</p>
+      <div v-if="error" class="assistant-error" role="alert">
+        <span>{{ error }}</span>
+        <button v-if="failedQuestion" type="button" :disabled="busy" @click="retryFailedQuestion">重新发送</button>
+      </div>
 
       <section class="assistant-composer">
         <div class="assistant-session-bar">
