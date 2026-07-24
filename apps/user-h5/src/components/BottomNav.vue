@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { Home, Newspaper, MessageCircleQuestion, ClipboardList, UserRound } from "lucide-vue-next";
+import { Home, Headphones, MessageCircleQuestion, ClipboardList, UserRound } from "lucide-vue-next";
 import { useRoute } from "vue-router";
 const route = useRoute();
 const links = [
   { to: "/", icon: Home, label: "首页", matches: ["/"] },
-  { to: "/news", icon: Newspaper, label: "资讯", matches: ["/news", "/category"] },
+  { to: "/listen", icon: Headphones, label: "听一听", matches: ["/listen"] },
   { to: "/assistant", icon: MessageCircleQuestion, label: "简达助手", primary: true, matches: ["/assistant"] },
   { to: "/services", icon: ClipboardList, label: "办事", matches: ["/services", "/guide", "/steps"] },
   { to: "/profile", icon: UserRound, label: "我的", matches: ["/profile", "/favorites", "/history", "/settings"] },

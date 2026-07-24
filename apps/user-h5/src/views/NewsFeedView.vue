@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import H5Header from "../components/H5Header.vue";
+import AppTopBar from "../components/navigation/AppTopBar.vue";
 import BottomNav from "../components/BottomNav.vue";
 import ContentCard from "../components/ContentCard.vue";
 import { fetchItems, type PublicItem } from "../api";
@@ -25,7 +25,7 @@ async function load() { loading.value = true; error.value = ""; try { items.valu
 onMounted(load);
 </script>
 <template>
-  <div class="h5-page"><H5Header />
+  <div class="h5-page"><AppTopBar />
     <main class="h5-main feed-page">
       <header class="app-section-head"><Newspaper /><div><h1>权威资讯</h1><p>持续浏览经过人工审核的政策、健康和生活信息。</p></div><button class="icon-action" type="button" aria-label="刷新资讯" @click="load"><RefreshCw /></button></header>
       <label class="search-input"><Search /><input v-model="query" placeholder="搜索标题、摘要或来源" /></label>

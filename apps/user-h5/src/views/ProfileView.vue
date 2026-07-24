@@ -2,15 +2,16 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
-import { clearLocalLibrary, favoriteItems, historyItems } from "../library";
-import { UserRound, Heart, Clock3, Bell, Settings, SlidersHorizontal, Info, CircleHelp, ShieldCheck, ChevronRight, Trash2 } from "lucide-vue-next";
-const favoriteCount = ref(0); const historyCount = ref(0);
-function load(){ favoriteCount.value=favoriteItems().length; historyCount.value=historyItems().length; }
+import { clearLocalLibrary, favoriteItems, historyItems, listenHistoryItems } from "../library";
+import { UserRound, Heart, Clock3, Headphones, Bell, Settings, SlidersHorizontal, Info, CircleHelp, ShieldCheck, ChevronRight, Trash2 } from "lucide-vue-next";
+const favoriteCount = ref(0); const historyCount = ref(0); const listenCount = ref(0);
+function load(){ favoriteCount.value=favoriteItems().length; historyCount.value=historyItems().length; listenCount.value=listenHistoryItems().length; }
 function clear(){ if(window.confirm("确认清除本机收藏和浏览历史吗？阅读设置将保留。")){ clearLocalLibrary(); load(); } }
 onMounted(()=>{load();window.addEventListener("jianda-library-change",load)}); onUnmounted(()=>window.removeEventListener("jianda-library-change",load));
 const links = [
   ["/favorites", Heart, "我的收藏", "仍在公开的资讯与办事", () => `${favoriteCount.value} 条`],
   ["/history", Clock3, "历史浏览", "最近打开过的内容", () => `${historyCount.value} 条`],
+  ["/listen?tab=recent", Headphones, "最近收听", "继续播放在本机听过的内容", () => `${listenCount.value} 条`],
   ["/settings", Settings, "阅读与语音设置", "字号、对比度和朗读速度", () => ""],
   ["/settings", SlidersHorizontal, "内容偏好", "关注频道与首页最近浏览", () => ""],
 ] as const;

@@ -4,7 +4,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: "/", component: () => import("./views/HomeView.vue"), meta: { title: "首页", showBack: false } },
-    { path: "/news", component: () => import("./views/NewsFeedView.vue"), meta: { title: "权威资讯", showBack: false } },
+    { path: "/listen", component: () => import("./views/ListenView.vue"), meta: { title: "听一听", showBack: false } },
+    { path: "/news", component: () => import("./views/NewsFeedView.vue"), meta: { title: "权威资讯", showBack: true, backTo: "/" } },
     { path: "/assistant", component: () => import("./views/AssistantView.vue"), meta: { title: "简达助手", showBack: false } },
     { path: "/services", component: () => import("./views/ServicesView.vue"), meta: { title: "办事专区", showBack: false } },
     { path: "/profile", component: () => import("./views/ProfileView.vue"), meta: { title: "我的", showBack: false } },
