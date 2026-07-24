@@ -29,7 +29,7 @@ test.describe("H5 LAN HTTP compatibility", () => {
     await expect(page.locator(".content-row").first()).toBeVisible();
 
     await page.goto(`${h5Url}/services`);
-    await expect(page.getByRole("heading", { name: "办事专区" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "办事行动中心" })).toBeVisible();
     await expect(page.getByText(/\d+ 个事项/)).toBeVisible();
 
     await page.goto(`${h5Url}/assistant`);

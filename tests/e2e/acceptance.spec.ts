@@ -39,7 +39,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
       ["/", "下午好", "h5-home-375.png"],
       ["/news", "权威资讯", "h5-news-375.png"],
       ["/assistant", "简达助手", "h5-assistant-375.png"],
-      ["/services", "办事专区", "h5-services-375.png"],
+      ["/services", "办事行动中心", "h5-services-375.png"],
       ["/profile", "游客使用", "h5-profile-375.png"],
     ] as const;
 
@@ -187,7 +187,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     await expect(page.getByRole("button", { name: "较快" })).toHaveClass(/active/);
     await expect(page.getByRole("checkbox").first()).toBeChecked();
     await expect(page.getByRole("checkbox").nth(2)).not.toBeChecked();
-    expect(savedPreferences.rate).toBe("1.1");
+    expect(savedPreferences.rate).toBe("1.2");
     expect(savedPreferences.contrast).toBe("1");
     expect(savedPreferences.reader).toBeTruthy();
     expect(
@@ -231,7 +231,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     await page.route("**/api/public/assistant/chat", (route) => route.abort("timedout"));
     await page.getByLabel("输入您想了解的问题").fill("网络超时验收问题");
     await page.getByRole("button", { name: "发送问题" }).click();
-    await expect(page.getByText(/暂时无法连接简达助手/)).toBeVisible();
+    await expect(page.getByText(/网络连接失败，请检查当前网络后重新发送/)).toBeVisible();
   });
 
   test("语音不可用时有文字提示，键盘焦点清晰可见", async ({
@@ -239,12 +239,19 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     page,
   }) => {
     await context.addInitScript(() => {
-      delete (window as typeof window & { speechSynthesis?: unknown }).speechSynthesis;
+      Object.defineProperty(window, "speechSynthesis", {
+        configurable: true,
+        value: undefined,
+      });
+      Object.defineProperty(window, "SpeechSynthesisUtterance", {
+        configurable: true,
+        value: undefined,
+      });
     });
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`${h5Url}/guide/social-security-card-renewal`);
     await page.getByRole("button", { name: "听全文", exact: true }).click();
-    await expect(page.getByText(/当前浏览器不支持语音朗读/)).toBeVisible();
+    await expect(page.getByText(/当前浏览器不支持语音播报/)).toBeVisible();
     await page.keyboard.press("Tab");
     const focus = await page.evaluate(() => {
       const element = document.activeElement as HTMLElement;

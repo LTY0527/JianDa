@@ -32,8 +32,8 @@ export function splitSpeechText(text: string, maxLength = 160): string[] {
 export function useSpeechPlayer(onFinished?: () => void) {
   const supported = ref(
     typeof window !== "undefined" &&
-      "speechSynthesis" in window &&
-      "SpeechSynthesisUtterance" in window,
+      typeof window.speechSynthesis?.speak === "function" &&
+      typeof window.SpeechSynthesisUtterance === "function",
   );
   const status = ref<SpeechPlayerStatus>("idle");
   const error = ref("");
@@ -173,4 +173,3 @@ export function useSpeechPlayer(onFinished?: () => void) {
     setRate,
   };
 }
-
