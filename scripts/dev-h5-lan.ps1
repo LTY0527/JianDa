@@ -17,6 +17,31 @@ Remove-Item Env:VITE_API_BASE_URL -ErrorAction SilentlyContinue
 $env:VITE_PROXY_TARGET = $ProxyTarget
 
 function Find-LanIPv4 {
+    try {
+        $interfaces = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()
+        foreach ($networkInterface in $interfaces) {
+            if ($networkInterface.OperationalStatus -ne [System.Net.NetworkInformation.OperationalStatus]::Up) {
+                continue
+            }
+            $properties = $networkInterface.GetIPProperties()
+            if (-not ($properties.GatewayAddresses | Where-Object { $_.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork })) {
+                continue
+            }
+            $address = $properties.UnicastAddresses |
+                Where-Object {
+                    $_.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and
+                    -not [System.Net.IPAddress]::IsLoopback($_.Address) -and
+                    ($_.Address.ToString() -match "^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)")
+                } |
+                Select-Object -First 1
+            if ($address) {
+                return $address.Address.ToString()
+            }
+        }
+    } catch {
+        # Fall through to ipconfig for restricted or older Windows environments.
+    }
+
     $ipconfigText = (ipconfig | Out-String)
     $blocks = $ipconfigText -split "(\r?\n){2,}"
     foreach ($block in $blocks) {
