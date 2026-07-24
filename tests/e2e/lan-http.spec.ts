@@ -5,6 +5,56 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 test.describe("H5 LAN HTTP compatibility", () => {
+  test("returns non-empty UTF-8 JSON through the same-origin API proxy", async ({
+    request,
+  }) => {
+    const response = await request.get(`${h5Url}/api/public/items`);
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"].toLowerCase()).toContain(
+      "application/json;charset=utf-8",
+    );
+    const payload = await response.json();
+    expect(payload.data.length).toBeGreaterThan(0);
+    expect(payload.data[0].title).toMatch(/[\u4e00-\u9fff]/);
+  });
+
+  test("renders home, news, services and assistant content through the proxy", async ({
+    page,
+  }) => {
+    await page.goto(h5Url);
+    await expect(page.getByRole("heading", { name: "重要提醒" })).toBeVisible();
+
+    await page.goto(`${h5Url}/news`);
+    await expect(page.getByRole("heading", { name: "权威资讯" })).toBeVisible();
+    await expect(page.locator(".content-row").first()).toBeVisible();
+
+    await page.goto(`${h5Url}/services`);
+    await expect(page.getByRole("heading", { name: "办事专区" })).toBeVisible();
+    await expect(page.getByText(/\d+ 个事项/)).toBeVisible();
+
+    await page.goto(`${h5Url}/assistant`);
+    await expect(page.getByRole("heading", { name: "简达助手" })).toBeVisible();
+    await expect(page.locator(".assistant-suggestions button").first()).toBeVisible();
+  });
+
+  test("recovers when the home retry button reloads a failed API request", async ({
+    page,
+  }) => {
+    let failOnce = true;
+    await page.route("**/api/public/items", async (route) => {
+      if (failOnce) {
+        failOnce = false;
+        await route.abort("connectionfailed");
+      } else {
+        await route.continue();
+      }
+    });
+    await page.goto(h5Url);
+    await expect(page.getByText("内容暂时没有加载成功")).toBeVisible();
+    await page.getByRole("button", { name: "重新加载" }).click();
+    await expect(page.getByRole("heading", { name: "重要提醒" })).toBeVisible();
+  });
+
   test("falls back to getRandomValues and reuses the stored visitor ID", async ({
     context,
     page,
