@@ -116,21 +116,33 @@ Get-NetIPAddress -AddressFamily IPv4 |
   Select-Object InterfaceAlias, IPAddress
 ```
 
-在启动服务的同一个 PowerShell 会话中配置手机实际访问的 API 地址和后端显式 CORS 白名单。将占位文字替换为本机当前局域网 IP：
+局域网开发使用 H5 同源代理：浏览器只访问 5174，`/api` 由 Vite 转发到本机后端。先启动后端，再运行专用脚本：
 
 ```powershell
-$lanIp = "电脑局域网IP"
-$env:VITE_API_BASE_URL = "http://${lanIp}:8080/api"
-$env:JIANDA_CORS_ALLOWED_ORIGINS = "http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5173,http://localhost:5174,http://${lanIp}:5174"
-./scripts/dev.ps1
+cd services\backend
+mvn spring-boot:run
+
+# 在另一个 PowerShell 中，从项目根目录执行
+./scripts/dev-h5-lan.ps1
 ```
 
-只启动用户端时也可运行 `npm run dev:h5:lan`；后端仍需在带有上述 CORS 环境变量的终端中启动。随后在手机浏览器验证：
+`dev-h5-lan.ps1` 会清除当前进程中的 `VITE_API_BASE_URL`，设置 `VITE_PROXY_TARGET=http://127.0.0.1:8080`，并输出本机和代理测试地址。随后在手机浏览器验证：
 
 - 用户端：`http://电脑局域网IP:5174`
-- 公开内容接口：`http://电脑局域网IP:8080/api/public/items`
+- 同源代理：`http://电脑局域网IP:5174/api/public/items`
+- 后端直连对照：`http://电脑局域网IP:8080/api/public/items`
 
-`VITE_API_BASE_URL` 必须在启动 Vite 前设置，因为手机上的 `127.0.0.1` 指向手机自身。开发和生产环境均采用显式 Origin 白名单，禁止使用 `*`；生产部署应只填写真实受信域名。若页面或接口无法连接，请检查 Windows 防火墙是否允许当前 Node.js、Java 进程或 5174、8080 端口的局域网入站访问。
+真机代理测试时不要设置 `VITE_API_BASE_URL`，否则浏览器会绕过 5174 同源代理。`VITE_API_BASE_URL` 仅保留给需要显式 API 地址的部署环境覆盖；代理目标由 `VITE_PROXY_TARGET` 配置，默认是 `http://127.0.0.1:8080`。仓库配置不包含固定局域网 IP，也不会删除或重写 `/api` 前缀。
+
+可用下面三个地址检查响应头和正文：
+
+```powershell
+curl.exe -i http://127.0.0.1:8080/api/public/items
+curl.exe -i http://127.0.0.1:5174/api/public/items
+curl.exe -i http://电脑局域网IP:5174/api/public/items
+```
+
+正常结果均为 `200`、非空 JSON，`Content-Type` 为 `application/json;charset=UTF-8`。若 5174 返回 HTML，说明 Vite 代理未加载；502 表示代理无法连接后端；404 表示请求路径错误；200 空正文需继续检查代理响应和过滤器。修改 Vite 配置或环境变量后必须彻底停止并重启 H5。
 
 普通 HTTP 局域网下部分浏览器不提供 `crypto.randomUUID`，用户端会自动改用 Web Crypto 随机字节并提供最终兼容兜底，不会在 Vue 挂载前白屏。已保存的游客 ID 会直接复用，它只关联当前浏览器中的匿名收藏、历史和偏好，不是身份认证凭证。原有 `npm run dev:h5` 和 localhost 开发方式保持不变。
 

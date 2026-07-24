@@ -193,7 +193,11 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] 游客 ID 独立封装，依次使用 `crypto.randomUUID`、`crypto.getRandomValues` 和 UUID 格式最终兜底。
 - [x] 已有游客 ID 直接复用；明确其只用于匿名收藏、历史和偏好，不作为认证凭证。
 - [x] 助手会话消息 ID 复用同一兼容生成函数，普通 HTTP 下不再直接依赖 `randomUUID`。
-- [x] 增加 `dev:h5:lan`、环境变量 API 地址和可配置的 Spring Boot CORS 显式白名单。
+- [x] 增加 `dev:h5:lan`、同源 `/api` 代理、可配置代理目标和 Spring Boot CORS 显式白名单。
 - [x] 生产配置拒绝任意 Origin 通配符，新增允许/拒绝 Origin 的后端集成测试。
 - [x] 增加普通 HTTP 缺失或异常 Web Crypto 场景，以及收藏、历史、偏好持久化的 Playwright 回归。
-- [ ] 待项目所在真实局域网完成 iPhone Safari / Android Chrome 人工访问抽检。
+- [x] iPhone 已确认可访问 H5、Swagger 和非空公开接口，局域网与后端端口连通。
+- [x] 修复 5174 未配置 `/api` 代理、真机默认 API 地址错误和 JSON 响应未声明 UTF-8。
+- [x] 增加 `dev-h5-lan.ps1`，真机代理模式自动清除 `VITE_API_BASE_URL` 并使用 `VITE_PROXY_TARGET`。
+- [x] 本机真实 LAN 地址验证首页、资讯、办事、助手数据与同源 API。
+- [ ] 待用户在 iPhone Safari 刷新确认修复后页面，并补充 Android Chrome 人工抽检。
