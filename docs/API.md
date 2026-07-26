@@ -42,7 +42,7 @@
 - `GET /api/public/items/{slug}`
 - `POST|DELETE /api/public/items/{id}/favorite`
 - `GET /api/public/assistant/suggestions`：根据当前已发布分类返回稳定推荐问题。
-- `POST /api/public/assistant/chat`：仅检索 `PUBLISHED` 内容并返回回答、来源引用和安全提示。
+- `POST /api/public/assistant/chat`：仅检索 `PUBLISHED` 内容并返回回答、来源引用、安全提示和 `mode`；当前稳定降级值为 `retrieval`，预留的外部模型实现可返回 `ai`。
 
 助手请求示例：
 

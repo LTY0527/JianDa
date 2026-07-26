@@ -10,12 +10,10 @@ export default defineConfig({
       "/api": {
         target: process.env.VITE_PROXY_TARGET || "http://127.0.0.1:8080",
         changeOrigin: true,
-        configure(proxy) {
-          proxy.on("proxyReq", (proxyRequest) => {
-            // The browser talks to Vite same-origin. Do not forward its LAN Origin
-            // into Spring CORS processing for this trusted development proxy hop.
-            proxyRequest.removeHeader("origin");
-          });
+        bypass(request) {
+          // The browser talks to Vite same-origin. Remove its LAN Origin before
+          // http-proxy constructs the trusted local request to Spring.
+          delete request.headers.origin;
         },
       },
     },

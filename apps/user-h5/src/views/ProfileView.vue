@@ -6,7 +6,7 @@ import { clearLocalLibrary, favoriteItems, historyItems, listenHistoryItems } fr
 import { UserRound, Heart, Clock3, Headphones, Bell, Settings, SlidersHorizontal, Info, CircleHelp, ShieldCheck, ChevronRight, Trash2 } from "lucide-vue-next";
 const favoriteCount = ref(0); const historyCount = ref(0); const listenCount = ref(0);
 function load(){ favoriteCount.value=favoriteItems().length; historyCount.value=historyItems().length; listenCount.value=listenHistoryItems().length; }
-function clear(){ if(window.confirm("确认清除本机收藏和浏览历史吗？阅读设置将保留。")){ clearLocalLibrary(); load(); } }
+function clear(){ if(window.confirm("确认清除本机收藏、浏览和收听历史吗？阅读设置将保留。")){ clearLocalLibrary(); load(); } }
 onMounted(()=>{load();window.addEventListener("jianda-library-change",load)}); onUnmounted(()=>window.removeEventListener("jianda-library-change",load));
 const links = [
   ["/favorites", Heart, "我的收藏", "仍在公开的资讯与办事", () => `${favoriteCount.value} 条`],
