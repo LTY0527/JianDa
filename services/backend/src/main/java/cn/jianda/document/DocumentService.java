@@ -123,8 +123,17 @@ public class DocumentService {
         jdbc.update("UPDATE source_document SET processing_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
         try {
             boolean publicInformation = document.get("content_source_id") != null;
+            List<Map<String, Object>> sourceSegments = jdbc.query(
+                    "SELECT id,page_no,text FROM document_segment WHERE document_id=? ORDER BY page_no,segment_no",
+                    (resultSet, rowNum) -> Map.of(
+                            "segment_id", resultSet.getLong("id"),
+                            "page_no", resultSet.getInt("page_no"),
+                            "text", resultSet.getString("text")),
+                    id);
             Map<String, Object> result = aiClient.analyze(document.get("title").toString(), rawText,
-                    publicInformation ? "public_news" : "guide");
+                    publicInformation ? "public_news" : "guide",
+                    String.valueOf(document.getOrDefault("organization_name", "")),
+                    sourceSegments);
             List<Map<String, Object>> fields = (List<Map<String, Object>>) result.get("fields");
             for (Map<String, Object> field : fields) {
                 String quote = String.valueOf(field.get("source_quote"));

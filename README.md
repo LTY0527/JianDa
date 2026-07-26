@@ -2,6 +2,28 @@
 
 基于人工智能的公共服务信息适老化生成与阅读平台。课程版本提供机构端 Web、用户移动 H5、Spring Boot 后端和 FastAPI AI 服务，并保证在无 Docker、无真实模型 Key 时使用 H2 + MockProvider 完整演示。
 
+## AI Provider
+
+AI 服务默认使用确定性的 `MockProvider`，无需 API Key。设置 `LLM_PROVIDER=external` 后启用 OpenAI-compatible 的 DeepSeek `ExternalLlmProvider`。它先从带页码和段落 ID 的原文中提取可追溯事实，再仅使用已验证事实生成适老化摘要、通俗版、步骤卡片、风险提示、术语解释和朗读稿；任一阶段失败都会明确报错，不会静默回退到 Mock 数据。
+
+External Provider 默认模型为 `deepseek-v4-flash`，也可通过 `EXTERNAL_LLM_MODEL=deepseek-v4-pro` 切换。不要使用已弃用的 `deepseek-chat` 或 `deepseek-reasoner`。提示词版本由 `JIANDA_PROMPT_VERSION=v1` 控制，代码不会记录完整原文、Authorization 请求头或模型推理内容。
+
+本轮只通过本地 mock HTTP Server 完成自动测试，没有调用真实 DeepSeek。真实联调前，在本机未提交的 `.env` 中填写：
+
+```env
+LLM_PROVIDER=external
+EXTERNAL_LLM_BASE_URL=https://api.deepseek.com
+EXTERNAL_LLM_API_KEY=你的本机密钥
+EXTERNAL_LLM_MODEL=deepseek-v4-flash
+EXTERNAL_LLM_TIMEOUT_SECONDS=60
+EXTERNAL_LLM_MAX_RETRIES=2
+EXTERNAL_LLM_MAX_TOKENS=6000
+EXTERNAL_LLM_THINKING=disabled
+JIANDA_PROMPT_VERSION=v1
+```
+
+`.env` 不得提交到 Git。涉及公共服务材料时，还应先确认模型账号、数据出境、隐私和业务审核要求。
+
 ## 目录
 
 ```text

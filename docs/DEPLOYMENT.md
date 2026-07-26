@@ -81,7 +81,22 @@ Flyway 在后端启动时执行数据库迁移。正式发布前必须：
 
 ## AI 服务边界
 
-当前可部署路径使用 `LLM_PROVIDER=mock`。`external` provider 仍是未实现扩展点，不能据此宣称真实模型已经生产化。AI 的 `/internal/*` 接口当前没有应用级服务认证；公网部署前应保持 AI 服务在私有网络，并停止直接映射 8001，或增加后端到 AI 的服务认证。
+默认部署路径使用 `LLM_PROVIDER=mock`，无需 API Key。`LLM_PROVIDER=external` 会启用 OpenAI-compatible 的 DeepSeek Provider，按“事实提取 → 适老化改写”两阶段处理，并对字段白名单、JSON Schema、页码、段落 ID 和逐字原文引用进行校验。External 失败时不会回退为 Mock。
+
+External 配置包括：
+
+- `EXTERNAL_LLM_BASE_URL`：默认 `https://api.deepseek.com`
+- `EXTERNAL_LLM_API_KEY`：External 模式必填，只能通过未提交的环境配置或 Secret 注入
+- `EXTERNAL_LLM_MODEL`：默认 `deepseek-v4-flash`，可切换为 `deepseek-v4-pro`
+- `EXTERNAL_LLM_TIMEOUT_SECONDS`：默认 60
+- `EXTERNAL_LLM_MAX_RETRIES`：默认 2，仅用于 429、5xx、超时、临时连接失败和空 content
+- `EXTERNAL_LLM_MAX_TOKENS`：默认 6000
+- `EXTERNAL_LLM_THINKING`：默认 `disabled`
+- `JIANDA_PROMPT_VERSION`：默认 `v1`
+
+不要配置已弃用的 `deepseek-chat` 或 `deepseek-reasoner`。当前实现和自动测试完成不等于真实模型已经通过生产合规或业务验收；本阶段未发送真实 DeepSeek 请求。
+
+AI 的 `/internal/*` 接口当前没有应用级服务认证；公网部署前应保持 AI 服务在私有网络，并停止直接映射 8001，或增加后端到 AI 的服务认证。
 
 ## 内置公开信息 fixture
 

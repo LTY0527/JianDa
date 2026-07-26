@@ -2,6 +2,9 @@ package cn.jianda;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -18,6 +21,7 @@ import java.util.Map;
 import java.nio.file.Path;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -38,7 +42,7 @@ class CoreFlowIntegrationTest {
 
     @BeforeEach
     void configureAi() {
-        when(aiClient.analyze(anyString(), anyString(), anyString())).thenReturn(Map.of(
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList())).thenReturn(Map.of(
                 "fields", List.of(
                         Map.of("field_type", "TARGET_AUDIENCE", "label", "适用对象", "value", "年满80周岁的本市户籍老人",
                                 "page_no", 1, "source_quote", "补贴对象为年满八十周岁的本市户籍老人。", "confidence", 0.98),
@@ -132,7 +136,7 @@ class CoreFlowIntegrationTest {
                 .andExpect(jsonPath("$.data[0].text").value("第一页真实正文"))
                 .andExpect(jsonPath("$.data[1].page_no").value(2));
 
-        when(aiClient.analyze(anyString(), anyString(), anyString())).thenReturn(Map.of(
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList())).thenReturn(Map.of(
                 "fields", List.of(Map.of(
                         "field_type", "LOCATION", "label", "地点", "value", "第二页",
                         "page_no", 2, "segment_no", 1, "source_quote", "第二页真实正文", "confidence", 0.99)),
@@ -141,6 +145,20 @@ class CoreFlowIntegrationTest {
                 "audio_script", "真实语音稿"));
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
                 .andExpect(status().isOk());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, Object>>> segmentsCaptor =
+                ArgumentCaptor.forClass((Class) List.class);
+        verify(aiClient).analyze(
+                eq("真实 PDF 追溯测试"),
+                eq("第一页真实正文\n第二页真实正文"),
+                eq("guide"),
+                eq("浦江街道社区服务中心"),
+                segmentsCaptor.capture());
+        List<Map<String, Object>> sentSegments = segmentsCaptor.getValue();
+        org.junit.jupiter.api.Assertions.assertEquals(2, sentSegments.size());
+        org.junit.jupiter.api.Assertions.assertEquals(1, sentSegments.get(0).get("page_no"));
+        org.junit.jupiter.api.Assertions.assertEquals("第一页真实正文", sentSegments.get(0).get("text"));
+        org.junit.jupiter.api.Assertions.assertTrue(sentSegments.get(0).get("segment_id") instanceof Long);
         mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].page_no").value(2))
@@ -161,7 +179,7 @@ class CoreFlowIntegrationTest {
                         .header("Authorization", auth).param("manualText", "用于验证 AI 服务不可用时的任务状态。"))
                 .andExpect(status().isOk());
 
-        when(aiClient.analyze(anyString(), anyString(), anyString()))
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList()))
                 .thenThrow(new IllegalStateException("AI service unavailable"));
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
                 .andExpect(status().isServiceUnavailable())

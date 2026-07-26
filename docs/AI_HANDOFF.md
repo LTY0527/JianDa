@@ -1,5 +1,18 @@
 # 简达 AI 开发交接
 
+## DeepSeek External Provider（2026-07-26）
+
+- 默认仍为 `LLM_PROVIDER=mock`，无需密钥，既有确定性演示流程不变。
+- `LLM_PROVIDER=external` 使用 OpenAI-compatible `POST /chat/completions`，默认模型 `deepseek-v4-flash`，允许配置 `deepseek-v4-pro`。
+- 阶段 A 仅提取事实，输出字段白名单、`source_quote`、`page_no`、`segment_id` 和置信度；程序再次验证逐字引用与实际段落一致。
+- 阶段 B 仅使用已验证事实生成适老化内容，不接收未校验的自由字典。
+- 两阶段分别使用严格 Pydantic Schema；非法 JSON、Schema 错误、截断输出和不可追溯引用会明确失败，不会写库，也不会回退 Mock。
+- 提示词位于 `services/ai-service/app/prompts/`，当前版本为 `v1`。日志仅记录阶段与版本，不记录完整材料、Authorization、API Key 或 `reasoning_content`。
+- 后端把数据库中真实 `document_segment` 的 ID、页码、文本以及机构来源名称传给 AI 服务，保存前仍保留后端二次引用定位。
+- 自动测试只使用本地 mock HTTP Server，尚未执行任何真实 DeepSeek 请求。
+
+真实联调前复制 `.env.example` 到本机 `.env`，至少设置 `LLM_PROVIDER=external` 和 `EXTERNAL_LLM_API_KEY`，并完成数据合规确认。不要把 `.env` 或真实密钥提交到 Git。
+
 更新时间：2026-07-26
 
 ## 当前状态

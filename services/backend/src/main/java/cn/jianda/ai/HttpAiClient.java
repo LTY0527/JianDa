@@ -11,6 +11,8 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -61,11 +63,17 @@ public class HttpAiClient implements AiClient {
     }
 
     @Override
-    public Map<String, Object> analyze(String title, String text, String documentType) {
+    public Map<String, Object> analyze(String title, String text, String documentType,
+                                       String sourceName, List<Map<String, Object>> segments) {
         HttpURLConnection connection = null;
         try {
-            byte[] payload = objectMapper.writeValueAsBytes(Map.of(
-                    "title", title, "text", text, "document_type", documentType));
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("title", title);
+            request.put("text", text);
+            request.put("document_type", documentType);
+            request.put("source_name", sourceName == null ? "" : sourceName);
+            request.put("segments", segments);
+            byte[] payload = objectMapper.writeValueAsBytes(request);
             connection = (HttpURLConnection) analyzeUri.toURL().openConnection(Proxy.NO_PROXY);
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");

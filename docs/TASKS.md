@@ -267,3 +267,16 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 ## 当前最早未完成任务
 
 进入 Phase 8.3，处理内部端口收敛、TLS/域名、容器加固、备份恢复和生产演示数据策略。iPhone Safari、Android Chrome、目标老年用户与业务文案确认仍是公开上线门禁。
+
+## DeepSeek External Provider 与适老化提示词框架
+
+- [x] 保持 `MockProvider` 为默认实现；Mock 模式无需 API Key，既有接口与测试继续可用。
+- [x] 实现 OpenAI-compatible DeepSeek `ExternalLlmProvider`，默认 `deepseek-v4-flash`，支持通过环境变量切换模型。
+- [x] 建立“事实提取 → 适老化内容生成”两阶段流程，External 失败时明确报错且不回退 Mock。
+- [x] 提示词按 `guide_extract_v1`、`guide_rewrite_v1`、Schema 和 few-shot 示例文件化，当前版本为 `v1`。
+- [x] 使用严格 Pydantic Schema 校验字段白名单、非空值、置信度和适老化输出结构。
+- [x] 校验 `source_quote` 是对应 `segment_id/page_no` 原文的逐字子串；后端传入真实数据库段落并在入库前继续二次定位。
+- [x] Compose 和 `.env.example` 已提供 External 变量框架，Key 默认留空且默认 Provider 仍为 Mock。
+- [x] 本地 mock HTTP Server 覆盖正常两阶段、鉴权失败、限流、服务端错误、超时、空响应、非法 JSON、截断、Schema、引用追溯及日志脱敏。
+- [x] 银龄活动、健康体检、字段不完整和冲突日期四类离线材料回归均使用不同且可追溯结果。
+- [ ] 等待用户在本机未提交的 `.env` 中填写真实配置并完成数据合规确认后，再执行真实 DeepSeek 联调；本阶段禁止真实请求。
