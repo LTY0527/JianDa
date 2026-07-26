@@ -52,6 +52,7 @@ test.describe("Phase 8.2 build integrity", () => {
 
     expect(dockerfile).toContain("apps/institution-web");
     expect(dockerfile).toContain("apps/user-h5");
+    expect(dockerfile).toContain("VITE_H5_BASE_URL");
     expect(dockerfile).toContain("nginx");
     expect(nginx).toContain("try_files $uri $uri/ /index.html");
     expect(nginx).toContain("location /api/");
@@ -61,6 +62,7 @@ test.describe("Phase 8.2 build integrity", () => {
     expect(nginx).toContain("listen 8090");
     expect(compose).toContain("Dockerfile.frontend");
     expect(compose).toContain("INSTITUTION_PORT");
+    expect(compose).toContain("VITE_H5_BASE_URL");
     expect(dockerignore).toContain("node_modules");
     expect(dockerignore).toContain("**/dist");
   });

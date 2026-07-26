@@ -10,6 +10,8 @@ RUN npm ci
 
 COPY packages/ ./packages/
 COPY apps/ ./apps/
+ARG VITE_H5_BASE_URL=
+ENV VITE_H5_BASE_URL=${VITE_H5_BASE_URL}
 RUN npm run build
 
 FROM nginx:1.27-alpine

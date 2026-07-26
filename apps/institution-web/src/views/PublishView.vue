@@ -8,6 +8,7 @@ import {
   type GeneratedContent,
 } from "../api/documents";
 import { apiMessage } from "../api/http";
+import { buildH5GuideUrl } from "../utils/h5-url";
 import { CheckCircle2, Send, ShieldCheck } from "lucide-vue-next";
 
 const documentId = Number(useRoute().params.id);
@@ -34,7 +35,12 @@ onBeforeRouteLeave(() => {
 });
 const h5Url = computed(() =>
   publishedSlug.value
-    ? `http://127.0.0.1:5174/guide/${publishedSlug.value}`
+    ? buildH5GuideUrl(publishedSlug.value, {
+        configuredBaseUrl: import.meta.env.VITE_H5_BASE_URL,
+        isDev: import.meta.env.DEV,
+        protocol: window.location.protocol,
+        hostname: window.location.hostname,
+      })
     : "",
 );
 

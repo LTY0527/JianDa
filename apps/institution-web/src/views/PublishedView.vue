@@ -4,6 +4,7 @@ import PageHeader from "../components/PageHeader.vue";
 import StatusTag from "../components/StatusTag.vue";
 import { documentApi, type DocumentRow } from "../api/documents";
 import { apiMessage } from "../api/http";
+import { buildH5GuideUrl } from "../utils/h5-url";
 import { ExternalLink, RotateCcw, Search } from "lucide-vue-next";
 
 const rows = ref<DocumentRow[]>([]);
@@ -11,6 +12,15 @@ const loading = ref(true);
 const error = ref("");
 const query = ref("");
 const withdrawingId = ref<number | null>(null);
+
+function h5GuideUrl(documentId: number): string {
+  return buildH5GuideUrl(`guide-${documentId}`, {
+    configuredBaseUrl: import.meta.env.VITE_H5_BASE_URL,
+    isDev: import.meta.env.DEV,
+    protocol: window.location.protocol,
+    hostname: window.location.hostname,
+  });
+}
 
 async function load() {
   loading.value = true;
@@ -84,7 +94,7 @@ onMounted(load);
             <td><StatusTag status="PUBLISHED" text="已发布" /></td>
             <td>
               <a
-                :href="`http://127.0.0.1:5174/guide/guide-${row.id}`"
+                :href="h5GuideUrl(row.id)"
                 target="_blank"
                 rel="noreferrer"
                 ><ExternalLink :size="14" />查看</a
