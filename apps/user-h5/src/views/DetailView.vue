@@ -7,8 +7,8 @@ import { cleanDisplayTitle } from "../content";
 import { readerPreferences, recordVisit, saveFavorite } from "../library";
 import SpeechRateSelector from "../components/SpeechRateSelector.vue";
 import { useSpeechPlayer } from "../composables/useSpeechPlayer";
+import { buildTelephoneHref, copyText } from "../utils/contactActions";
 import {
-
   ShieldCheck,
   Volume2,
   Pause,
@@ -31,6 +31,7 @@ const loading = ref(true);
 const speech = useSpeechPlayer();
 const isNews = computed(() => route.path.startsWith("/news/"));
 const error = ref("");
+const copyFeedback = ref("");
 const item = ref<any>({
   id: 0,
   slug: String(route.params.slug),
@@ -45,7 +46,22 @@ const detail = ref<{
   steps: string[][];
   warnings: string[];
   terms: Record<string, string>;
-}>({ summary: [], materials: [], steps: [], warnings: [], terms: {} });
+  fields: Record<string, string>;
+}>({ summary: [], materials: [], steps: [], warnings: [], terms: {}, fields: {} });
+const targetAudience = computed(() => detail.value.fields.TARGET_AUDIENCE || "");
+const eligibility = computed(() => detail.value.fields.ELIGIBILITY || "");
+const startDate = computed(() => detail.value.fields.START_DATE || "");
+const endDate = computed(() => detail.value.fields.END_DATE || "");
+const location = computed(() => detail.value.fields.LOCATION || "");
+const contact = computed(() => detail.value.fields.CONTACT || "");
+const fee = computed(() => detail.value.fields.FEE || "");
+const fieldWarning = computed(() => detail.value.fields.WARNING || "");
+const contactHref = computed(() => buildTelephoneHref(contact.value));
+const registrationDate = computed(() => {
+  if (startDate.value && endDate.value)
+    return `${startDate.value} 至 ${endDate.value}`;
+  return startDate.value || endDate.value;
+});
 const speechText = computed(() =>
   [
     cleanDisplayTitle(item.value.title),
@@ -58,6 +74,18 @@ onMounted(async () => {
     item.value = await fetchDetail(String(route.params.slug));
     const generated = item.value.generated || {};
     const fields = item.value.fields || [];
+    detail.value.fields = Object.fromEntries(
+      fields
+        .filter(
+          (field: any) =>
+            typeof field?.field_type === "string" &&
+            String(field?.field_value || "").trim(),
+        )
+        .map((field: any) => [
+          String(field.field_type),
+          String(field.field_value).trim(),
+        ]),
+    );
     const generatedSummary = Array.isArray(generated.SUMMARY)
       ? generated.SUMMARY
       : [];
@@ -72,6 +100,12 @@ onMounted(async () => {
     detail.value.warnings = Array.isArray(generated.RISK_WARNING)
       ? generated.RISK_WARNING
       : [];
+    if (
+      fieldWarning.value &&
+      !detail.value.warnings.includes(fieldWarning.value)
+    ) {
+      detail.value.warnings.unshift(fieldWarning.value);
+    }
     detail.value.terms =
       generated.TERM_EXPLANATION &&
       typeof generated.TERM_EXPLANATION === "object"
@@ -106,6 +140,13 @@ async function toggleFav() {
   } catch {
     error.value = "收藏操作失败，请稍后重试";
   }
+}
+async function copyAddress() {
+  if (!location.value) return;
+  copyFeedback.value = "";
+  copyFeedback.value = (await copyText(location.value))
+    ? "地址已复制"
+    : "复制失败，请长按地址手动复制";
 }
 function grow() {
   font.value = font.value >= 24 ? 18 : font.value + 2;
@@ -162,17 +203,14 @@ function grow() {
           </li>
         </ol>
       </section>
-      <section
-        v-if="detail.materials.length || detail.steps.length"
-        class="reader-section"
-      >
+      <section v-if="targetAudience || eligibility" class="reader-section">
         <h2>我是否符合条件？</h2>
         <div class="answer yes">
           <CheckCircle2 />
-          <p>
-            <b>符合以下条件即可申请</b>具有本市户籍，并且已经年满 80
-            周岁。目前没有领取同类生活补贴。
-          </p>
+          <div>
+            <p v-if="targetAudience"><b>适用对象</b>{{ targetAudience }}</p>
+            <p v-if="eligibility"><b>申请条件</b>{{ eligibility }}</p>
+          </div>
         </div>
       </section>
       <section v-if="detail.materials.length" class="reader-section">
@@ -180,23 +218,34 @@ function grow() {
         <ul class="material-list">
           <li v-for="m in detail.materials"><CheckCircle2 />{{ m }}</li>
         </ul>
-        <p class="warm-tip">
-          <TriangleAlert />建议出门前把原件和复印件分别装好，避免遗漏。
-        </p>
       </section>
-      <section v-if="detail.steps.length" class="quick-info">
-        <article>
+      <section
+        v-if="registrationDate || location || contact || fee"
+        class="quick-info"
+      >
+        <article v-if="registrationDate">
           <CalendarClock /><span
-            ><small>办理时间</small><b>工作日 9:00—17:00</b></span
+            ><small>报名时间</small><b>{{ registrationDate }}</b></span
           >
         </article>
-        <article>
-          <MapPin /><span
-            ><small>办理地点</small><b>户籍所在地社区服务窗口</b></span
+        <article v-if="location" class="address-info">
+          <MapPin /><span><small>地点</small><b>{{ location }}</b></span>
+          <button type="button" class="copy-address" @click="copyAddress">
+            复制地址
+          </button>
+        </article>
+        <p v-if="copyFeedback" class="copy-feedback" role="status">
+          {{ copyFeedback }}
+        </p>
+        <article v-if="contact">
+          <Phone /><span
+            ><small>咨询电话</small
+            ><a v-if="contactHref" :href="contactHref">{{ contact }}</a
+            ><b v-else>{{ contact }}</b></span
           >
         </article>
-        <article>
-          <Phone /><span><small>咨询电话</small><b>021-12345</b></span>
+        <article v-if="fee">
+          <CheckCircle2 /><span><small>费用</small><b>{{ fee }}</b></span>
         </article>
       </section>
       <section v-if="detail.steps.length" class="reader-section step-section">

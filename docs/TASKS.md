@@ -251,6 +251,7 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] Docker Compose 四服务全部 healthy，四个健康端点、两端页面、同源 API 和容器内三条 fixture 均已验证。
 - [x] Phase 8.2 Playwright 容器 smoke 与构建完整性共 8/8 通过。
 - [x] 发布成功页 H5 链接支持 DEV 5174、Docker 同主机无机构端口及 `VITE_H5_BASE_URL` 自定义 HTTPS 地址；Docker 实际点击已进入 `guide-14` 用户详情。
+- [x] H5 详情页九类业务字段全部改为读取已发布 `fields`；真实电话支持 `tel:`，地址支持 Clipboard API 与普通 HTTP 降级复制，缺失字段不再显示补贴演示兜底。
 
 ## 上传材料真实提取与 Mock 追溯修复
 
