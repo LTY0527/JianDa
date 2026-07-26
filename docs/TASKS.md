@@ -245,8 +245,12 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] 新增多阶段前端镜像和 Nginx 双端口托管，支持 SPA fallback、API 反向代理、上传大小、安全响应头和哈希资源缓存。
 - [x] 新增 `.dockerignore`、Phase 8.2 构建完整性测试和部署文档。
 - [x] 前端类型检查、生产构建和 3 项无 Docker 部署断言通过。
-- [ ] 在可用 Docker 环境执行完整 Compose 构建，并运行 5 项 Nginx 容器 smoke。
+- [x] 修复后端依赖宿主机 `/fixtures/public-information.json` 导致容器启动失败；默认 fixture 已进入 classpath 和 Spring Boot JAR。
+- [x] fixture 支持可选外部路径覆盖；缺失路径明确报错，未配置时稳定回退 classpath。
+- [x] 后端 16 项测试、Maven 打包、JAR 资源检查和后端镜像重建通过。
+- [x] Docker Compose 四服务全部 healthy，四个健康端点、两端页面、同源 API 和容器内三条 fixture 均已验证。
+- [x] Phase 8.2 Playwright 容器 smoke 与构建完整性共 8/8 通过。
 
 ## 当前最早未完成任务
 
-在安装 Docker 的环境完成 Phase 8.2 容器冒烟；随后进入 Phase 8.3，处理内部端口收敛、TLS/域名、容器加固、备份恢复和生产演示数据策略。真机与业务文案确认仍是公开上线门禁。
+进入 Phase 8.3，处理内部端口收敛、TLS/域名、容器加固、备份恢复和生产演示数据策略。iPhone Safari、Android Chrome、目标老年用户与业务文案确认仍是公开上线门禁。

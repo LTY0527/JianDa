@@ -254,7 +254,9 @@ Phase 7.4 自动化验收已覆盖助手同源 POST、检索引用、错误重�
 
 ## Docker（可选）
 
-安装 Docker 后运行 `docker compose up --build`，会启动 MySQL 8、AI 服务和后端；两个 Vite 前端仍按上面的 npm 命令启动。AI 容器使用 Python 3.11，符合项目最低版本要求，不需要与本机验证版本完全一致。
+安装 Docker 后运行 `docker compose up --build -d`，会启动 MySQL 8、AI 服务、Spring Boot 后端以及托管两个 Vue 应用的 Nginx 前端。默认访问地址为用户端 `http://127.0.0.1`、机构端 `http://127.0.0.1:8090`。AI 容器使用 Python 3.11，符合项目最低版本要求，不需要与本机验证版本完全一致。
+
+公开信息 fixture 默认从后端 JAR 内的 `classpath:fixtures/public-information.json` 读取，因此 IDE、`java -jar` 和 Docker 使用同一份内置资源。如需显式使用外部 fixture，可设置 `JIANDA_PUBLIC_FIXTURE`；一旦配置，路径必须在后端运行环境中存在，否则后端会报告包含目标路径的明确错误。容器环境不要填写 Windows 宿主机路径。
 
 ## 当前限制
 

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -13,34 +14,52 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 @Component
 public class FixtureCollector implements ContentCollector {
+    static final String DEFAULT_FIXTURE_RESOURCE = "fixtures/public-information.json";
+
     private final ObjectMapper objectMapper;
-    private final Path fixturePath;
+    private final String externalFixturePath;
     private List<CollectedContent> fixtures = List.of();
 
     public FixtureCollector(ObjectMapper objectMapper,
-                            @Value("${jianda.public-fixture:../../fixtures/public-information.json}") String fixturePath) {
+                            @Value("${jianda.public-fixture:}") String fixturePath) {
         this.objectMapper = objectMapper;
-        this.fixturePath = Paths.get(fixturePath).toAbsolutePath().normalize();
+        this.externalFixturePath = fixturePath == null ? "" : fixturePath.trim();
     }
 
     @PostConstruct
     void load() throws IOException {
-        if (!Files.isRegularFile(fixturePath)) {
-            throw new IllegalStateException("公开信息 fixture 不存在：" + fixturePath);
+        try (InputStream input = openFixture()) {
+            List<Map<String, Object>> rows = objectMapper.readValue(input, new TypeReference<>() {});
+            List<CollectedContent> loaded = new ArrayList<>();
+            for (Map<String, Object> row : rows) {
+                loaded.add(new CollectedContent(text(row, "id"), text(row, "title"), text(row, "sourceName"),
+                        text(row, "sourceType"), text(row, "sourceUrl"), text(row, "publisher"),
+                        LocalDate.parse(text(row, "publishedAt")).atStartOfDay(), text(row, "body"),
+                        text(row, "category")));
+            }
+            fixtures = List.copyOf(loaded);
         }
-        List<Map<String, Object>> rows = objectMapper.readValue(Files.readString(fixturePath), new TypeReference<>() {});
-        List<CollectedContent> loaded = new ArrayList<>();
-        for (Map<String, Object> row : rows) {
-            loaded.add(new CollectedContent(text(row, "id"), text(row, "title"), text(row, "sourceName"),
-                    text(row, "sourceType"), text(row, "sourceUrl"), text(row, "publisher"),
-                    LocalDate.parse(text(row, "publishedAt")).atStartOfDay(), text(row, "body"),
-                    text(row, "category")));
+    }
+
+    private InputStream openFixture() throws IOException {
+        if (!externalFixturePath.isBlank()) {
+            Path path = Paths.get(externalFixturePath).toAbsolutePath().normalize();
+            if (!Files.isRegularFile(path)) {
+                throw new IllegalStateException("配置的外部公开信息 fixture 不存在：" + path);
+            }
+            return Files.newInputStream(path);
         }
-        fixtures = List.copyOf(loaded);
+
+        ClassPathResource resource = new ClassPathResource(DEFAULT_FIXTURE_RESOURCE);
+        if (!resource.exists()) {
+            throw new IllegalStateException("classpath 公开信息 fixture 不存在：" + DEFAULT_FIXTURE_RESOURCE);
+        }
+        return resource.getInputStream();
     }
 
     @Override

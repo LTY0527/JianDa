@@ -1,6 +1,6 @@
 # Phase 8.1 部署基线
 
-本文描述当前后端、AI 服务和 MySQL 的容器部署基线。它用于部署准备和环境验证，不代表公网生产验收完成。两个 Vue 前端仍需单独构建和托管，Nginx、TLS、正式域名、备份恢复演练和真机验收不在本阶段范围内。
+本文描述 MySQL、AI 服务、后端和 Nginx 前端的容器部署基线。它用于部署准备和环境验证，不代表公网生产验收完成。TLS、正式域名、备份恢复演练和真机验收仍不在当前完成范围内。
 
 ## 当前拓扑
 
@@ -31,6 +31,8 @@
 - `UPLOAD_DIR`
 - `AI_SERVICE_URL`
 - `JIANDA_CORS_ALLOWED_ORIGINS`
+
+`JIANDA_PUBLIC_FIXTURE` 是可选覆盖项。留空时后端读取 JAR 内的 `classpath:fixtures/public-information.json`；只有需要由运维提供外部 fixture 时才设置该变量，并确保路径在后端容器内可读。不要填写 Windows 宿主机绝对路径。
 
 `application-prod.yml` 不为这些值提供开发兜底。Compose 为本地验证保留显式开发默认值，但生产环境必须通过 `.env`、编排平台 Secret 或等价机制覆盖，且不得提交真实值。
 
@@ -80,6 +82,17 @@ Flyway 在后端启动时执行数据库迁移。正式发布前必须：
 ## AI 服务边界
 
 当前可部署路径使用 `LLM_PROVIDER=mock`。`external` provider 仍是未实现扩展点，不能据此宣称真实模型已经生产化。AI 的 `/internal/*` 接口当前没有应用级服务认证；公网部署前应保持 AI 服务在私有网络，并停止直接映射 8001，或增加后端到 AI 的服务认证。
+
+## 内置公开信息 fixture
+
+平台管理员的离线公开信息导入功能依赖正式内置 fixture，而不是容器文件系统中的 `/fixtures` 绝对路径。构建后可检查：
+
+```powershell
+& "C:\Program Files\Java\jdk-17\bin\jar.exe" tf services/backend/target/backend-0.1.0.jar |
+  Select-String "BOOT-INF/classes/fixtures/public-information.json"
+```
+
+容器启动后可使用平台管理员登录并请求 `/api/public-sources/fixtures`，应返回三条稳定样例。外部路径配置存在但文件缺失时后端会主动失败，以避免误以为导入数据已经加载。
 
 ## 尚未完成的上线门禁
 
