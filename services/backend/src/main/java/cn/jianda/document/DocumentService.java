@@ -11,8 +11,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.sql.PreparedStatement;
-import java.sql.Statement;
-import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -96,9 +95,14 @@ public class DocumentService {
             throw new BusinessException(400, "文件路径不安全");
         }
         Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
-        String rawText = manualText == null || manualText.isBlank() ? defaultRawText() : manualText.trim();
-        jdbc.update("UPDATE source_document SET file_name=?,file_type=?,storage_path=?,raw_text=?,page_count=3,processing_status='UPLOADED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                original, file.getContentType(), target.toString(), rawText, id);
+        ExtractedDocument extracted = extractDocument(target, original, file.getContentType(), manualText);
+        jdbc.update("DELETE FROM document_segment WHERE document_id=?", id);
+        for (ExtractedSegment segment : extracted.segments()) {
+            jdbc.update("INSERT INTO document_segment(document_id,page_no,segment_no,text,start_offset,end_offset) VALUES (?,?,?,?,?,?)",
+                    id, segment.pageNo(), segment.segmentNo(), segment.text(), segment.startOffset(), segment.endOffset());
+        }
+        jdbc.update("UPDATE source_document SET file_name=?,file_type=?,storage_path=?,raw_text=?,page_count=?,processing_status='UPLOADED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                original, file.getContentType(), target.toString(), extracted.text(), extracted.pageCount(), id);
         log(user, "UPLOAD_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
         return detail(id, user);
     }
@@ -107,6 +111,11 @@ public class DocumentService {
     @SuppressWarnings("unchecked")
     public Map<String, Object> process(long id, AuthUser user) {
         Map<String, Object> document = detail(id, user);
+        String rawText = document.get("raw_text") == null ? "" : document.get("raw_text").toString();
+        if (rawText.isBlank()) {
+            throw new BusinessException(400, "材料正文为空，请先上传可提取文本的 PDF 或录入正文");
+        }
+        ensureTraceSegment(id, rawText);
         jdbc.update("DELETE FROM extracted_field WHERE document_id=?", id);
         jdbc.update("DELETE FROM generated_content WHERE document_id=?", id);
         jdbc.update("INSERT INTO processing_job(document_id,job_type,status,progress,started_at) VALUES (?,'FULL_PIPELINE','PROCESSING',15,CURRENT_TIMESTAMP)", id);
@@ -114,13 +123,15 @@ public class DocumentService {
         jdbc.update("UPDATE source_document SET processing_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
         try {
             boolean publicInformation = document.get("content_source_id") != null;
-            Map<String, Object> result = aiClient.analyze(document.get("title").toString(), document.get("raw_text").toString(),
+            Map<String, Object> result = aiClient.analyze(document.get("title").toString(), rawText,
                     publicInformation ? "public_news" : "guide");
             List<Map<String, Object>> fields = (List<Map<String, Object>>) result.get("fields");
             for (Map<String, Object> field : fields) {
-                jdbc.update("INSERT INTO extracted_field(document_id,field_type,field_label,field_value,page_no,source_quote,confidence) VALUES (?,?,?,?,?,?,?)",
-                        id, field.get("field_type"), field.get("label"), field.get("value"), field.get("page_no"),
-                        field.get("source_quote"), field.get("confidence"));
+                String quote = String.valueOf(field.get("source_quote"));
+                Map<String, Object> source = findSourceSegment(id, quote);
+                jdbc.update("INSERT INTO extracted_field(document_id,field_type,field_label,field_value,page_no,segment_id,source_quote,confidence) VALUES (?,?,?,?,?,?,?,?)",
+                        id, field.get("field_type"), field.get("label"), field.get("value"), source.get("page_no"),
+                        source.get("id"), quote, field.get("confidence"));
             }
             saveGenerated(id, "SUMMARY", "三句话看懂", result.get("summary"), result.get("plain_text"));
             saveGenerated(id, "PLAIN_LANGUAGE", "通俗版", result.get("summary"), result.get("plain_text"));
@@ -247,10 +258,60 @@ public class DocumentService {
         return value.length() > 900 ? value.substring(0, 900) : value;
     }
 
-    private static String defaultRawText() {
-        return "补贴对象为具有本市户籍且年满八十周岁的老年人。已享受同类补贴待遇的，不重复发放。\n"
-                + "申请材料：身份证及户口簿原件、本人银行卡复印件、近期一寸免冠照片一张。\n"
-                + "请申请人至户籍所在地社区服务窗口提出申请。咨询电话：021-12345。";
+    @SuppressWarnings("unchecked")
+    private ExtractedDocument extractDocument(Path target, String fileName, String contentType, String manualText) {
+        if (manualText != null && !manualText.isBlank()) {
+            String text = manualText.trim();
+            return new ExtractedDocument(text, 1, List.of(new ExtractedSegment(1, 1, text, 0, text.length())));
+        }
+        if (!fileName.toLowerCase().endsWith(".pdf")) {
+            return new ExtractedDocument("", 1, List.of());
+        }
+        Map<String, Object> result = aiClient.extractText(target, fileName, contentType);
+        String text = String.valueOf(result.getOrDefault("text", "")).trim();
+        if (text.isBlank()) {
+            throw new BusinessException(400, "PDF 未提取到可读文本，请检查文件是否为扫描件");
+        }
+        List<ExtractedSegment> segments = new ArrayList<>();
+        for (Map<String, Object> item : (List<Map<String, Object>>) result.getOrDefault("segments", List.of())) {
+            segments.add(new ExtractedSegment(
+                    number(item.get("page_no")),
+                    number(item.get("segment_no")),
+                    String.valueOf(item.get("text")),
+                    number(item.get("start_offset")),
+                    number(item.get("end_offset"))));
+        }
+        int pageCount = number(result.getOrDefault("page_count", segments.size()));
+        return new ExtractedDocument(text, pageCount, segments);
     }
+
+    private Map<String, Object> findSourceSegment(long documentId, String quote) {
+        List<Map<String, Object>> segments = jdbc.queryForList(
+                "SELECT id,page_no,segment_no,text FROM document_segment WHERE document_id=? ORDER BY page_no,segment_no",
+                documentId);
+        return segments.stream()
+                .filter(segment -> String.valueOf(segment.get("text")).contains(quote))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("AI 字段原文依据无法在材料分页正文中定位：" + quote));
+    }
+
+    private void ensureTraceSegment(long documentId, String rawText) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM document_segment WHERE document_id=?", Integer.class, documentId);
+        if (count != null && count > 0) {
+            return;
+        }
+        jdbc.update(
+                "INSERT INTO document_segment(document_id,page_no,segment_no,text,start_offset,end_offset) VALUES (?,1,1,?,0,?)",
+                documentId, rawText, rawText.length());
+    }
+
+    private static int number(Object value) {
+        return value instanceof Number number ? number.intValue() : Integer.parseInt(String.valueOf(value));
+    }
+
+    private record ExtractedDocument(String text, int pageCount, List<ExtractedSegment> segments) {}
+
+    private record ExtractedSegment(int pageNo, int segmentNo, String text, int startOffset, int endOffset) {}
 }
 

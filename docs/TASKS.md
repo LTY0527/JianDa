@@ -251,6 +251,17 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] Docker Compose 四服务全部 healthy，四个健康端点、两端页面、同源 API 和容器内三条 fixture 均已验证。
 - [x] Phase 8.2 Playwright 容器 smoke 与构建完整性共 8/8 通过。
 
+## 上传材料真实提取与 Mock 追溯修复
+
+- [x] 移除上传 PDF 时无条件写入“老年补贴申请”固定正文的回退逻辑，后端通过 AI 提取接口调用 PyMuPDF。
+- [x] PDF 按真实页码保存 `document_segment`，`raw_text` 与 `page_count` 均来自当前上传文件。
+- [x] Mock 指南分析改为使用传入正文的确定性规则；未识别正文返回待人工填写，不伪造字段。
+- [x] 保存字段前以 `source_quote` 匹配真实 segment，落库真实 `page_no` 和 `segment_id`，无法追溯时拒绝生成结果。
+- [x] 银龄数字生活测试 PDF 已通过正常上传和处理接口重新处理文档 13；原始上传卷和其他发布数据未删除。
+- [x] 文档 13 现有 2 页真实正文和 8 个可追溯字段，正文、字段与生成内容均无 80 周岁补贴残留。
+- [x] AI 8 项测试、后端 17 项测试、前端类型检查/构建和审核页 Playwright 回归均通过。
+- [x] Compose 三个应用镜像重建完成，MySQL、AI、后端和前端四服务均为 healthy。
+
 ## 当前最早未完成任务
 
 进入 Phase 8.3，处理内部端口收敛、TLS/域名、容器加固、备份恢复和生产演示数据策略。iPhone Safari、Android Chrome、目标老年用户与业务文案确认仍是公开上线门禁。
