@@ -36,6 +36,22 @@ source_name: {request.source_name or "未提供"}
 严格 JSON 结构示例：
 {FACT_SCHEMA_EXAMPLE}
 
+提取前必须逐项检查以下事实，不得因为已经找到若干字段就提前停止：
+1. 谁受到通知影响、谁可以办理或参加（TARGET_AUDIENCE、ELIGIBILITY）。
+2. 开始、截止、活动、调整前后日期和服务时间（START_DATE、END_DATE、EVENT_DATE、SERVICE_TIME、RESULT_TIME）。
+3. 地点、电话、费用、所需证件或材料、风险提示（LOCATION、CONTACT、FEE、MATERIAL、WARNING）。
+4. 原文存在多组“原日期调整为新日期”时，每一组分别输出一个 EVENT_DATE；value 同时保留原日期和新日期。
+5. “持某证件到某处办理”中的证件属于 MATERIAL，受理时段属于 SERVICE_TIME。
+6. 原文未出现费用时不得输出 FEE；不得为了凑齐清单编造字段。
+7. 不限制 fields 数量。同类事实出现多次时逐条提取，尤其不能遗漏最后一组日期或跨换行的句子。
+8. TARGET_AUDIENCE 应检查“已取得预约号的人”“受本次调整影响的人”等通知对象，即使句子中存在换行。
+   TARGET_AUDIENCE 必须是患者、居民、申请人等人群，不得把科室、机构、门诊类型或服务项目当成人群。
+9. SERVICE_TIME 只提取原文明示的具体日期、星期或时间段；“时段保持不变”不是可执行的服务时间，不输出。
+10. value 中的所有年份、日期、时间、电话和金额必须逐字有原文依据。不得根据标题年份为未写年份的日期补年份。
+
+输出 JSON 前再次自检：每一组调整前后日期是否都已单独输出；每一个明确时间段、办理材料、地点、电话、
+通知对象和风险提示是否都已覆盖；是否误加了原文没有的费用或年份。
+
 {FACT_FEW_SHOTS}
 
 当前材料原文：

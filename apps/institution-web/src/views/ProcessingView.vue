@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
-import { documentApi } from "../api/documents";
+import {
+  documentApi,
+  type DocumentDetail,
+  type ProcessingJob,
+} from "../api/documents";
 import { apiMessage } from "../api/http";
 import {
   CircleCheck,
@@ -10,18 +14,65 @@ import {
   WandSparkles,
   ListChecks,
   ArrowRight,
+  RefreshCw,
+  TriangleAlert,
 } from "lucide-vue-next";
 const route = useRoute();
 const documentId = Number(route.params.id);
 const fields = ref<any[]>([]);
-const steps = ref<any[][]>([]);
+const steps = ref<[string, string][]>([]);
+const summary = ref<string[]>([]);
+const document = ref<DocumentDetail | null>(null);
+const segmentCount = ref(0);
+const jobs = ref<ProcessingJob[]>([]);
 const error = ref("");
-onMounted(async () => {
+const loading = ref(true);
+const retrying = ref(false);
+const failed = computed(() => document.value?.processing_status === "FAILED");
+const emptyReviewResult = computed(
+  () =>
+    !loading.value &&
+    document.value?.processing_status === "WAITING_REVIEW" &&
+    fields.value.length === 0,
+);
+const failureMessage = computed(
+  () =>
+    jobs.value.find((job) => job.status === "FAILED")?.error_message ||
+    (emptyReviewResult.value
+      ? "本次处理未生成可审核字段，请重新处理或查看任务日志"
+      : error.value || "处理未完成，请重新尝试"),
+);
+
+function parseJsonArray(value?: string): unknown[] {
+  if (!value) return [];
   try {
-    const [fieldResponse, generatedResponse] = await Promise.all([
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function load() {
+  loading.value = true;
+  error.value = "";
+  try {
+    const [
+      detailResponse,
+      fieldResponse,
+      generatedResponse,
+      segmentResponse,
+      jobResponse,
+    ] = await Promise.all([
+      documentApi.detail(documentId),
       documentApi.fields(documentId),
       documentApi.generated(documentId),
+      documentApi.segments(documentId),
+      documentApi.jobs(documentId),
     ]);
+    document.value = detailResponse.data.data;
+    segmentCount.value = segmentResponse.data.data.length;
+    jobs.value = jobResponse.data.data;
     fields.value = fieldResponse.data.data.map((field) => ({
       id: field.id,
       label: field.field_label,
@@ -33,18 +84,49 @@ onMounted(async () => {
     const stepContent = generatedResponse.data.data.find(
       (item) => item.content_type === "STEP_CARDS",
     )?.content_json;
-    const parsed =
-      typeof stepContent === "string" ? JSON.parse(stepContent) : [];
-    steps.value = parsed.map((step: any) => [step.title, step.description]);
+    steps.value = parseJsonArray(stepContent)
+      .filter(
+        (step): step is Record<string, unknown> =>
+          typeof step === "object" && step !== null,
+      )
+      .map((step) => [String(step.title || ""), String(step.description || "")]);
+    const summaryContent = generatedResponse.data.data.find(
+      (item) => item.content_type === "SUMMARY",
+    );
+    summary.value = parseJsonArray(summaryContent?.content_json).map(String);
   } catch (cause) {
     error.value = apiMessage(cause);
+  } finally {
+    loading.value = false;
   }
-});
+}
+
+async function retry() {
+  retrying.value = true;
+  error.value = "";
+  try {
+    await documentApi.process(documentId);
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    await load();
+    retrying.value = false;
+  }
+}
+
+onMounted(load);
 </script>
 <template>
   <div>
-    <PageHeader title="AI 处理结果" description="查看结构化字段、通俗版摘要和办理步骤。" :breadcrumbs="['材料管理', '处理结果']" status="待审核"
-      ><RouterLink class="btn primary" :to="`/documents/${documentId}/review`"
+    <PageHeader
+      title="AI 处理结果"
+      description="查看结构化字段、通俗版摘要和办理步骤。"
+      :breadcrumbs="['材料管理', '处理结果']"
+      :status="failed ? '处理失败' : fields.length ? '待审核' : '处理中'"
+      ><RouterLink
+        v-if="fields.length"
+        class="btn primary"
+        :to="`/documents/${documentId}/review`"
         >进入对照审核<ArrowRight :size="17" /></RouterLink
     ></PageHeader>
     <section class="process-rail">
@@ -54,20 +136,54 @@ onMounted(async () => {
       <i></i>
       <div class="done">
         <CircleCheck /><span
-          ><b>正文提取</b><small>共 3 页，12 个段落</small></span
+          ><b>正文提取</b
+          ><small
+            >共 {{ document?.page_count || 0 }} 页，{{ segmentCount }} 个段落</small
+          ></span
         >
       </div>
       <i></i>
-      <div class="done">
-        <CircleCheck /><span
-          ><b>AI 分析</b><small>字段与通俗版已生成</small></span
+      <div :class="{ done: fields.length, failed }">
+        <CircleCheck v-if="fields.length" />
+        <TriangleAlert v-else-if="failed || emptyReviewResult" />
+        <LoaderCircle v-else /><span
+          ><b>AI 分析</b
+          ><small>{{
+            fields.length
+              ? `已生成 ${fields.length} 个可追溯字段`
+              : failed || emptyReviewResult
+                ? "未生成可审核字段"
+                : "正在等待分析结果"
+          }}</small></span
         >
       </div>
       <i></i>
-      <div class="active">
-        <LoaderCircle /><span
-          ><b>等待审核</b><small>请确认关键字段</small></span
+      <div :class="{ done: fields.length, active: !fields.length && !failed }">
+        <CircleCheck v-if="fields.length" />
+        <LoaderCircle v-else /><span
+          ><b>等待审核</b
+          ><small>{{ fields.length ? "请确认关键字段" : "尚未进入审核" }}</small></span
         >
+      </div>
+    </section>
+    <section
+      v-if="!loading && (failed || emptyReviewResult || error)"
+      class="panel process-failure"
+    >
+      <TriangleAlert />
+      <div>
+        <h2>本次处理没有生成可审核结果</h2>
+        <p>{{ failureMessage }}</p>
+        <div>
+          <RouterLink class="btn secondary" to="/documents"
+            >返回材料详情</RouterLink
+          >
+          <button class="btn primary" :disabled="retrying" @click="retry">
+            <RefreshCw :size="17" />{{
+              retrying ? "正在重新处理…" : "重新处理"
+            }}
+          </button>
+        </div>
       </div>
     </section>
     <div v-if="fields.length" class="result-grid">
@@ -100,13 +216,10 @@ onMounted(async () => {
               <p>通俗版摘要</p>
             </div>
           </div>
-          <ol>
-            <li>年满 80 周岁、符合条件的本市户籍老人可以申请这项补贴。</li>
-            <li>
-              准备好身份证、户口簿、银行卡和一寸照片，到户籍所在地社区办理。
-            </li>
-            <li>审核一般需要 10 个工作日，通过后补贴会发到本人银行卡。</li>
+          <ol v-if="summary.length">
+            <li v-for="item in summary" :key="item">{{ item }}</li>
           </ol>
+          <p v-else class="result-placeholder">暂无可展示的通俗版摘要。</p>
         </section>
         <section class="panel steps-mini">
           <div class="result-heading">

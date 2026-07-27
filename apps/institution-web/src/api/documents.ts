@@ -41,6 +41,20 @@ export interface GeneratedContent {
   status: string;
 }
 
+export interface DocumentSegment {
+  id: number;
+  page_no: number;
+  segment_no: number;
+  text: string;
+}
+
+export interface ProcessingJob {
+  id: number;
+  status: string;
+  progress: number;
+  error_message?: string;
+}
+
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<ApiResponse<{ token: string; user: Record<string, unknown> }>>(
@@ -73,6 +87,10 @@ export const documentApi = {
     http.get<ApiResponse<ExtractedField[]>>(`/documents/${id}/fields`),
   generated: (id: number) =>
     http.get<ApiResponse<GeneratedContent[]>>(`/documents/${id}/generated`),
+  segments: (id: number) =>
+    http.get<ApiResponse<DocumentSegment[]>>(`/documents/${id}/segments`),
+  jobs: (id: number) =>
+    http.get<ApiResponse<ProcessingJob[]>>(`/documents/${id}/jobs`),
   updateField: (
     documentId: number,
     fieldId: number,

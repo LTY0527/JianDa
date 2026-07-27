@@ -194,6 +194,75 @@ class CoreFlowIntegrationTest {
     }
 
     @Test
+    void emptyAiFieldsFailWithoutGeneratedContentAndCanBeRetried() throws Exception {
+        String auth = "Bearer " + login();
+        String created = mvc.perform(post("/api/documents").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"空字段重试测试\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+        String sourceText = "咨询电话：021-5558 7301。";
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "空字段重试.pdf", "application/pdf", "%PDF-test".getBytes());
+        mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(file)
+                        .header("Authorization", auth).param("manualText", sourceText))
+                .andExpect(status().isOk());
+
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList()))
+                .thenReturn(Map.of(
+                        "fields", List.of(),
+                        "summary", List.of("没有字段的摘要"),
+                        "plain_text", "没有字段的通俗版",
+                        "steps", List.of(),
+                        "term_explanations", Map.of(),
+                        "warnings", List.of(),
+                        "audio_script", "没有字段的朗读稿"));
+        mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value(
+                        "AI未生成可追溯的关键字段，请检查模型输出后重新处理"));
+        mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.processing_status").value("FAILED"))
+                .andExpect(jsonPath("$.data.raw_text").value(sourceText));
+        mvc.perform(get("/api/documents/{id}/jobs", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].status").value("FAILED"))
+                .andExpect(jsonPath("$.data[0].error_message").value(
+                        "AI未生成可追溯的关键字段，请检查模型输出后重新处理"));
+        mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(0));
+        mvc.perform(get("/api/documents/{id}/generated", documentId).header("Authorization", auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(0));
+        mvc.perform(get("/api/documents/{id}/segments", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].text").value(sourceText));
+
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList()))
+                .thenReturn(Map.of(
+                        "fields", List.of(Map.of(
+                                "field_type", "CONTACT",
+                                "label", "咨询电话",
+                                "value", "021-5558 7301",
+                                "source_quote", "咨询电话：021-5558 7301。",
+                                "confidence", 0.95)),
+                        "summary", List.of("请按通知咨询。"),
+                        "plain_text", "请拨打通知中的电话咨询。",
+                        "steps", List.of(),
+                        "term_explanations", Map.of(),
+                        "warnings", List.of(),
+                        "audio_script", "请拨打通知中的电话咨询。"));
+        mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
+        mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].source_quote").value("咨询电话：021-5558 7301。"));
+    }
+
+    @Test
     void uploadAcceptsImagesAndRejectsUnsupportedFileType() throws Exception {
         String auth = "Bearer " + login();
         for (String extension : List.of("png", "jpg")) {

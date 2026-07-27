@@ -1,7 +1,9 @@
 import json
 import logging
 import os
+import re
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -12,7 +14,6 @@ from pydantic import ValidationError
 from app.models import (
     AnalyzeResult,
     ExtractedField,
-    FactExtractionResponse,
     FactField,
     RewriteResponse,
     SourceSegment,
@@ -22,7 +23,7 @@ from app.prompts import guide_extract_v1, guide_rewrite_v1
 from app.providers.base import LlmProvider
 
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("uvicorn.error")
 
 
 class ExternalProviderError(RuntimeError):
@@ -101,6 +102,18 @@ class ExternalSettings:
         )
 
 
+@dataclass(frozen=True)
+class CompletionResult:
+    payload: dict[str, Any]
+    request_id: str
+    finish_reason: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    elapsed_ms: int
+    retry_count: int
+
+
 class ExternalLlmProvider(LlmProvider):
     """Two-stage OpenAI-compatible provider with strict source tracing."""
 
@@ -131,7 +144,7 @@ class ExternalLlmProvider(LlmProvider):
                 "external_llm stage=fact_extract prompt_version=%s",
                 self.settings.prompt_version,
             )
-            fact_json = self._completion(
+            fact_result = self._completion(
                 active_client,
                 [
                     {"role": "system", "content": guide_extract_v1.SYSTEM_PROMPT},
@@ -144,13 +157,26 @@ class ExternalLlmProvider(LlmProvider):
                 ],
                 stage="fact_extract",
             )
-            facts = self._validate_facts(fact_json, request)
+            model_facts = self._validate_facts(fact_result.payload, request)
+            facts = self._complete_explicit_temporal_facts(
+                model_facts, request
+            )
+            LOGGER.info(
+                "provider=external model=%s prompt_version=%s "
+                "stage=fact_completion model_field_count=%s "
+                "source_rule_added_count=%s final_field_count=%s",
+                self.settings.model,
+                self.settings.prompt_version,
+                len(model_facts),
+                len(facts) - len(model_facts),
+                len(facts),
+            )
 
             LOGGER.info(
                 "external_llm stage=accessible_rewrite prompt_version=%s",
                 self.settings.prompt_version,
             )
-            rewrite_json = self._completion(
+            rewrite_result = self._completion(
                 active_client,
                 [
                     {"role": "system", "content": guide_rewrite_v1.SYSTEM_PROMPT},
@@ -163,7 +189,7 @@ class ExternalLlmProvider(LlmProvider):
                 ],
                 stage="accessible_rewrite",
             )
-            rewrite = self._validate_rewrite(rewrite_json)
+            rewrite = self._validate_rewrite(rewrite_result.payload)
             return AnalyzeResult(
                 fields=[
                     ExtractedField(
@@ -194,7 +220,7 @@ class ExternalLlmProvider(LlmProvider):
         client: httpx.Client,
         messages: list[dict[str, str]],
         stage: str,
-    ) -> dict[str, Any]:
+    ) -> CompletionResult:
         request_body = {
             "model": self.settings.model,
             "messages": messages,
@@ -205,6 +231,7 @@ class ExternalLlmProvider(LlmProvider):
         }
         attempts = self.settings.max_retries + 1
         for attempt in range(attempts):
+            started = time.perf_counter()
             try:
                 response = client.post(
                     self.endpoint,
@@ -215,6 +242,14 @@ class ExternalLlmProvider(LlmProvider):
                     json=request_body,
                 )
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                self._log_http_audit(
+                    stage=stage,
+                    http_status=0,
+                    request_id="none",
+                    finish_reason="network_error",
+                    elapsed_ms=self._elapsed_ms(started),
+                    retry_count=attempt,
+                )
                 if attempt + 1 < attempts:
                     self._backoff(attempt)
                     continue
@@ -222,11 +257,25 @@ class ExternalLlmProvider(LlmProvider):
                     f"外部模型{stage}请求超时或连接失败"
                 ) from exc
 
+            elapsed_ms = self._elapsed_ms(started)
+            header_request_id = self._safe_identifier(
+                response.headers.get("x-request-id")
+                or response.headers.get("request-id")
+                or ""
+            )
             if response.status_code in (401, 403):
+                self._log_http_audit(
+                    stage, response.status_code, header_request_id,
+                    "authentication_error", elapsed_ms, attempt
+                )
                 raise ExternalProviderError(
                     f"外部模型鉴权失败（HTTP {response.status_code}）"
                 )
             if response.status_code == 429 or response.status_code >= 500:
+                self._log_http_audit(
+                    stage, response.status_code, header_request_id,
+                    "transient_http_error", elapsed_ms, attempt
+                )
                 if attempt + 1 < attempts:
                     self._backoff(attempt)
                     continue
@@ -234,40 +283,78 @@ class ExternalLlmProvider(LlmProvider):
                     f"外部模型暂时不可用（HTTP {response.status_code}）"
                 )
             if not 200 <= response.status_code < 300:
+                self._log_http_audit(
+                    stage, response.status_code, header_request_id,
+                    "http_error", elapsed_ms, attempt
+                )
                 raise ExternalProviderError(
                     f"外部模型请求失败（HTTP {response.status_code}）"
                 )
             try:
                 envelope = response.json()
             except ValueError as exc:
+                self._log_http_audit(
+                    stage, response.status_code, header_request_id,
+                    "invalid_envelope_json", elapsed_ms, attempt
+                )
                 raise ExternalProviderError(
                     f"外部模型{stage}响应不是合法 JSON"
                 ) from exc
             if not isinstance(envelope, dict):
+                self._log_http_audit(
+                    stage, response.status_code, header_request_id,
+                    "invalid_envelope_type", elapsed_ms, attempt
+                )
                 raise ExternalProviderError(
                     f"外部模型{stage}响应必须是 JSON 对象"
                 )
             choices = envelope.get("choices")
+            request_id = self._safe_identifier(
+                str(envelope.get("id") or header_request_id)
+            )
+            usage = envelope.get("usage")
+            usage = usage if isinstance(usage, dict) else {}
             if not isinstance(choices, list) or not choices:
+                self._log_http_audit(
+                    stage, response.status_code, request_id,
+                    "missing_choices", elapsed_ms, attempt, usage
+                )
                 raise ExternalProviderError(
                     f"外部模型{stage}响应缺少 choices"
                 )
             choice = choices[0]
             if not isinstance(choice, dict):
+                self._log_http_audit(
+                    stage, response.status_code, request_id,
+                    "invalid_choice", elapsed_ms, attempt, usage
+                )
                 raise ExternalProviderError(
                     f"外部模型{stage}响应 choices 格式错误"
                 )
-            if choice.get("finish_reason") == "length":
+            finish_reason = str(choice.get("finish_reason") or "unknown")
+            if finish_reason == "length":
+                self._log_http_audit(
+                    stage, response.status_code, request_id,
+                    finish_reason, elapsed_ms, attempt, usage
+                )
                 raise ExternalProviderError(
                     f"外部模型{stage}输出因长度限制被截断"
                 )
             message = choice.get("message")
             if not isinstance(message, dict):
+                self._log_http_audit(
+                    stage, response.status_code, request_id,
+                    "missing_message", elapsed_ms, attempt, usage
+                )
                 raise ExternalProviderError(
                     f"外部模型{stage}响应缺少 message"
                 )
             content = message.get("content")
             if not isinstance(content, str) or not content.strip():
+                self._log_http_audit(
+                    stage, response.status_code, request_id,
+                    "empty_content", elapsed_ms, attempt, usage
+                )
                 if attempt + 1 < attempts:
                     self._backoff(attempt)
                     continue
@@ -277,41 +364,118 @@ class ExternalLlmProvider(LlmProvider):
             try:
                 parsed = json.loads(content)
             except json.JSONDecodeError as exc:
+                self._log_http_audit(
+                    stage, response.status_code, request_id,
+                    "invalid_content_json", elapsed_ms, attempt, usage
+                )
                 raise ExternalProviderError(
                     f"外部模型{stage}content 不是合法 JSON"
                 ) from exc
             if not isinstance(parsed, dict):
+                self._log_http_audit(
+                    stage, response.status_code, request_id,
+                    "invalid_content_type", elapsed_ms, attempt, usage
+                )
                 raise ExternalProviderError(
                     f"外部模型{stage}content 必须是 JSON 对象"
                 )
-            return parsed
+            self._log_http_audit(
+                stage, response.status_code, request_id,
+                finish_reason, elapsed_ms, attempt, usage
+            )
+            return CompletionResult(
+                payload=parsed,
+                request_id=request_id,
+                finish_reason=finish_reason,
+                prompt_tokens=self._safe_int(usage.get("prompt_tokens")),
+                completion_tokens=self._safe_int(usage.get("completion_tokens")),
+                total_tokens=self._safe_int(usage.get("total_tokens")),
+                elapsed_ms=elapsed_ms,
+                retry_count=attempt,
+            )
         raise ExternalProviderError(f"外部模型{stage}请求失败")
 
     def _validate_facts(
         self, payload: dict[str, Any], request: TextRequest
     ) -> list[FactField]:
-        try:
-            response = FactExtractionResponse.model_validate(payload)
-        except ValidationError as exc:
+        raw_fields = payload.get("fields")
+        raw_field_count = len(raw_fields) if isinstance(raw_fields, list) else 0
+        reasons: dict[str, int] = {}
+        if payload.get("prompt_version") != self.settings.prompt_version:
+            reasons["prompt_version_mismatch"] = 1
+            self._log_fact_audit(raw_field_count, raw_field_count, 0, 0, reasons)
             raise ExternalProviderError(
                 "外部模型事实提取结果不符合 JSON Schema"
-            ) from exc
-        self._check_prompt_version(response.prompt_version)
+            )
+        if not isinstance(raw_fields, list):
+            reasons["fields_not_array"] = 1
+            self._log_fact_audit(raw_field_count, 0, 0, 0, reasons)
+            raise ExternalProviderError(
+                "外部模型事实提取结果不符合 JSON Schema"
+            )
+
+        schema_valid: list[FactField] = []
+        for item in raw_fields:
+            try:
+                schema_valid.append(FactField.model_validate(item))
+            except ValidationError:
+                reasons["schema_invalid"] = reasons.get("schema_invalid", 0) + 1
+
         segments = request.segments or [
             SourceSegment(segment_id=1, page_no=1, text=request.text)
         ]
         by_id = {segment.segment_id: segment for segment in segments}
-        for field in response.fields:
+        trace_valid: list[FactField] = []
+        for field in schema_valid:
             segment = by_id.get(field.segment_id)
-            if (
-                segment is None
-                or segment.page_no != field.page_no
-                or field.source_quote not in segment.text
-            ):
-                raise ExternalProviderError(
-                    "外部模型字段原文引用无法追溯，结果已拒绝"
+            if segment is None:
+                reasons["segment_not_found"] = reasons.get("segment_not_found", 0) + 1
+                continue
+            if segment.page_no != field.page_no:
+                reasons["page_mismatch"] = reasons.get("page_mismatch", 0) + 1
+                continue
+            source_quote = self._locate_source_quote(
+                segment.text, field.source_quote
+            )
+            if source_quote is None:
+                reasons["source_quote_not_found"] = (
+                    reasons.get("source_quote_not_found", 0) + 1
                 )
-        return response.fields
+                continue
+            value_numbers = self._number_tokens(field.value)
+            quote_numbers = self._number_tokens(source_quote)
+            if any(
+                quote_numbers[number] < count
+                for number, count in value_numbers.items()
+            ):
+                reasons["numeric_mismatch"] = reasons.get("numeric_mismatch", 0) + 1
+                continue
+            value = field.value
+            if (
+                field.field_type
+                in {"START_DATE", "END_DATE", "EVENT_DATE", "SERVICE_TIME"}
+                and any(
+                    value_numbers[number] < count
+                    for number, count in quote_numbers.items()
+                )
+            ):
+                value = source_quote
+            trace_valid.append(
+                field.model_copy(
+                    update={"value": value, "source_quote": source_quote}
+                )
+            )
+
+        self._log_fact_audit(
+            raw_field_count,
+            len(raw_fields),
+            len(schema_valid),
+            len(trace_valid),
+            reasons,
+        )
+        if not trace_valid:
+            raise ExternalProviderError("模型未生成可追溯的关键字段")
+        return trace_valid
 
     def _validate_rewrite(
         self, payload: dict[str, Any]
@@ -325,6 +489,85 @@ class ExternalLlmProvider(LlmProvider):
         self._check_prompt_version(response.prompt_version)
         return response
 
+    def _complete_explicit_temporal_facts(
+        self, facts: list[FactField], request: TextRequest
+    ) -> list[FactField]:
+        completed = list(facts)
+        segments = request.segments or [
+            SourceSegment(segment_id=1, page_no=1, text=request.text)
+        ]
+        date_token = r"(?:\d{4}年)?\d{1,2}月\d{1,2}日"
+        adjustment_pattern = re.compile(
+            rf"原预约日期为\s*(?P<from>{date_token})\s*的[，,]?\s*"
+            rf"(?:顺延|调整|改期|变更)(?:至|为)\s*(?P<to>{date_token})"
+        )
+        deadline_pattern = re.compile(
+            rf"(?P<value>{date_token}\s*\d{{1,2}}:\d{{2}}\s*"
+            r"(?:以前|之前|前|截止))"
+        )
+
+        for segment in segments:
+            for match in adjustment_pattern.finditer(segment.text):
+                original_date = match.group("from")
+                adjusted_date = match.group("to")
+                if self._has_temporal_pair(
+                    completed, "EVENT_DATE", original_date, adjusted_date
+                ):
+                    continue
+                completed.append(
+                    FactField(
+                        field_type="EVENT_DATE",
+                        label="原预约与调整日期",
+                        value=f"{original_date} → {adjusted_date}",
+                        source_quote=match.group(0),
+                        page_no=segment.page_no,
+                        segment_id=segment.segment_id,
+                        confidence=0.99,
+                    )
+                )
+
+            for match in deadline_pattern.finditer(segment.text):
+                value = re.sub(r"\s+", "", match.group("value"))
+                if self._has_temporal_value(completed, "END_DATE", value):
+                    continue
+                completed.append(
+                    FactField(
+                        field_type="END_DATE",
+                        label="确认截止",
+                        value=value,
+                        source_quote=match.group("value"),
+                        page_no=segment.page_no,
+                        segment_id=segment.segment_id,
+                        confidence=0.99,
+                    )
+                )
+        return completed
+
+    @staticmethod
+    def _has_temporal_pair(
+        fields: list[FactField],
+        field_type: str,
+        first: str,
+        second: str,
+    ) -> bool:
+        return any(
+            field.field_type == field_type
+            and first in field.value
+            and second in field.value
+            for field in fields
+        )
+
+    @staticmethod
+    def _has_temporal_value(
+        fields: list[FactField], field_type: str, value: str
+    ) -> bool:
+        normalized_value = re.sub(r"\s+", "", value)
+        return any(
+            field.field_type == field_type
+            and normalized_value in re.sub(r"\s+", "", field.value)
+            for field in fields
+        )
+
     def _check_prompt_version(self, actual: str) -> None:
         if actual != self.settings.prompt_version:
             raise ExternalProviderError(
@@ -333,3 +576,104 @@ class ExternalLlmProvider(LlmProvider):
 
     def _backoff(self, attempt: int) -> None:
         self.sleep(min(0.2 * (2**attempt), 1.0))
+
+    @staticmethod
+    def _locate_source_quote(source: str, quote: str) -> str | None:
+        if quote in source:
+            return quote
+        normalized_source: list[str] = []
+        source_indexes: list[int] = []
+        for index, character in enumerate(source):
+            if not character.isspace():
+                normalized_source.append(character)
+                source_indexes.append(index)
+        normalized_quote = "".join(
+            character for character in quote if not character.isspace()
+        )
+        if not normalized_quote:
+            return None
+        start = "".join(normalized_source).find(normalized_quote)
+        if start < 0:
+            return None
+        original_start = source_indexes[start]
+        original_end = source_indexes[start + len(normalized_quote) - 1] + 1
+        return source[original_start:original_end]
+
+    @staticmethod
+    def _number_tokens(value: str) -> Counter[str]:
+        return Counter(re.findall(r"\d+", re.sub(r"\s+", "", value)))
+
+    def _log_http_audit(
+        self,
+        stage: str,
+        http_status: int,
+        request_id: str,
+        finish_reason: str,
+        elapsed_ms: int,
+        retry_count: int,
+        usage: dict[str, Any] | None = None,
+    ) -> None:
+        usage = usage or {}
+        LOGGER.info(
+            "provider=external model=%s prompt_version=%s stage=%s "
+            "http_status=%s request_id=%s finish_reason=%s "
+            "prompt_tokens=%s completion_tokens=%s total_tokens=%s "
+            "elapsed_ms=%s retry_count=%s",
+            self.settings.model,
+            self.settings.prompt_version,
+            stage,
+            http_status,
+            request_id or "none",
+            finish_reason,
+            self._safe_int(usage.get("prompt_tokens")),
+            self._safe_int(usage.get("completion_tokens")),
+            self._safe_int(usage.get("total_tokens")),
+            elapsed_ms,
+            retry_count,
+        )
+
+    def _log_fact_audit(
+        self,
+        raw_field_count: int,
+        parsed_field_count: int,
+        schema_valid_field_count: int,
+        trace_valid_field_count: int,
+        reasons: dict[str, int],
+    ) -> None:
+        rejected_field_count = max(
+            parsed_field_count - trace_valid_field_count,
+            sum(reasons.values()),
+        )
+        rejected_reason = ",".join(
+            f"{reason}:{count}" for reason, count in sorted(reasons.items())
+        ) or "none"
+        LOGGER.info(
+            "provider=external model=%s prompt_version=%s stage=fact_validation "
+            "raw_field_count=%s parsed_field_count=%s "
+            "schema_valid_field_count=%s trace_valid_field_count=%s "
+            "rejected_field_count=%s rejected_reason=%s",
+            self.settings.model,
+            self.settings.prompt_version,
+            raw_field_count,
+            parsed_field_count,
+            schema_valid_field_count,
+            trace_valid_field_count,
+            rejected_field_count,
+            rejected_reason,
+        )
+
+    @staticmethod
+    def _safe_identifier(value: str) -> str:
+        sanitized = re.sub(r"[^A-Za-z0-9._:-]", "_", value)[:96]
+        return sanitized or "none"
+
+    @staticmethod
+    def _safe_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _elapsed_ms(started: float) -> int:
+        return max(0, round((time.perf_counter() - started) * 1000))

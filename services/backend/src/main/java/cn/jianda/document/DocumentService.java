@@ -29,6 +29,8 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 public class DocumentService {
     private static final Logger LOGGER = LoggerFactory.getLogger(DocumentService.class);
+    private static final String EMPTY_AI_FIELDS_MESSAGE =
+            "AI未生成可追溯的关键字段，请检查模型输出后重新处理";
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of("pdf", "png", "jpg", "jpeg");
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
@@ -134,13 +136,13 @@ public class DocumentService {
                     publicInformation ? "public_news" : "guide",
                     String.valueOf(document.getOrDefault("organization_name", "")),
                     sourceSegments);
-            List<Map<String, Object>> fields = (List<Map<String, Object>>) result.get("fields");
-            for (Map<String, Object> field : fields) {
-                String quote = String.valueOf(field.get("source_quote"));
-                Map<String, Object> source = findSourceSegment(id, quote);
+            List<PreparedField> fields = prepareFields(id, result);
+            for (PreparedField prepared : fields) {
+                Map<String, Object> field = prepared.field();
+                SourceTrace source = prepared.source();
                 jdbc.update("INSERT INTO extracted_field(document_id,field_type,field_label,field_value,page_no,segment_id,source_quote,confidence) VALUES (?,?,?,?,?,?,?,?)",
-                        id, field.get("field_type"), field.get("label"), field.get("value"), source.get("page_no"),
-                        source.get("id"), quote, field.get("confidence"));
+                        id, field.get("field_type"), field.get("label"), field.get("value"), source.pageNo(),
+                        source.segmentId(), source.quote(), prepared.confidence());
             }
             saveGenerated(id, "SUMMARY", "三句话看懂", result.get("summary"), result.get("plain_text"));
             saveGenerated(id, "PLAIN_LANGUAGE", "通俗版", result.get("summary"), result.get("plain_text"));
@@ -162,11 +164,14 @@ public class DocumentService {
             return Map.of("documentId", id, "status", "WAITING_REVIEW", "progress", 100);
         } catch (RuntimeException exception) {
             LOGGER.error("Document processing failed for document {}", id, exception);
+            String errorMessage = exception instanceof AiResultValidationException
+                    ? EMPTY_AI_FIELDS_MESSAGE : truncate(exception.getMessage());
             jdbc.update("UPDATE processing_job SET status='FAILED',error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                    truncate(exception.getMessage()), jobId);
+                    errorMessage, jobId);
             jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "FAILED");
-            throw new BusinessException(503, "AI 服务暂时不可用，任务已标记失败，可稍后重试");
+            throw new BusinessException(503, exception instanceof AiResultValidationException
+                    ? EMPTY_AI_FIELDS_MESSAGE : "AI 服务暂时不可用，任务已标记失败，可稍后重试");
         }
     }
 
@@ -294,14 +299,87 @@ public class DocumentService {
         return new ExtractedDocument(text, pageCount, segments);
     }
 
-    private Map<String, Object> findSourceSegment(long documentId, String quote) {
+    private List<PreparedField> prepareFields(long documentId, Map<String, Object> result) {
+        if (result == null || !(result.get("fields") instanceof List<?> rawFields) || rawFields.isEmpty()) {
+            throw new AiResultValidationException();
+        }
+        List<PreparedField> prepared = new ArrayList<>();
+        for (Object item : rawFields) {
+            if (!(item instanceof Map<?, ?> rawField)) {
+                throw new AiResultValidationException();
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> field = (Map<String, Object>) rawField;
+            for (String key : List.of("field_type", "label", "value", "source_quote", "confidence")) {
+                if (field.get(key) == null || String.valueOf(field.get(key)).isBlank()) {
+                    throw new AiResultValidationException();
+                }
+            }
+            double confidence;
+            try {
+                confidence = field.get("confidence") instanceof Number number
+                        ? number.doubleValue() : Double.parseDouble(String.valueOf(field.get("confidence")));
+            } catch (NumberFormatException exception) {
+                throw new AiResultValidationException();
+            }
+            if (confidence < 0 || confidence > 1) {
+                throw new AiResultValidationException();
+            }
+            SourceTrace source = findSourceSegment(documentId, String.valueOf(field.get("source_quote")));
+            prepared.add(new PreparedField(field, source, confidence));
+        }
+        if (prepared.isEmpty()) {
+            throw new AiResultValidationException();
+        }
+        return prepared;
+    }
+
+    private SourceTrace findSourceSegment(long documentId, String quote) {
         List<Map<String, Object>> segments = jdbc.queryForList(
                 "SELECT id,page_no,segment_no,text FROM document_segment WHERE document_id=? ORDER BY page_no,segment_no",
                 documentId);
-        return segments.stream()
-                .filter(segment -> String.valueOf(segment.get("text")).contains(quote))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("AI 字段原文依据无法在材料分页正文中定位：" + quote));
+        for (Map<String, Object> segment : segments) {
+            String located = locateSourceQuote(String.valueOf(segment.get("text")), quote);
+            if (located != null) {
+                return new SourceTrace(
+                        ((Number) segment.get("id")).longValue(),
+                        ((Number) segment.get("page_no")).intValue(),
+                        located);
+            }
+        }
+        throw new AiResultValidationException();
+    }
+
+    private static String locateSourceQuote(String source, String quote) {
+        if (source.contains(quote)) {
+            return quote;
+        }
+        StringBuilder normalizedSource = new StringBuilder();
+        List<Integer> sourceIndexes = new ArrayList<>();
+        for (int index = 0; index < source.length(); index++) {
+            char character = source.charAt(index);
+            if (!Character.isWhitespace(character)) {
+                normalizedSource.append(character);
+                sourceIndexes.add(index);
+            }
+        }
+        StringBuilder normalizedQuote = new StringBuilder();
+        for (int index = 0; index < quote.length(); index++) {
+            char character = quote.charAt(index);
+            if (!Character.isWhitespace(character)) {
+                normalizedQuote.append(character);
+            }
+        }
+        if (normalizedQuote.isEmpty()) {
+            return null;
+        }
+        int start = normalizedSource.indexOf(normalizedQuote.toString());
+        if (start < 0) {
+            return null;
+        }
+        int originalStart = sourceIndexes.get(start);
+        int originalEnd = sourceIndexes.get(start + normalizedQuote.length() - 1) + 1;
+        return source.substring(originalStart, originalEnd);
     }
 
     private void ensureTraceSegment(long documentId, String rawText) {
@@ -322,5 +400,11 @@ public class DocumentService {
     private record ExtractedDocument(String text, int pageCount, List<ExtractedSegment> segments) {}
 
     private record ExtractedSegment(int pageNo, int segmentNo, String text, int startOffset, int endOffset) {}
+
+    private record SourceTrace(long segmentId, int pageNo, String quote) {}
+
+    private record PreparedField(Map<String, Object> field, SourceTrace source, double confidence) {}
+
+    private static final class AiResultValidationException extends RuntimeException {}
 }
 

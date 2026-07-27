@@ -36,7 +36,8 @@ def facts(fields=None):
     return {
         "prompt_version": "v1",
         "fields": fields
-        or [
+        if fields is not None
+        else [
             {
                 "field_type": "LOCATION",
                 "label": "地点",
@@ -248,6 +249,10 @@ def test_empty_content_is_retried():
     ("payload", "message"),
     [
         (completion("not-json"), "content 不是合法 JSON"),
+        (
+            completion('```json\n{"prompt_version":"v1","fields":[]}\n```'),
+            "content 不是合法 JSON",
+        ),
         (completion(json.dumps({"prompt_version": "v1"})), "不符合 JSON Schema"),
         (completion(json.dumps(facts()), finish_reason="length"), "长度限制"),
     ],
@@ -288,7 +293,7 @@ def test_untraceable_quote_or_page_mismatch_is_rejected_without_retry(invalid_fi
         [response(200, json_completion(facts([invalid_field])))]
     ) as server:
         provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
-        with pytest.raises(ExternalProviderError, match="无法追溯"):
+        with pytest.raises(ExternalProviderError, match="未生成可追溯"):
             provider.analyze(request())
     assert len(server.requests) == 1
 
@@ -316,6 +321,8 @@ def test_api_key_never_appears_in_logs_or_error(caplog):
             provider.analyze(request())
     assert TEST_KEY not in caplog.text
     assert TEST_KEY not in str(raised.value)
+    assert "Authorization" not in caplog.text
+    assert "Bearer" not in caplog.text
 
 
 def test_missing_key_fails_only_when_external_provider_is_created(monkeypatch):
@@ -328,6 +335,202 @@ def test_mock_mode_does_not_require_external_api_key(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.delenv("EXTERNAL_LLM_API_KEY", raising=False)
     assert isinstance(get_provider(), MockProvider)
+
+
+@pytest.mark.parametrize(
+    "invalid_fields",
+    [
+        None,
+        [],
+        [
+            {
+                "field_type": "CONTACT",
+                "field_label": "咨询电话",
+                "field_value": "021-5558 7301",
+                "source_quote": "咨询电话：021-5558 7301。",
+                "page_no": 1,
+                "segment_id": 101,
+                "confidence": 0.95,
+            }
+        ],
+    ],
+)
+def test_null_empty_or_wrong_field_contract_fails_before_rewrite(invalid_fields):
+    payload = {"prompt_version": "v1", "fields": invalid_fields}
+    with QueueServer([response(200, json_completion(payload))]) as server:
+        provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
+        with pytest.raises(ExternalProviderError):
+            provider.analyze(request("咨询电话：021-5558 7301。"))
+    assert len(server.requests) == 1
+
+
+def test_whitespace_only_quote_difference_locates_original_text():
+    source = "咨询电话：021-5558 \n\t7301。"
+    field = {
+        "field_type": "CONTACT",
+        "label": "咨询电话",
+        "value": "021-5558 7301",
+        "source_quote": "咨询电话：021-5558 7301。",
+        "page_no": 1,
+        "segment_id": 101,
+        "confidence": 0.95,
+    }
+    with QueueServer(
+        [
+            response(200, json_completion(facts([field]))),
+            response(200, json_completion(rewrite())),
+        ]
+    ) as server:
+        result = ExternalLlmProvider(
+            settings(server.url), sleep=lambda _: None
+        ).analyze(request(source))
+    assert result.fields[0].source_quote == source
+
+
+def test_changed_phone_number_is_rejected():
+    source = "咨询电话：021-5558 7301。"
+    field = {
+        "field_type": "CONTACT",
+        "label": "咨询电话",
+        "value": "021-5558 7302",
+        "source_quote": "咨询电话：021-5558 7301。",
+        "page_no": 1,
+        "segment_id": 101,
+        "confidence": 0.95,
+    }
+    with QueueServer([response(200, json_completion(facts([field])))]) as server:
+        with pytest.raises(ExternalProviderError, match="未生成可追溯"):
+            ExternalLlmProvider(
+                settings(server.url), sleep=lambda _: None
+            ).analyze(request(source))
+    assert len(server.requests) == 1
+
+
+def test_temporal_value_preserves_time_present_in_source_quote():
+    source = "请在9月28日18:00以前完成确认。"
+    field = {
+        "field_type": "END_DATE",
+        "label": "确认截止",
+        "value": "9月28日",
+        "source_quote": "9月28日18:00以前",
+        "page_no": 1,
+        "segment_id": 101,
+        "confidence": 0.95,
+    }
+    with QueueServer(
+        [
+            response(200, json_completion(facts([field]))),
+            response(200, json_completion(rewrite())),
+        ]
+    ) as server:
+        result = ExternalLlmProvider(
+            settings(server.url), sleep=lambda _: None
+        ).analyze(request(source))
+    assert result.fields[0].value == "9月28日18:00以前"
+    assert result.fields[0].source_quote == "9月28日18:00以前"
+
+
+def test_explicit_adjustment_dates_and_deadline_are_completed_from_source():
+    source = (
+        "原预约日期为10月1日的，顺延至10月8日；"
+        "原预约日期为10月2日的，顺延至10月9日；"
+        "原预约日期为10月3日\n的，顺延至10月10日。"
+        "请患者在9月28日18:00以前确认。"
+        "地点：青松社区服务站"
+    )
+    with QueueServer(
+        [
+            response(200, json_completion(facts())),
+            response(200, json_completion(rewrite())),
+        ]
+    ) as server:
+        result = ExternalLlmProvider(
+            settings(server.url), sleep=lambda _: None
+        ).analyze(request(source))
+    temporal = [
+        field
+        for field in result.fields
+        if field.field_type in {"EVENT_DATE", "END_DATE"}
+    ]
+    assert [field.value for field in temporal] == [
+        "10月1日 → 10月8日",
+        "10月2日 → 10月9日",
+        "10月3日 → 10月10日",
+        "9月28日18:00以前",
+    ]
+    assert all(field.source_quote in source for field in temporal)
+
+
+def test_source_completion_does_not_duplicate_model_temporal_fields():
+    source = "原预约日期为10月1日的，顺延至10月8日。地点：青松社区服务站"
+    model_fields = facts()["fields"] + [
+        {
+            "field_type": "EVENT_DATE",
+            "label": "预约调整",
+            "value": "10月1日 → 10月8日",
+            "source_quote": "原预约日期为10月1日的，顺延至10月8日",
+            "page_no": 1,
+            "segment_id": 101,
+            "confidence": 0.98,
+        }
+    ]
+    with QueueServer(
+        [
+            response(200, json_completion(facts(model_fields))),
+            response(200, json_completion(rewrite())),
+        ]
+    ) as server:
+        result = ExternalLlmProvider(
+            settings(server.url), sleep=lambda _: None
+        ).analyze(request(source))
+    assert sum(
+        field.field_type == "EVENT_DATE" for field in result.fields
+    ) == 1
+
+
+def test_audit_counts_valid_and_rejected_fields_without_sensitive_content(caplog):
+    caplog.set_level(logging.INFO)
+    valid = {
+        "field_type": "LOCATION",
+        "label": "地点",
+        "value": "青松社区服务站",
+        "source_quote": "地点：青松社区服务站",
+        "page_no": 1,
+        "segment_id": 101,
+        "confidence": 0.98,
+    }
+    invalid = {**valid, "value": "其他地点", "source_quote": "不存在的原文"}
+    with QueueServer(
+        [
+            response(
+                200,
+                {
+                    "id": "request-test-1",
+                    "usage": {
+                        "prompt_tokens": 100,
+                        "completion_tokens": 20,
+                        "total_tokens": 120,
+                    },
+                    **json_completion(facts([valid, invalid])),
+                },
+            ),
+            response(200, json_completion(rewrite())),
+        ]
+    ) as server:
+        result = ExternalLlmProvider(
+            settings(server.url), sleep=lambda _: None
+        ).analyze(request())
+    assert len(result.fields) == 1
+    assert "raw_field_count=2" in caplog.text
+    assert "parsed_field_count=2" in caplog.text
+    assert "schema_valid_field_count=2" in caplog.text
+    assert "trace_valid_field_count=1" in caplog.text
+    assert "rejected_field_count=1" in caplog.text
+    assert "source_quote_not_found:1" in caplog.text
+    assert "prompt_tokens=100" in caplog.text
+    assert TEST_KEY not in caplog.text
+    assert "Authorization" not in caplog.text
+    assert "Bearer" not in caplog.text
 
 
 @pytest.mark.parametrize(
