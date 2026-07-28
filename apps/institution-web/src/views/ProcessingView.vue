@@ -30,6 +30,12 @@ const error = ref("");
 const loading = ref(true);
 const retrying = ref(false);
 const latestJob = computed(() => jobs.value[0]);
+const rewriteRecoverable = computed(
+  () =>
+    failed.value &&
+    latestJob.value?.last_failed_stage === "accessible_rewrite" &&
+    Boolean(latestJob.value?.fact_checkpoint_json),
+);
 const isWebArticle = computed(() => document.value?.source_type === "WEB_ARTICLE");
 const textLength = computed(() => (document.value?.raw_text || "").length);
 const imageCount = computed(() =>
@@ -41,6 +47,8 @@ const stageText: Record<string, string> = {
   VALIDATING_TRACE: "正在校验原文追溯",
   GENERATING_ACCESSIBLE_CONTENT: "正在生成通俗内容",
   SAVING_RESULT: "正在保存结果",
+  REWRITE_PENDING: "事实提取已保留，等待适老化改写",
+  accessible_rewrite: "适老化改写失败，可单独重试",
   SUCCEEDED: "处理完成",
   FAILED: "处理失败",
 };
@@ -121,7 +129,8 @@ async function retry() {
   retrying.value = true;
   error.value = "";
   try {
-    await documentApi.process(documentId);
+    if (rewriteRecoverable.value) await documentApi.retryRewrite(documentId);
+    else await documentApi.process(documentId);
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -206,15 +215,22 @@ onMounted(load);
     >
       <TriangleAlert />
       <div>
-        <h2>本次处理没有生成可审核结果</h2>
+        <h2>{{ rewriteRecoverable ? "事实提取已完成，适老化改写失败" : "本次处理没有生成可审核结果" }}</h2>
         <p>{{ failureMessage }}</p>
+        <p v-if="rewriteRecoverable" class="info-note">
+          已保留 {{ fields.length }} 个可追溯事实字段，不会再次调用事实提取。
+          <span v-if="latestJob?.provider_request_id">请求编号：{{ latestJob.provider_request_id }}</span>
+          <span>重试次数：{{ latestJob?.retry_count || 0 }}</span>
+        </p>
         <div>
           <RouterLink class="btn secondary" to="/documents"
             >返回材料详情</RouterLink
           >
           <button class="btn primary" :disabled="retrying" @click="retry">
             <RefreshCw :size="17" />{{
-              retrying ? "正在重新处理…" : "重新处理"
+              retrying
+                ? rewriteRecoverable ? "正在重新生成适老化内容…" : "正在重新处理…"
+                : rewriteRecoverable ? "重新生成适老化内容" : "重新处理"
             }}
           </button>
         </div>

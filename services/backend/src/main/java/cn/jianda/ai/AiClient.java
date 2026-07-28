@@ -14,4 +14,8 @@ public interface AiClient {
     Map<String, Object> analyze(String title, String text, String documentType,
                                 String sourceName, List<Map<String, Object>> segments,
                                 Map<String, Object> context);
+
+    Map<String, Object> rewrite(String title, String text, String documentType,
+                                String sourceName, List<Map<String, Object>> segments,
+                                Map<String, Object> context, Map<String, Object> factCheckpoint);
 }

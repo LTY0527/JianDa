@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import cn.jianda.ai.AiClient;
+import cn.jianda.ai.AiServiceException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -339,6 +340,52 @@ class CoreFlowIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].source_quote").value("咨询电话：021-5558 7301。"));
+    }
+
+    @Test
+    void rewriteSchemaFailureKeepsFactCheckpointAndRetrySkipsFactExtraction() throws Exception {
+        String auth = "Bearer " + login();
+        String created = mvc.perform(post("/api/documents").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"阶段恢复测试\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+        String sourceText = "咨询电话：021-5558 7301。";
+        mvc.perform(multipart("/api/documents/{id}/upload", documentId)
+                        .file(new MockMultipartFile("file", "恢复.pdf", "application/pdf", "%PDF".getBytes()))
+                        .header("Authorization", auth).param("manualText", sourceText))
+                .andExpect(status().isOk());
+        Map<String, Object> fact = Map.of(
+                "field_type", "CONTACT", "label", "咨询电话", "value", "021-5558 7301",
+                "source_quote", sourceText, "page_no", 1, "segment_id", 1,
+                "confidence", 0.95, "needs_human_review", false);
+        Map<String, Object> facts = Map.of("prompt_version", "v1", "fields", List.of(fact), "sessions", List.of());
+        Map<String, Object> checkpoint = Map.of(
+                "prompt_version", "v1", "schema_version", "1.1", "model", "test-model",
+                "response_fingerprint", "0123456789abcdef", "request_id", "req-fact",
+                "fact_extract_ms", 12, "prompt_tokens", 10, "completion_tokens", 5,
+                "total_tokens", 15, "facts", facts);
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
+                .thenThrow(new AiServiceException(503, Map.of(
+                        "error_code", "LLM_SCHEMA_VALIDATION_FAILED",
+                        "message", "缺少必填字段：quick_summary",
+                        "stage", "accessible_rewrite", "json_path", "$.quick_summary",
+                        "request_id", "req-rewrite", "retryable", true,
+                        "fact_checkpoint", checkpoint)));
+        mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("事实提取结果已保留")));
+        mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(1));
+        when(aiClient.rewrite(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap(), anyMap()))
+                .thenReturn(Map.of(
+                        "fields", List.of(fact), "summary", List.of("请按原文咨询。"),
+                        "plain_text", "请按原文电话咨询。", "steps", List.of(),
+                        "term_explanations", Map.of(), "warnings", List.of(),
+                        "audio_script", "请按原文电话咨询。", "metrics", Map.of("total_tokens", 8)));
+        mvc.perform(post("/api/documents/{id}/retry-rewrite", documentId).header("Authorization", auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
+        verify(aiClient).rewrite(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap(), anyMap());
+        verify(aiClient).analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap());
     }
 
     @Test

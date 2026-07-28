@@ -59,6 +59,11 @@ public class DocumentController {
     @PostMapping("/{id}/process")
     public ApiResponse<Map<String, Object>> process(@PathVariable long id) { return ApiResponse.ok(service.process(id, UserContext.current())); }
 
+    @PostMapping("/{id}/retry-rewrite")
+    public ApiResponse<Map<String, Object>> retryRewrite(@PathVariable long id) {
+        return ApiResponse.ok(service.retryRewrite(id, UserContext.current()));
+    }
+
     @GetMapping("/{id}/jobs")
     public ApiResponse<List<Map<String, Object>>> jobs(@PathVariable long id) { return ApiResponse.ok(service.jobs(id, UserContext.current())); }
 

@@ -1,6 +1,7 @@
 package cn.jianda.document;
 
 import cn.jianda.ai.AiClient;
+import cn.jianda.ai.AiServiceException;
 import cn.jianda.common.BusinessException;
 import cn.jianda.security.AuthUser;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -274,15 +275,183 @@ public class DocumentService {
                     "progress", 100, "cacheHit", Boolean.TRUE.equals(metrics.get("cache_hit")), "totalMs", totalMs);
         } catch (RuntimeException exception) {
             LOGGER.error("Document processing failed for document {}", id, exception);
-            String errorMessage = exception instanceof AiResultValidationException
-                    ? EMPTY_AI_FIELDS_MESSAGE : truncate(exception.getMessage());
-            jdbc.update("UPDATE processing_job SET status='FAILED',stage='FAILED',error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                    errorMessage, jobId);
+            String errorMessage = diagnosticMessage(exception);
+            String failedStage = exception instanceof AiServiceException aiFailure
+                    ? defaultString(aiFailure.stringValue("stage"), "FAILED") : "FAILED";
+            if (exception instanceof AiServiceException aiFailure
+                    && aiFailure.detail().get("fact_checkpoint") instanceof Map<?, ?> checkpoint) {
+                persistFactCheckpoint(id, jobId, checkpoint, aiFailure);
+            }
+            jdbc.update("UPDATE processing_job SET status='FAILED',stage=?,last_failed_stage=?,error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    failedStage, failedStage, errorMessage, jobId);
             jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "FAILED");
-            throw new BusinessException(503, exception instanceof AiResultValidationException
-                    ? EMPTY_AI_FIELDS_MESSAGE : "AI 服务暂时不可用，任务已标记失败，可稍后重试");
+            throw new BusinessException(503, publicFailureMessage(exception));
         }
+    }
+
+    private void persistFactCheckpoint(long documentId, Long jobId, Map<?, ?> checkpoint,
+                                       AiServiceException failure) {
+        try {
+            Object rawFacts = checkpoint.get("facts");
+            Map<String, Object> facts = rawFacts instanceof Map<?, ?> map
+                    ? objectMapper.convertValue(map, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {})
+                    : Map.of();
+            List<PreparedField> fields = prepareFields(documentId, facts);
+            jdbc.update("DELETE FROM extracted_field WHERE document_id=?", documentId);
+            for (PreparedField prepared : fields) {
+                Map<String, Object> field = prepared.field();
+                SourceTrace source = prepared.source();
+                jdbc.update("INSERT INTO extracted_field(document_id,field_type,field_label,field_value,page_no,segment_id,source_quote,confidence) VALUES (?,?,?,?,?,?,?,?)",
+                        documentId, field.get("field_type"), field.get("label"), field.get("value"), source.pageNo(),
+                        source.segmentId(), source.quote(), prepared.confidence());
+            }
+            String checkpointJson = objectMapper.writeValueAsString(checkpoint);
+            jdbc.update("UPDATE processing_job SET fact_checkpoint_json=?,fact_response_fingerprint=?,provider_request_id=?,"
+                            + "schema_version=?,prompt_version=?,fact_extract_ms=?,prompt_tokens=?,completion_tokens=?,total_tokens=? WHERE id=?",
+                    checkpointJson,
+                    checkpoint.get("response_fingerprint"),
+                    checkpoint.get("request_id"),
+                    checkpoint.get("schema_version"),
+                    checkpoint.get("prompt_version"),
+                    longValue(checkpoint.get("fact_extract_ms")),
+                    intValue(checkpoint.get("prompt_tokens")),
+                    intValue(checkpoint.get("completion_tokens")),
+                    intValue(checkpoint.get("total_tokens")),
+                    jobId);
+        } catch (JsonProcessingException | IllegalArgumentException checkpointError) {
+            LOGGER.error("Failed to persist fact checkpoint for document {}", documentId, checkpointError);
+        }
+    }
+
+    private static long longValue(Object value) {
+        return value instanceof Number number ? number.longValue() : 0L;
+    }
+
+    private static int intValue(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private String diagnosticMessage(RuntimeException exception) {
+        if (exception instanceof AiResultValidationException) return EMPTY_AI_FIELDS_MESSAGE;
+        if (exception instanceof AiServiceException aiFailure) {
+            return truncate(String.join(" | ", List.of(
+                    defaultString(aiFailure.stringValue("message"), "AI 服务暂时不可用"),
+                    "stage=" + defaultString(aiFailure.stringValue("stage"), "unknown"),
+                    "json_path=" + defaultString(aiFailure.stringValue("json_path"), "unknown"),
+                    "request_id=" + defaultString(aiFailure.stringValue("request_id"), "unknown"))));
+        }
+        return "AI 服务暂时不可用";
+    }
+
+    private String publicFailureMessage(RuntimeException exception) {
+        if (exception instanceof AiResultValidationException) return EMPTY_AI_FIELDS_MESSAGE;
+        if (!(exception instanceof AiServiceException aiFailure)) {
+            return "AI 服务暂时不可用，任务已标记失败，可稍后重试";
+        }
+        if (!"LLM_SCHEMA_VALIDATION_FAILED".equals(aiFailure.stringValue("error_code"))
+                && !"LLM_JSON_PARSE_FAILED".equals(aiFailure.stringValue("error_code"))) {
+            return "AI 服务暂时不可用，任务已标记失败，可稍后重试";
+        }
+        String stage = "accessible_rewrite".equals(aiFailure.stringValue("stage"))
+                ? "适老化改写" : "事实提取";
+        String path = aiFailure.stringValue("json_path").replace("$.", "");
+        String requestId = aiFailure.stringValue("request_id");
+        StringBuilder message = new StringBuilder("外部模型返回内容格式不完整；错误阶段：").append(stage);
+        if (!path.isBlank() && !"$".equals(path)) message.append("；字段：").append(path);
+        if ("accessible_rewrite".equals(aiFailure.stringValue("stage"))) {
+            message.append("；本次事实提取结果已保留，可以仅重试改写阶段");
+        }
+        if (!requestId.isBlank()) message.append("；请求编号：").append(requestId);
+        return message.toString();
+    }
+
+    private static String defaultString(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    @Transactional(noRollbackFor = BusinessException.class)
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> retryRewrite(long id, AuthUser user) {
+        Map<String, Object> document = detail(id, user);
+        String status = String.valueOf(document.get("processing_status"));
+        if ("PUBLISHED".equals(status)) throw new BusinessException(409, "已发布材料不能重新生成");
+        Integer active = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM processing_job WHERE document_id=? AND status='PROCESSING'",
+                Integer.class, id);
+        if (active != null && active > 0) throw new BusinessException(409, "材料正在处理中，请勿重复提交");
+        List<Map<String, Object>> checkpoints = jdbc.queryForList(
+                "SELECT * FROM processing_job WHERE document_id=? AND fact_checkpoint_json IS NOT NULL ORDER BY id DESC LIMIT 1",
+                id);
+        if (checkpoints.isEmpty()) throw new BusinessException(409, "尚无可用的事实提取检查点，请先完整处理材料");
+        Map<String, Object> previous = checkpoints.get(0);
+        String checkpointJson = String.valueOf(previous.get("fact_checkpoint_json"));
+        Map<String, Object> checkpoint;
+        try {
+            checkpoint = objectMapper.readValue(checkpointJson, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException(409, "事实提取检查点不可用，请重新完整处理材料");
+        }
+        String traceId = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO processing_job(document_id,job_type,status,stage,progress,trace_id,retry_count,started_at) "
+                        + "VALUES (?,'REWRITE_ONLY','PROCESSING','REWRITE_PENDING',60,?,?,CURRENT_TIMESTAMP)",
+                id, traceId, intValue(previous.get("retry_count")) + 1);
+        Long jobId = jdbc.queryForObject("SELECT MAX(id) FROM processing_job WHERE document_id=?", Long.class, id);
+        jdbc.update("UPDATE source_document SET processing_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+        try {
+            List<Map<String, Object>> sourceSegments = jdbc.query(
+                    "SELECT id,page_no,text FROM document_segment WHERE document_id=? ORDER BY page_no,segment_no",
+                    (resultSet, rowNum) -> Map.of("segment_id", resultSet.getLong("id"),
+                            "page_no", resultSet.getInt("page_no"), "text", resultSet.getString("text")), id);
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("document_id", id);
+            context.put("processing_job_id", jobId);
+            context.put("trace_id", traceId);
+            context.put("content_kind", document.get("content_kind"));
+            context.put("prompt_version", "WEB_ARTICLE".equals(document.get("source_type")) ? "web-v1.1" : previous.get("prompt_version"));
+            Map<String, Object> result = aiClient.rewrite(String.valueOf(document.get("title")),
+                    String.valueOf(document.get("raw_text")),
+                    document.get("content_source_id") != null ? "public_news" : "guide",
+                    String.valueOf(document.getOrDefault("source_name", "")), sourceSegments, context, checkpoint);
+            jdbc.update("DELETE FROM generated_content WHERE document_id=?", id);
+            saveRewriteResult(id, result, document.get("content_source_id") != null ? document : null);
+            Map<String, Object> metrics = result.get("metrics") instanceof Map<?, ?> map
+                    ? (Map<String, Object>) map : Map.of();
+            jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,accessible_rewrite_ms=?,"
+                            + "prompt_tokens=?,completion_tokens=?,total_tokens=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    metric(metrics, "accessible_rewrite_ms"), metric(metrics, "prompt_tokens"),
+                    metric(metrics, "completion_tokens"), metric(metrics, "total_tokens"), jobId);
+            jdbc.update("UPDATE source_document SET processing_status='WAITING_REVIEW',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+            return Map.of("documentId", id, "status", "WAITING_REVIEW", "stage", "SUCCEEDED", "progress", 100);
+        } catch (RuntimeException exception) {
+            String failedStage = exception instanceof AiServiceException aiFailure
+                    ? defaultString(aiFailure.stringValue("stage"), "accessible_rewrite") : "accessible_rewrite";
+            jdbc.update("UPDATE processing_job SET status='FAILED',stage=?,last_failed_stage=?,error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    failedStage, failedStage, diagnosticMessage(exception), jobId);
+            jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+            throw new BusinessException(503, publicFailureMessage(exception));
+        }
+    }
+
+    private void saveRewriteResult(long id, Map<String, Object> result, Map<String, Object> publicDocument) {
+        saveGenerated(id, "SUMMARY", "三句话看懂", result.get("summary"), result.get("plain_text"));
+        saveGenerated(id, "PLAIN_LANGUAGE", "通俗版", result.get("summary"), result.get("plain_text"));
+        Object rawSteps = result.get("steps");
+        List<Map<String, Object>> steps = rawSteps instanceof List<?> list
+                ? (List<Map<String, Object>>) list : List.of();
+        saveGenerated(id, "STEP_CARDS", "办理步骤", steps, stepsText(steps));
+        saveGenerated(id, "TERM_EXPLANATION", "专业术语解释", result.get("term_explanations"), "专业术语已生成");
+        for (String[] item : List.of(
+                new String[]{"why_it_matters", "WHY_IT_MATTERS", "与我有什么关系"},
+                new String[]{"action_checklist", "ACTION_CHECKLIST", "行动清单"},
+                new String[]{"key_facts", "KEY_FACTS", "关键事实"},
+                new String[]{"common_mistakes", "COMMON_MISTAKES", "常见误区"},
+                new String[]{"faq", "FAQ", "常见问题"},
+                new String[]{"uncertainties", "UNCERTAINTIES", "尚待确认"})) {
+            saveStructuredIfPresent(id, result, item[0], item[1], item[2]);
+        }
+        if (result.get("warnings") != null) saveGenerated(id, "RISK_WARNING", "风险提示", result.get("warnings"), result.get("warnings"));
+        saveGenerated(id, "AUDIO_SCRIPT", "语音稿", null, result.get("audio_script"));
     }
 
     public List<Map<String, Object>> jobs(long id, AuthUser user) {

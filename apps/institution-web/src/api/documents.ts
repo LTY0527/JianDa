@@ -94,6 +94,10 @@ export interface ProcessingJob {
   progress: number;
   error_message?: string;
   stage?: string;
+  last_failed_stage?: string;
+  provider_request_id?: string;
+  fact_checkpoint_json?: string;
+  retry_count?: number;
   cache_hit?: boolean;
   total_ms?: number;
 }
@@ -138,6 +142,10 @@ export const documentApi = {
   process: (id: number) =>
     http.post<ApiResponse<{ status: string; progress: number }>>(
       `/documents/${id}/process`,
+    ),
+  retryRewrite: (id: number) =>
+    http.post<ApiResponse<{ status: string; progress: number }>>(
+      `/documents/${id}/retry-rewrite`,
     ),
   detail: (id: number) =>
     http.get<ApiResponse<DocumentDetail>>(`/documents/${id}`),
