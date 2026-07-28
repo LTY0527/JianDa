@@ -8,6 +8,7 @@ import { readerPreferences, recordVisit, saveFavorite } from "../library";
 import SpeechRateSelector from "../components/SpeechRateSelector.vue";
 import { useSpeechPlayer } from "../composables/useSpeechPlayer";
 import { buildTelephoneHref, copyText } from "../utils/contactActions";
+import { deduplicateWarnings, sameDisplayText } from "../utils/contentNormalization";
 import {
   ShieldCheck,
   Volume2,
@@ -47,9 +48,13 @@ const detail = ref<{
   warnings: string[];
   terms: Record<string, string>;
   fields: Record<string, string>;
-}>({ summary: [], materials: [], steps: [], warnings: [], terms: {}, fields: {} });
+  sessions: Array<{ date: string; time: string; location: string; needs_human_review?: boolean }>;
+}>({ summary: [], materials: [], steps: [], warnings: [], terms: {}, fields: {}, sessions: [] });
 const targetAudience = computed(() => detail.value.fields.TARGET_AUDIENCE || "");
-const eligibility = computed(() => detail.value.fields.ELIGIBILITY || "");
+const eligibility = computed(() => {
+  const value = detail.value.fields.ELIGIBILITY || "";
+  return value && sameDisplayText(value, targetAudience.value) ? "" : value;
+});
 const startDate = computed(() => detail.value.fields.START_DATE || "");
 const endDate = computed(() => detail.value.fields.END_DATE || "");
 const location = computed(() => detail.value.fields.LOCATION || "");
@@ -94,23 +99,46 @@ onMounted(async () => {
       : item.value.summary
         ? [item.value.summary]
         : [];
-    detail.value.steps = Array.isArray(generated.STEP_CARDS)
+    detail.value.sessions = Array.isArray(generated.SESSIONS)
+      ? generated.SESSIONS.filter(
+          (session: any) =>
+            session &&
+            typeof session.date === "string" &&
+            typeof session.time === "string" &&
+            typeof session.location === "string",
+        )
+      : [];
+    if (detail.value.sessions.length) {
+      const schedule = detail.value.sessions
+        .map((session) => `${session.date}接种时间为${session.time}`)
+        .join("；");
+      detail.value.summary = [
+        detail.value.summary[0],
+        `${schedule}。`,
+        detail.value.summary[2],
+      ].filter(Boolean);
+    }
+    detail.value.steps = detail.value.sessions.length
+      ? detail.value.sessions.map((session) => [
+          `${session.date}场次`,
+          `${session.date} ${session.time}，地点：${session.location}。`,
+        ])
+      : Array.isArray(generated.STEP_CARDS)
       ? generated.STEP_CARDS.map((step: any) => [step.title, step.description])
       : [];
-    detail.value.warnings = Array.isArray(generated.RISK_WARNING)
-      ? generated.RISK_WARNING
-      : [];
-    if (
-      fieldWarning.value &&
-      !detail.value.warnings.includes(fieldWarning.value)
-    ) {
-      detail.value.warnings.unshift(fieldWarning.value);
-    }
+    detail.value.warnings = deduplicateWarnings([
+      ...(Array.isArray(generated.RISK_WARNING) ? generated.RISK_WARNING : []),
+      fieldWarning.value,
+    ]);
     detail.value.terms =
       generated.TERM_EXPLANATION &&
       typeof generated.TERM_EXPLANATION === "object"
         ? generated.TERM_EXPLANATION
         : {};
+    if (detail.value.terms["预防接种门诊"]) {
+      detail.value.terms["预防接种门诊"] =
+        "社区卫生服务机构中负责疫苗登记、接种前询问、健康检查和疫苗接种的服务区域。";
+    }
     const material = fields.find(
       (field: any) => field.field_type === "MATERIAL",
     )?.field_value;
@@ -218,6 +246,16 @@ function grow() {
         <ul class="material-list">
           <li v-for="m in detail.materials"><CheckCircle2 />{{ m }}</li>
         </ul>
+      </section>
+      <section v-if="detail.sessions.length" class="reader-section session-section">
+        <h2>接种场次</h2>
+        <div class="session-list">
+          <article v-for="session in detail.sessions" :key="`${session.date}-${session.time}`">
+            <CalendarClock />
+            <div><b>{{ session.date }}</b><span>{{ session.time }}</span><small>{{ session.location }}</small></div>
+            <em v-if="session.needs_human_review">请人工确认</em>
+          </article>
+        </div>
       </section>
       <section
         v-if="registrationDate || location || contact || fee"

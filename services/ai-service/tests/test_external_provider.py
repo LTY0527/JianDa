@@ -488,6 +488,77 @@ def test_source_completion_does_not_duplicate_model_temporal_fields():
     ) == 1
 
 
+def test_material_four_sessions_split_conditions_and_rewrite_without_ambiguity():
+    condition = (
+        "本街道常住居民中，年满60周岁、目前无急性发热症状且"
+        "无医生明确告知的接种禁忌者"
+    )
+    source = (
+        f"{condition}，可参加本次登记。\n"
+        "2026年9月12日\n08:00-11:30\n"
+        "海棠街道社区卫生服务中心预防接种门诊\n"
+        "2026年9月13日\n13:30-16:30\n"
+        "海棠街道社区卫生服务中心预防接种门诊\n"
+        "请携带本人身份证。咨询电话021-5600-8812。"
+    )
+    fields = [
+        {
+            "field_type": field_type,
+            "label": label,
+            "value": value,
+            "source_quote": quote,
+            "page_no": 1,
+            "segment_id": 101,
+            "confidence": 0.98,
+        }
+        for field_type, label, value, quote in [
+            ("TARGET_AUDIENCE", "登记对象", condition, f"{condition}，可参加本次登记。"),
+            ("ELIGIBILITY", "符合条件", condition, f"{condition}，可参加本次登记。"),
+            ("MATERIAL", "材料", "本人身份证", "请携带本人身份证"),
+            (
+                "LOCATION",
+                "地点",
+                "海棠街道社区卫生服务中心预防接种门诊",
+                "海棠街道社区卫生服务中心预防接种门诊",
+            ),
+            ("CONTACT", "电话", "021-5600-8812", "咨询电话021-5600-8812"),
+        ]
+    ]
+    rewrite_payload = rewrite()
+    rewrite_payload["warnings"] = [
+        "接种前无需空腹。",
+        "接种前不需要空腹。",
+        "中心不会通过私人二维码收款，也不会要求提供支付密码。",
+    ]
+    rewrite_payload["term_explanations"] = {"预防接种门诊": "就是打疫苗的地方。"}
+    with QueueServer(
+        [
+            response(200, json_completion(facts(fields))),
+            response(200, json_completion(rewrite_payload)),
+        ]
+    ) as server:
+        result = ExternalLlmProvider(
+            settings(server.url), sleep=lambda _: None
+        ).analyze(request(source))
+
+    values = {field.field_type: field.value for field in result.fields}
+    assert values["TARGET_AUDIENCE"] == "本街道常住居民中，年满60周岁"
+    assert values["ELIGIBILITY"] == "目前无急性发热症状且无医生明确告知的接种禁忌"
+    assert [(item.date, item.time) for item in result.sessions] == [
+        ("2026年9月12日", "08:00-11:30"),
+        ("2026年9月13日", "13:30-16:30"),
+    ]
+    assert result.summary[1] == (
+        "2026年9月12日接种时间为08:00-11:30；"
+        "2026年9月13日接种时间为13:30-16:30。"
+    )
+    assert result.warnings == [
+        "接种前不需要空腹。",
+        "中心不会通过私人二维码收款，也不会要求提供支付密码。",
+    ]
+    assert "负责疫苗登记" in result.term_explanations["预防接种门诊"]
+
+
 def test_audit_counts_valid_and_rejected_fields_without_sensitive_content(caplog):
     caplog.set_level(logging.INFO)
     valid = {

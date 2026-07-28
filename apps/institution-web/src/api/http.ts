@@ -30,7 +30,19 @@ http.interceptors.response.use(
 );
 
 export function apiMessage(error: unknown): string {
-  if (axios.isAxiosError(error))
-    return error.response?.data?.message || "服务连接失败，请确认后端已启动";
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    const serverMessage = error.response?.data?.message;
+    const requestId = error.response?.headers?.["x-request-id"];
+    let message = serverMessage || "操作失败，请稍后重试";
+    if (!error.response) message = "服务暂时不可达，请检查网络后重试";
+    else if (status === 401 || status === 403) message = "登录已失效，请重新登录";
+    else if (status === 400) message = serverMessage || "材料信息不完整，请检查后重试";
+    else if (status === 413) message = "文件超过 20MB，请选择较小的文件";
+    else if (status === 500) message = "服务器处理失败，请稍后重试";
+    else if (status === 502 || status === 504) message = "网关暂时无法连接服务，请稍后重试";
+    else if (status === 503) message = serverMessage || "AI 服务调用失败，请稍后重试";
+    return requestId ? `${message}（请求编号：${requestId}）` : message;
+  }
   return "操作失败，请稍后重试";
 }

@@ -60,6 +60,26 @@ class ExtractedField(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class ServiceSession(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    date: str = Field(min_length=1)
+    time: str = Field(min_length=1)
+    location: str = Field(min_length=1)
+    source_quote: str = Field(min_length=1)
+    page_no: int = Field(ge=1)
+    segment_id: int
+    needs_human_review: bool = False
+
+    @field_validator("date", "time", "location", "source_quote")
+    @classmethod
+    def strip_session_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
+
+
 class StepCard(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -70,6 +90,7 @@ class StepCard(BaseModel):
 
 class AnalyzeResult(BaseModel):
     fields: list[ExtractedField]
+    sessions: list[ServiceSession] = Field(default_factory=list)
     summary: list[str]
     plain_text: str
     steps: list[StepCard]
@@ -103,6 +124,7 @@ class FactExtractionResponse(BaseModel):
 
     prompt_version: str = Field(min_length=1)
     fields: list[FactField]
+    sessions: list[ServiceSession] = Field(default_factory=list)
 
 
 class RewriteResponse(BaseModel):
@@ -145,3 +167,20 @@ class ExtractTextResult(BaseModel):
     page_count: int
     segments: list[Segment]
     extraction_method: str
+
+
+class MetadataPreview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    source_name: str
+    document_number: str = ""
+    source_type: str = ""
+    authority_status: Literal["DOCUMENT_EVIDENCE", "UNCONFIRMED", "CONFLICT"]
+    confidence: float = Field(ge=0, le=1)
+    evidence_quote: str = ""
+    evidence_type: Literal[
+        "HEADER", "SIGNATURE", "SEAL", "PUBLISHER_FIELD", "FILENAME", "NONE"
+    ]
+    page_no: int = Field(ge=1)
+    warnings: list[str] = Field(default_factory=list)

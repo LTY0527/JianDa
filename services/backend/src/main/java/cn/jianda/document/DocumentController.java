@@ -35,8 +35,14 @@ public class DocumentController {
 
     @PostMapping
     public ApiResponse<Map<String, Object>> create(@Valid @RequestBody CreateRequest request) {
-        long id = service.create(request.title(), UserContext.current());
+        long id = service.create(request, UserContext.current());
         return ApiResponse.ok(Map.of("id", id, "status", "UPLOADED"));
+    }
+
+    @PostMapping("/metadata-preview")
+    public ApiResponse<Map<String, Object>> metadataPreview(
+            @RequestPart("file") MultipartFile file) throws IOException {
+        return ApiResponse.ok(service.metadataPreview(file));
     }
 
     @GetMapping("/{id}")
@@ -90,11 +96,19 @@ public class DocumentController {
     @PostMapping("/{id}/withdraw")
     public ApiResponse<Void> withdraw(@PathVariable long id) { service.withdraw(id, UserContext.current()); return ApiResponse.ok(null); }
 
-    public record CreateRequest(@NotBlank(message = "请输入材料标题") String title) {}
+    public record CreateRequest(
+            @NotBlank(message = "请输入材料标题") String title,
+            String sourceName,
+            String documentNumber,
+            String sourceType,
+            String authorityStatus,
+            Double confidence,
+            String evidenceQuote,
+            String evidenceType,
+            Integer pageNo) {}
     public record FieldRequest(@NotBlank(message = "字段内容不能为空") String value, boolean confirmed) {}
     public record ReviewRequest(String comment) {}
     public record PublishRequest(@NotBlank(message = "请输入标题") String title,
                                  @NotBlank(message = "请选择分类") String category,
                                  @NotBlank(message = "请输入来源") String sourceName, String sourceUrl) {}
 }
-

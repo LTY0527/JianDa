@@ -23,15 +23,27 @@ public class HttpAiClient implements AiClient {
     private final ObjectMapper objectMapper;
     private final URI analyzeUri;
     private final URI extractUri;
+    private final URI metadataUri;
 
     public HttpAiClient(ObjectMapper objectMapper, @Value("${jianda.ai-service-url}") String baseUrl) {
         this.objectMapper = objectMapper;
         this.analyzeUri = URI.create(baseUrl + "/internal/analyze");
         this.extractUri = URI.create(baseUrl + "/internal/extract-text");
+        this.metadataUri = URI.create(baseUrl + "/internal/metadata-preview");
     }
 
     @Override
     public Map<String, Object> extractText(Path file, String fileName, String contentType) {
+        return sendFile(extractUri, file, fileName, contentType, "AI extraction");
+    }
+
+    @Override
+    public Map<String, Object> previewMetadata(Path file, String fileName, String contentType) {
+        return sendFile(metadataUri, file, fileName, contentType, "AI metadata preview");
+    }
+
+    private Map<String, Object> sendFile(URI uri, Path file, String fileName,
+                                         String contentType, String operation) {
         HttpURLConnection connection = null;
         String boundary = "----JianDa" + UUID.randomUUID().toString().replace("-", "");
         try {
@@ -46,7 +58,7 @@ public class HttpAiClient implements AiClient {
             Files.copy(file, payload);
             payload.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
 
-            connection = (HttpURLConnection) extractUri.toURL().openConnection(Proxy.NO_PROXY);
+            connection = (HttpURLConnection) uri.toURL().openConnection(Proxy.NO_PROXY);
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
             connection.setConnectTimeout(10_000);
@@ -54,9 +66,9 @@ public class HttpAiClient implements AiClient {
             connection.setDoOutput(true);
             connection.setFixedLengthStreamingMode(payload.size());
             payload.writeTo(connection.getOutputStream());
-            return readResponse(connection, "AI extraction");
+            return readResponse(connection, operation);
         } catch (IOException exception) {
-            throw new IllegalStateException("AI extraction service connection failed", exception);
+            throw new IllegalStateException(operation + " service connection failed", exception);
         } finally {
             if (connection != null) connection.disconnect();
         }

@@ -9,10 +9,13 @@
 
 ## 材料与处理
 
+- `POST /api/documents/metadata-preview`：上传 PDF/PNG/JPG 后预识别标题、来源、文号和材料内权威证据；不创建正式文档或处理任务。
 - `POST /api/documents`，`POST /api/documents/{id}/upload`
 - `GET /api/documents`，`GET /api/documents/{id}`
 - `POST /api/documents/{id}/process`
 - `GET /api/documents/{id}/jobs|segments|fields|generated`
+
+预识别结果的 `authority_status` 仅表示材料内部证据：`DOCUMENT_EVIDENCE` 为存在明确发布机构证据，`UNCONFIRMED` 为无法确认，`CONFLICT` 为候选冲突；不表示官网或外部数据库已经核验。正式处理结果的 `generated` 可包含 `SESSIONS`，其中日期、时间、地点和原文追溯信息作为同一场次保存。
 
 ## 审核发布
 

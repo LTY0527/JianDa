@@ -19,6 +19,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.util.Base64;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -62,6 +64,17 @@ class CoreFlowIntegrationTest {
                                 "start_offset", 0, "end_offset", 7),
                         Map.of("page_no", 2, "segment_no", 1, "text", "第二页真实正文",
                                 "start_offset", 8, "end_offset", 15))));
+        when(aiClient.previewMetadata(any(Path.class), anyString(), anyString())).thenReturn(Map.of(
+                "title", "秋冬季流感疫苗集中接种登记说明",
+                "source_name", "海棠街道社区卫生服务中心",
+                "document_number", "海卫预防〔2026〕09号",
+                "source_type", "基层医疗卫生机构",
+                "authority_status", "DOCUMENT_EVIDENCE",
+                "confidence", 0.96,
+                "evidence_quote", "海棠街道社区卫生服务中心",
+                "evidence_type", "HEADER",
+                "page_no", 1,
+                "warnings", List.of()));
     }
 
     @Test
@@ -70,6 +83,43 @@ class CoreFlowIntegrationTest {
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.username").value("org_admin"))
                 .andExpect(jsonPath("$.data.organizationName").value("浦江街道社区服务中心"));
+    }
+
+    @Test
+    void metadataPreviewDoesNotCreateDocumentOrLeaveTemporaryFile() throws Exception {
+        String auth = "Bearer " + login();
+        int before = objectMapper.readTree(mvc.perform(get("/api/documents").header("Authorization", auth))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString())
+                .path("data").size();
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "简达_模拟材料4_社区流感疫苗接种登记说明.pdf",
+                "application/pdf", "%PDF-preview".getBytes());
+        mvc.perform(multipart("/api/documents/metadata-preview").file(file).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").value("秋冬季流感疫苗集中接种登记说明"))
+                .andExpect(jsonPath("$.data.source_name").value("海棠街道社区卫生服务中心"))
+                .andExpect(jsonPath("$.data.authority_status").value("DOCUMENT_EVIDENCE"))
+                .andExpect(jsonPath("$.data.document_number").value("海卫预防〔2026〕09号"));
+        int after = objectMapper.readTree(mvc.perform(get("/api/documents").header("Authorization", auth))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString())
+                .path("data").size();
+        org.junit.jupiter.api.Assertions.assertEquals(before, after);
+        Path previewDir = Path.of("./target/test-uploads/.metadata-preview");
+        if (Files.exists(previewDir)) {
+            try (var files = Files.list(previewDir)) {
+                org.junit.jupiter.api.Assertions.assertEquals(0, files.count());
+            }
+        }
+    }
+
+    @Test
+    void generatedDefaultSecurityUserCannotAccessBusinessApi() throws Exception {
+        String basic = Base64.getEncoder().encodeToString("user:any-password".getBytes());
+        mvc.perform(get("/api/documents").header("Authorization", "Basic " + basic))
+                .andExpect(status().isForbidden())
+                .andExpect(result ->
+                        org.junit.jupiter.api.Assertions.assertNotNull(
+                                result.getResponse().getHeader("X-Request-Id")));
     }
 
     @Test

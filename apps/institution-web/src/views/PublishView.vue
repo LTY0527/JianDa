@@ -72,7 +72,7 @@ onMounted(async () => {
     form.category = document.value.category || "生活服务";
     form.summary = summary?.plain_text || "";
     form.sourceName =
-      source.source_name || document.value.organization_name || "";
+      source.source_name || document.value.source_name || document.value.organization_name || "";
     form.sourceUrl = document.value.import_url || source.source_url || "";
     form.publishedAt = String(
       document.value.source_published_at || new Date().toISOString(),

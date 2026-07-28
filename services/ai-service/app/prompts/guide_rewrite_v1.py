@@ -1,6 +1,6 @@
 import json
 
-from app.models import FactField, TextRequest
+from app.models import FactField, ServiceSession, TextRequest
 from app.prompts.schemas import REWRITE_SCHEMA_EXAMPLE
 
 
@@ -17,7 +17,10 @@ SYSTEM_PROMPT = """你是公共服务内容的适老化改写助手。
 
 
 def build_task_prompt(
-    request: TextRequest, fields: list[FactField], prompt_version: str
+    request: TextRequest,
+    fields: list[FactField],
+    sessions: list[ServiceSession],
+    prompt_version: str,
 ) -> str:
     verified = [
         {
@@ -30,6 +33,7 @@ def build_task_prompt(
         }
         for field in fields
     ]
+    verified_sessions = [session.model_dump() for session in sessions]
     return f"""任务：将已验证事实改写为适老化内容。
 prompt_version 必须原样返回为 {prompt_version}。
 document_type: {request.document_type}
@@ -39,8 +43,12 @@ source_name: {request.source_name or "未提供"}
 已验证事实：
 {json.dumps(verified, ensure_ascii=False)}
 
+已验证场次：
+{json.dumps(verified_sessions, ensure_ascii=False)}
+
 严格 JSON 结构示例：
 {REWRITE_SCHEMA_EXAMPLE}
 
 如果已验证事实为空，不得创造事实；摘要和通俗版应提示向发布机构确认。
+如果存在多个场次，摘要和步骤必须逐项保持每个日期与其时间、地点的对应关系，使用24小时制，不得压平成“多个日期都有多个时间段”。
 """

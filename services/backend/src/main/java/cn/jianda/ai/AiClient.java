@@ -7,6 +7,8 @@ import java.util.Map;
 public interface AiClient {
     Map<String, Object> extractText(Path file, String fileName, String contentType);
 
+    Map<String, Object> previewMetadata(Path file, String fileName, String contentType);
+
     Map<String, Object> analyze(String title, String text, String documentType,
                                 String sourceName, List<Map<String, Object>> segments);
 }

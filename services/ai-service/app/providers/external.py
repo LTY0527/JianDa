@@ -15,15 +15,39 @@ from app.models import (
     AnalyzeResult,
     ExtractedField,
     FactField,
+    MetadataPreview,
     RewriteResponse,
+    ServiceSession,
     SourceSegment,
+    StepCard,
     TextRequest,
 )
-from app.prompts import guide_extract_v1, guide_rewrite_v1
+from app.prompts import guide_extract_v1, guide_rewrite_v1, metadata_extract_v1
 from app.providers.base import LlmProvider
 
 
 LOGGER = logging.getLogger("uvicorn.error")
+
+
+def _deduplicate_warnings(warnings: list[str]) -> list[str]:
+    result: list[str] = []
+    keys: list[str] = []
+    for warning in warnings:
+        for clause in re.split(r"[。；;]+", warning):
+            display = clause.strip(" ，,。；;")
+            if not display:
+                continue
+            display = display.replace("无需", "不需要")
+            key = re.sub(r"[\s，,。；;！!]", "", display)
+            key = key.replace("无需", "不需要").replace("向您", "").replace("您", "")
+            if key in keys:
+                index = keys.index(key)
+                if "不需要" in display and "无需" in result[index]:
+                    result[index] = display + "。"
+                continue
+            result.append(display + "。")
+            keys.append(key)
+    return result
 
 
 class ExternalProviderError(RuntimeError):
@@ -161,6 +185,13 @@ class ExternalLlmProvider(LlmProvider):
             facts = self._complete_explicit_temporal_facts(
                 model_facts, request
             )
+            facts = self._split_duplicate_audience_eligibility(facts)
+            model_sessions = self._validate_sessions(
+                fact_result.payload.get("sessions"), request
+            )
+            sessions = self._complete_explicit_sessions(
+                model_sessions, request
+            )
             LOGGER.info(
                 "provider=external model=%s prompt_version=%s "
                 "stage=fact_completion model_field_count=%s "
@@ -183,13 +214,17 @@ class ExternalLlmProvider(LlmProvider):
                     {
                         "role": "user",
                         "content": guide_rewrite_v1.build_task_prompt(
-                            request, facts, self.settings.prompt_version
+                            request,
+                            facts,
+                            sessions,
+                            self.settings.prompt_version,
                         ),
                     },
                 ],
                 stage="accessible_rewrite",
             )
             rewrite = self._validate_rewrite(rewrite_result.payload)
+            rewrite = self._rewrite_with_sessions(rewrite, facts, sessions)
             return AnalyzeResult(
                 fields=[
                     ExtractedField(
@@ -204,6 +239,7 @@ class ExternalLlmProvider(LlmProvider):
                     )
                     for field in facts
                 ],
+                sessions=sessions,
                 summary=rewrite.summary,
                 plain_text=rewrite.plain_text,
                 steps=rewrite.steps,
@@ -215,18 +251,61 @@ class ExternalLlmProvider(LlmProvider):
             if self.client is None:
                 active_client.close()
 
+    def preview_metadata(
+        self,
+        text: str,
+        filename: str,
+        deterministic: MetadataPreview,
+    ) -> MetadataPreview:
+        active_client = self.client or httpx.Client(
+            timeout=self.settings.timeout_seconds
+        )
+        try:
+            result = self._completion(
+                active_client,
+                [
+                    {"role": "system", "content": metadata_extract_v1.SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": metadata_extract_v1.build_prompt(
+                            text, filename, deterministic.model_dump()
+                        ),
+                    },
+                ],
+                stage="metadata_preview",
+                max_tokens=800,
+            )
+            try:
+                preview = MetadataPreview.model_validate(result.payload)
+            except ValidationError as exc:
+                raise ExternalProviderError("外部模型元数据结果不符合 JSON Schema") from exc
+            if (
+                preview.authority_status == "DOCUMENT_EVIDENCE"
+                and (
+                    not preview.evidence_quote
+                    or preview.evidence_quote not in text
+                    or preview.source_name not in preview.evidence_quote
+                )
+            ):
+                raise ExternalProviderError("外部模型元数据发布机构证据无法追溯")
+            return preview
+        finally:
+            if self.client is None:
+                active_client.close()
+
     def _completion(
         self,
         client: httpx.Client,
         messages: list[dict[str, str]],
         stage: str,
+        max_tokens: int | None = None,
     ) -> CompletionResult:
         request_body = {
             "model": self.settings.model,
             "messages": messages,
             "stream": False,
             "response_format": {"type": "json_object"},
-            "max_tokens": self.settings.max_tokens,
+            "max_tokens": max_tokens or self.settings.max_tokens,
             "thinking": {"type": self.settings.thinking},
         }
         attempts = self.settings.max_retries + 1
@@ -542,6 +621,187 @@ class ExternalLlmProvider(LlmProvider):
                     )
                 )
         return completed
+
+    def _validate_sessions(
+        self, payload: Any, request: TextRequest
+    ) -> list[ServiceSession]:
+        if payload is None:
+            return []
+        if not isinstance(payload, list):
+            return []
+        segments = request.segments or [
+            SourceSegment(segment_id=1, page_no=1, text=request.text)
+        ]
+        by_id = {segment.segment_id: segment for segment in segments}
+        valid: list[ServiceSession] = []
+        for item in payload:
+            try:
+                session = ServiceSession.model_validate(item)
+            except ValidationError:
+                continue
+            segment = by_id.get(session.segment_id)
+            if segment is None or segment.page_no != session.page_no:
+                continue
+            quote = self._locate_source_quote(
+                segment.text, session.source_quote
+            )
+            if quote is None or not all(
+                re.sub(r"\s+", "", value)
+                in re.sub(r"\s+", "", quote)
+                for value in (session.date, session.time, session.location)
+            ):
+                continue
+            valid.append(
+                session.model_copy(update={"source_quote": quote})
+            )
+        return valid
+
+    def _complete_explicit_sessions(
+        self, sessions: list[ServiceSession], request: TextRequest
+    ) -> list[ServiceSession]:
+        completed = list(sessions)
+        segments = request.segments or [
+            SourceSegment(segment_id=1, page_no=1, text=request.text)
+        ]
+        pattern = re.compile(
+            r"(?P<date>\d{4}年\d{1,2}月\d{1,2}日)\s*"
+            r"(?P<time>\d{2}:\d{2}\s*[-—至]\s*\d{2}:\d{2})\s*"
+            r"(?P<location>[^\r\n。；]{2,80}(?:门诊|窗口|服务台|中心|地点))"
+        )
+        for segment in segments:
+            for match in pattern.finditer(segment.text):
+                date = re.sub(r"\s+", "", match.group("date"))
+                time_value = re.sub(r"\s+", "", match.group("time")).replace("—", "-")
+                location = match.group("location").strip()
+                if any(
+                    item.date == date
+                    and item.time == time_value
+                    and item.location == location
+                    for item in completed
+                ):
+                    continue
+                completed.append(
+                    ServiceSession(
+                        date=date,
+                        time=time_value,
+                        location=location,
+                        source_quote=match.group(0),
+                        page_no=segment.page_no,
+                        segment_id=segment.segment_id,
+                        needs_human_review=False,
+                    )
+                )
+        return completed
+
+    @staticmethod
+    def _split_duplicate_audience_eligibility(
+        fields: list[FactField],
+    ) -> list[FactField]:
+        audience = next(
+            (field for field in fields if field.field_type == "TARGET_AUDIENCE"),
+            None,
+        )
+        eligibility = next(
+            (field for field in fields if field.field_type == "ELIGIBILITY"),
+            None,
+        )
+        if (
+            audience is None
+            or eligibility is None
+            or re.sub(r"[\s，,。；;]", "", audience.value)
+            != re.sub(r"[\s，,。；;]", "", eligibility.value)
+            or audience.source_quote != eligibility.source_quote
+        ):
+            return fields
+        match = re.match(
+            r"(?P<audience>.+?年满\d+周岁)[、，,](?P<eligibility>目前.+?)(?:者)?$",
+            audience.value,
+        )
+        if not match:
+            return fields
+        return [
+            field.model_copy(
+                update={
+                    "value": (
+                        match.group("audience")
+                        if field.field_type == "TARGET_AUDIENCE"
+                        else match.group("eligibility").removesuffix("者")
+                    )
+                }
+            )
+            if field is audience or field is eligibility
+            else field
+            for field in fields
+        ]
+
+    @staticmethod
+    def _rewrite_with_sessions(
+        rewrite: RewriteResponse,
+        fields: list[FactField],
+        sessions: list[ServiceSession],
+    ) -> RewriteResponse:
+        if not sessions:
+            return rewrite
+        values: dict[str, str] = {}
+        for field in fields:
+            values.setdefault(field.field_type, field.value)
+        audience = values.get("TARGET_AUDIENCE", "")
+        eligibility = values.get("ELIGIBILITY", "")
+        first = "，且".join(
+            part for part in (audience, eligibility) if part
+        )
+        if first:
+            first += "，可以登记。"
+        schedule = "；".join(
+            f"{session.date}接种时间为{session.time}"
+            + (
+                f"，地点为{session.location}"
+                if len({item.location for item in sessions}) > 1
+                else ""
+            )
+            for session in sessions
+        ) + "。"
+        material = values.get("MATERIAL", "")
+        location = sessions[0].location
+        contact = values.get("CONTACT", "")
+        third_parts = []
+        if material:
+            third_parts.append(f"请带{material}")
+        if location:
+            third_parts.append(f"到{location}")
+        if contact:
+            third_parts.append(f"咨询电话{contact}")
+        third = "；".join(third_parts) + "。"
+        summary = [item for item in (first, schedule, third) if item]
+        steps = [
+            StepCard(
+                order=index + 1,
+                title=f"{session.date}场次",
+                description=(
+                    f"{session.date} {session.time}，"
+                    f"地点：{session.location}。"
+                ),
+            )
+            for index, session in enumerate(sessions)
+        ]
+        warnings = _deduplicate_warnings(rewrite.warnings)
+        terms = dict(rewrite.term_explanations)
+        if any("预防接种门诊" in session.location for session in sessions):
+            terms["预防接种门诊"] = (
+                "社区卫生服务机构中负责疫苗登记、接种前询问、"
+                "健康检查和疫苗接种的服务区域。"
+            )
+        plain_text = "".join(summary)
+        return rewrite.model_copy(
+            update={
+                "summary": summary,
+                "plain_text": plain_text,
+                "steps": steps,
+                "warnings": warnings,
+                "term_explanations": terms,
+                "audio_script": plain_text + "".join(warnings),
+            }
+        )
 
     @staticmethod
     def _has_temporal_pair(

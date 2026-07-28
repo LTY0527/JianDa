@@ -7,6 +7,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +23,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/public")
 public class PublicController {
+    private static final Pattern SESSION_PATTERN = Pattern.compile(
+            "(?<date>\\d{4}年\\d{1,2}月\\d{1,2}日)\\s*"
+                    + "(?<time>\\d{2}:\\d{2}\\s*[-—至]\\s*\\d{2}:\\d{2})\\s*"
+                    + "(?<location>[^\\r\\n。；]{2,80}(?:门诊|窗口|服务台|中心|地点))");
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
 
@@ -58,7 +65,15 @@ public class PublicController {
             } catch (Exception exception) { generated.put(row.get("content_type").toString(), row.get("plain_text")); }
         }
         result.put("generated", generated);
-        result.put("fields", jdbc.queryForList("SELECT field_type,field_label,field_value,page_no,source_quote FROM extracted_field WHERE document_id=? ORDER BY id", documentId));
+        List<Map<String, Object>> fields = jdbc.queryForList(
+                "SELECT field_type,field_label,field_value,page_no,segment_id,source_quote "
+                        + "FROM extracted_field WHERE document_id=? ORDER BY id", documentId);
+        result.put("fields", fields);
+        if (!generated.containsKey("SESSIONS")) {
+            List<Map<String, Object>> sessions =
+                    sessionsFromSource(String.valueOf(result.getOrDefault("raw_text", "")), fields);
+            if (!sessions.isEmpty()) generated.put("SESSIONS", sessions);
+        }
         return ApiResponse.ok(result);
     }
 
@@ -72,5 +87,28 @@ public class PublicController {
     @DeleteMapping("/items/{id}/favorite")
     public ApiResponse<Void> unfavorite(@PathVariable long id, @RequestHeader(value = "X-Anonymous-User", defaultValue = "demo-user") String user) {
         jdbc.update("DELETE FROM favorite WHERE anonymous_user_id=? AND published_item_id=?", user, id); return ApiResponse.ok(null);
+    }
+
+    private static List<Map<String, Object>> sessionsFromSource(
+            String source, List<Map<String, Object>> fields) {
+        List<Map<String, Object>> sessions = new ArrayList<>();
+        Matcher matcher = SESSION_PATTERN.matcher(source);
+        long segmentId = fields.stream()
+                .map(field -> field.get("segment_id"))
+                .filter(Number.class::isInstance)
+                .map(Number.class::cast)
+                .mapToLong(Number::longValue)
+                .findFirst().orElse(0);
+        while (matcher.find()) {
+            sessions.add(Map.of(
+                    "date", matcher.group("date").replaceAll("\\s+", ""),
+                    "time", matcher.group("time").replaceAll("\\s+", "").replace('—', '-'),
+                    "location", matcher.group("location").trim(),
+                    "source_quote", matcher.group(),
+                    "page_no", 1,
+                    "segment_id", segmentId,
+                    "needs_human_review", false));
+        }
+        return sessions;
     }
 }

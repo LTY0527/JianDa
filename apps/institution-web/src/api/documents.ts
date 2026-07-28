@@ -18,6 +18,7 @@ export interface ExtractedField {
   source_quote: string;
   confidence: number;
   review_status: string;
+  duplicate_suspected?: boolean;
 }
 
 export interface DocumentDetail {
@@ -29,7 +30,21 @@ export interface DocumentDetail {
   import_url?: string;
   source_published_at?: string;
   organization_name: string;
+  source_name?: string;
   processing_status: string;
+}
+
+export interface MetadataPreview {
+  title: string;
+  source_name: string;
+  document_number: string;
+  source_type: string;
+  authority_status: "DOCUMENT_EVIDENCE" | "UNCONFIRMED" | "CONFLICT";
+  confidence: number;
+  evidence_quote: string;
+  evidence_type: "HEADER" | "SIGNATURE" | "SEAL" | "PUBLISHER_FIELD" | "FILENAME" | "NONE";
+  page_no: number;
+  warnings: string[];
 }
 
 export interface GeneratedContent {
@@ -66,8 +81,23 @@ export const authApi = {
 
 export const documentApi = {
   list: () => http.get<ApiResponse<DocumentRow[]>>("/documents"),
-  create: (title: string) =>
-    http.post<ApiResponse<{ id: number }>>("/documents", { title }),
+  create: (title: string, sourceName = "", metadata?: MetadataPreview | null) =>
+    http.post<ApiResponse<{ id: number }>>("/documents", {
+      title,
+      sourceName,
+      documentNumber: metadata?.document_number,
+      sourceType: metadata?.source_type,
+      authorityStatus: metadata?.authority_status,
+      confidence: metadata?.confidence,
+      evidenceQuote: metadata?.evidence_quote,
+      evidenceType: metadata?.evidence_type,
+      pageNo: metadata?.page_no,
+    }),
+  metadataPreview: (file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    return http.post<ApiResponse<MetadataPreview>>("/documents/metadata-preview", body);
+  },
   upload: (id: number, file: File, manualText?: string) => {
     const body = new FormData();
     body.append("file", file);

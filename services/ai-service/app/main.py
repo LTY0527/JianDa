@@ -1,14 +1,29 @@
 import os
+import logging
 import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 
 from app.extraction import ALLOWED_SUFFIXES, extract_file
-from app.models import AnalyzeResult, ExtractTextResult, TextRequest
+from app.metadata import detect_metadata
+from app.models import AnalyzeResult, ExtractTextResult, MetadataPreview, TextRequest
 from app.providers import ExternalLlmProvider, LlmProvider, MockProvider
 
 app = FastAPI(title="简达 AI 服务", version="0.1.0")
+
+
+class _SkipHealthAccessLog(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        return not (
+            isinstance(args, tuple)
+            and len(args) >= 3
+            and str(args[2]).split("?", 1)[0] == "/health"
+        )
+
+
+logging.getLogger("uvicorn.access").addFilter(_SkipHealthAccessLog())
 
 
 def get_provider() -> LlmProvider:
@@ -30,6 +45,37 @@ async def extract_text(file: UploadFile = File(...)) -> ExtractTextResult:
         path = Path(temp.name)
     try:
         return extract_file(path)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@app.post("/internal/metadata-preview", response_model=MetadataPreview)
+async def metadata_preview(file: UploadFile = File(...)) -> MetadataPreview:
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(status_code=400, detail="仅支持 PDF、PNG、JPG 文件")
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp:
+        temp.write(await file.read())
+        path = Path(temp.name)
+    try:
+        preview, preview_text = detect_metadata(path, file.filename or "")
+        if (
+            preview.authority_status != "DOCUMENT_EVIDENCE"
+            and os.getenv("LLM_PROVIDER", "mock").lower() == "external"
+            and preview_text.strip()
+        ):
+            try:
+                preview = ExternalLlmProvider().preview_metadata(
+                    preview_text, file.filename or "", preview
+                )
+            except RuntimeError:
+                preview = preview.model_copy(
+                    update={
+                        "warnings": preview.warnings
+                        + ["智能补充识别未完成，请人工确认标题和来源。"]
+                    }
+                )
+        return preview
     finally:
         path.unlink(missing_ok=True)
 
@@ -56,4 +102,3 @@ def generate_steps(request: TextRequest) -> dict[str, object]:
 @app.post("/internal/trace-fields")
 def trace_fields(request: TextRequest) -> dict[str, object]:
     return {"fields": analyze(request).fields}
-

@@ -62,20 +62,51 @@ public class DocumentService {
     }
 
     @Transactional
-    public long create(String title, AuthUser user) {
+    public long create(DocumentController.CreateRequest request, AuthUser user) {
         KeyHolder keys = new GeneratedKeyHolder();
         jdbc.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO source_document(organization_id,title,processing_status,created_by) VALUES (?,?,'UPLOADED',?)",
+                    "INSERT INTO source_document(organization_id,title,source_name,document_number,source_type,"
+                            + "authority_status,metadata_confidence,metadata_evidence_quote,metadata_evidence_type,"
+                            + "metadata_page_no,processing_status,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,'UPLOADED',?)",
                     new String[] {"id"});
             ps.setLong(1, user.organizationId());
-            ps.setString(2, title.trim());
-            ps.setLong(3, user.id());
+            ps.setString(2, request.title().trim());
+            ps.setString(3, trimToNull(request.sourceName()));
+            ps.setString(4, trimToNull(request.documentNumber()));
+            ps.setString(5, trimToNull(request.sourceType()));
+            ps.setString(6, trimToNull(request.authorityStatus()));
+            if (request.confidence() == null) ps.setNull(7, java.sql.Types.DECIMAL);
+            else ps.setDouble(7, request.confidence());
+            ps.setString(8, trimToNull(request.evidenceQuote()));
+            ps.setString(9, trimToNull(request.evidenceType()));
+            if (request.pageNo() == null) ps.setNull(10, java.sql.Types.INTEGER);
+            else ps.setInt(10, request.pageNo());
+            ps.setLong(11, user.id());
             return ps;
         }, keys);
         long id = keys.getKey().longValue();
         log(user, "CREATE_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
         return id;
+    }
+
+    public Map<String, Object> metadataPreview(MultipartFile file) throws IOException {
+        if (file.isEmpty()) throw new BusinessException(400, "请选择要识别的文件");
+        String original = safeOriginalName(file);
+        String extension = extension(original);
+        if (!ALLOWED_EXTENSIONS.contains(extension)) {
+            throw new BusinessException(400, "仅支持 PDF、PNG、JPG 文件");
+        }
+        Path previewDir = uploadRoot.resolve(".metadata-preview").normalize();
+        Files.createDirectories(previewDir);
+        Path temporary = previewDir.resolve(UUID.randomUUID() + "." + extension).normalize();
+        if (!temporary.startsWith(previewDir)) throw new BusinessException(400, "文件路径不安全");
+        try {
+            Files.copy(file.getInputStream(), temporary, StandardCopyOption.REPLACE_EXISTING);
+            return aiClient.previewMetadata(temporary, original, file.getContentType());
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
     }
 
     @Transactional
@@ -84,9 +115,8 @@ public class DocumentService {
         if (file.isEmpty()) {
             throw new BusinessException(400, "请选择要上传的文件");
         }
-        String original = Paths.get(file.getOriginalFilename() == null ? "material" : file.getOriginalFilename())
-                .getFileName().toString().replaceAll("[^a-zA-Z0-9._\\-\\u4e00-\\u9fa5]", "_");
-        String extension = original.contains(".") ? original.substring(original.lastIndexOf('.') + 1).toLowerCase() : "";
+        String original = safeOriginalName(file);
+        String extension = extension(original);
         if (!ALLOWED_EXTENSIONS.contains(extension)) {
             throw new BusinessException(400, "仅支持 PDF、PNG、JPG 文件");
         }
@@ -132,9 +162,12 @@ public class DocumentService {
                             "page_no", resultSet.getInt("page_no"),
                             "text", resultSet.getString("text")),
                     id);
+            String sourceName = document.get("source_name") == null
+                    ? String.valueOf(document.getOrDefault("organization_name", ""))
+                    : String.valueOf(document.get("source_name"));
             Map<String, Object> result = aiClient.analyze(document.get("title").toString(), rawText,
                     publicInformation ? "public_news" : "guide",
-                    String.valueOf(document.getOrDefault("organization_name", "")),
+                    sourceName,
                     sourceSegments);
             List<PreparedField> fields = prepareFields(id, result);
             for (PreparedField prepared : fields) {
@@ -148,6 +181,9 @@ public class DocumentService {
             saveGenerated(id, "PLAIN_LANGUAGE", "通俗版", result.get("summary"), result.get("plain_text"));
             saveGenerated(id, "STEP_CARDS", "办理步骤", result.get("steps"), stepsText((List<Map<String, Object>>) result.get("steps")));
             saveGenerated(id, "TERM_EXPLANATION", "专业术语解释", result.get("term_explanations"), "专业术语已生成");
+            if (result.get("sessions") instanceof List<?> sessions && !sessions.isEmpty()) {
+                saveGenerated(id, "SESSIONS", "服务场次", sessions, sessions);
+            }
             if (result.get("warnings") != null) {
                 saveGenerated(id, "RISK_WARNING", "风险提示", result.get("warnings"),
                         String.valueOf(result.get("warnings")));
@@ -182,7 +218,10 @@ public class DocumentService {
 
     public List<Map<String, Object>> fields(long id, AuthUser user) {
         assertAccess(id, user);
-        return jdbc.queryForList("SELECT * FROM extracted_field WHERE document_id=? ORDER BY id", id);
+        List<Map<String, Object>> fields =
+                jdbc.queryForList("SELECT * FROM extracted_field WHERE document_id=? ORDER BY id", id);
+        markSuspectedDuplicateConditions(fields);
+        return fields;
     }
 
     public List<Map<String, Object>> generated(long id, AuthUser user) {
@@ -270,6 +309,51 @@ public class DocumentService {
     private static String truncate(String value) {
         if (value == null) return "未知错误";
         return value.length() > 900 ? value.substring(0, 900) : value;
+    }
+
+    private static String trimToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static String safeOriginalName(MultipartFile file) {
+        return Paths.get(file.getOriginalFilename() == null ? "material" : file.getOriginalFilename())
+                .getFileName().toString().replaceAll("[^a-zA-Z0-9._\\-\\u4e00-\\u9fa5]", "_");
+    }
+
+    private static String extension(String name) {
+        return name.contains(".") ? name.substring(name.lastIndexOf('.') + 1).toLowerCase() : "";
+    }
+
+    private static void markSuspectedDuplicateConditions(List<Map<String, Object>> fields) {
+        Map<String, Object> audience = fields.stream()
+                .filter(field -> "TARGET_AUDIENCE".equals(field.get("field_type"))).findFirst().orElse(null);
+        Map<String, Object> eligibility = fields.stream()
+                .filter(field -> "ELIGIBILITY".equals(field.get("field_type"))).findFirst().orElse(null);
+        if (audience == null || eligibility == null) return;
+        String audienceValue = normalizeComparable(audience.get("field_value"));
+        String eligibilityValue = normalizeComparable(eligibility.get("field_value"));
+        String audienceQuote = normalizeComparable(audience.get("source_quote"));
+        String eligibilityQuote = normalizeComparable(eligibility.get("source_quote"));
+        boolean duplicate = audienceValue.equals(eligibilityValue)
+                || (audienceQuote.equals(eligibilityQuote)
+                && similarity(audienceValue, eligibilityValue) >= 0.88);
+        if (duplicate) {
+            audience.put("duplicate_suspected", true);
+            eligibility.put("duplicate_suspected", true);
+        }
+    }
+
+    private static String normalizeComparable(Object value) {
+        return String.valueOf(value == null ? "" : value)
+                .replaceAll("[\\s，,。；;：:]", "");
+    }
+
+    private static double similarity(String left, String right) {
+        if (left.isEmpty() || right.isEmpty()) return 0;
+        int commonPrefix = 0;
+        int limit = Math.min(left.length(), right.length());
+        while (commonPrefix < limit && left.charAt(commonPrefix) == right.charAt(commonPrefix)) commonPrefix++;
+        return (2.0 * commonPrefix) / (left.length() + right.length());
     }
 
     @SuppressWarnings("unchecked")

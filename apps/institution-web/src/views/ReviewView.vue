@@ -73,6 +73,7 @@ async function load() {
       quote: field.source_quote,
       confidence: Number(field.confidence),
       reviewStatus: field.review_status,
+      duplicateSuspected: Boolean(field.duplicate_suspected),
     }));
     values.value = fields.value.map((field) => field.value);
     confirmed.value = fields.value
@@ -253,6 +254,9 @@ async function finish() {
           >
             <header>
               <b>{{ field.label }}</b>
+              <span v-if="field.duplicateSuspected" class="duplicate-warning"
+                ><TriangleAlert />疑似重复字段</span
+              >
               <span v-if="confirmed.includes(index)"
                 ><CheckCircle2 />已确认</span
               >

@@ -10,6 +10,17 @@ FACT_SCHEMA_EXAMPLE = """{
       "segment_id": 101,
       "confidence": 0.96
     }
+  ],
+  "sessions": [
+    {
+      "date": "2026年9月12日",
+      "time": "08:00-11:30",
+      "location": "青松社区卫生服务中心预防接种门诊",
+      "source_quote": "2026年9月12日 08:00-11:30 青松社区卫生服务中心预防接种门诊",
+      "page_no": 1,
+      "segment_id": 101,
+      "needs_human_review": false
+    }
   ]
 }"""
 
