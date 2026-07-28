@@ -177,10 +177,13 @@ public class DocumentService {
                     : String.valueOf(document.get("source_name"));
             jdbc.update("UPDATE processing_job SET stage='EXTRACTING_FACTS',progress=35 WHERE id=?", jobId);
             Map<String, Object> context = new LinkedHashMap<>();
-            context.put("content_sha256", String.valueOf(document.getOrDefault("file_sha256", "")));
+            String fileHash = nullableString(document.get("file_sha256"));
+            String contentHash = nullableString(document.get("content_hash"));
+            context.put("content_sha256", fileHash.isBlank() ? contentHash : fileHash);
             context.put("document_id", id);
             context.put("processing_job_id", jobId);
             context.put("trace_id", traceId);
+            context.put("content_kind", document.get("content_kind"));
             Map<String, Object> result = aiClient.analyze(document.get("title").toString(), rawText,
                     publicInformation ? "public_news" : "guide",
                     sourceName,
@@ -351,10 +354,30 @@ public class DocumentService {
         Map<String, Object> document = detail(id, user);
         int reviews = jdbc.queryForObject("SELECT COUNT(*) FROM review_record WHERE document_id=? AND action='APPROVE'", Integer.class, id);
         if (reviews == 0) throw new BusinessException(400, "发布前必须完成审核");
+        boolean webArticle = "WEB_ARTICLE".equals(document.get("source_type"));
+        if (webArticle && !Boolean.TRUE.equals(document.get("image_reviewed"))) {
+            throw new BusinessException(400, "第三方文章封面尚未人工确认，请确认图片来源或改用分类默认图");
+        }
         String summary = jdbc.queryForObject("SELECT plain_text FROM generated_content WHERE document_id=? AND content_type='SUMMARY' ORDER BY version DESC LIMIT 1", String.class, id);
-        String slug = "guide-" + id;
-        jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,source_name,source_url) VALUES (?,?,?,?,?,?,?,?)",
-                id, slug, title, summary, category, user.id(), sourceName, sourceUrl);
+        String slug = (webArticle ? "news-" : "guide-") + id;
+        String contentKind = nullableString(document.get("content_kind"));
+        String cover = Boolean.TRUE.equals(document.get("image_reviewed"))
+                ? nullableString(document.get("cover_image_url")) : "";
+        String raw = nullableString(document.get("extracted_text"));
+        int readingMinutes = Math.max(1, (int) Math.ceil(raw.length() / 500.0));
+        boolean local = nullableString(document.get("source_domain")).endsWith("shanghai.gov.cn");
+        int importance = switch (contentKind) {
+            case "ANTI_FRAUD", "SERVICE_NOTICE" -> 90;
+            case "HEALTH_EDUCATION", "POLICY_NEWS" -> 80;
+            case "COMMUNITY_SERVICE" -> 70;
+            default -> 50;
+        };
+        jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,source_name,"
+                        + "source_url,content_kind,cover_image_url,is_local,reading_minutes,importance) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                id, slug, title, summary, category, user.id(), sourceName, sourceUrl,
+                contentKind.isBlank() ? null : contentKind, cover.isBlank() ? null : cover,
+                local, readingMinutes, importance);
         jdbc.update("UPDATE source_document SET processing_status='PUBLISHED',allow_public_original=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 allowPublicOriginal, id);
         jdbc.update("UPDATE generated_content SET status='PUBLISHED' WHERE document_id=?", id);

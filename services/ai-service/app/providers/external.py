@@ -43,6 +43,8 @@ from app.prompts import (
     guide_rewrite_v1,
     guide_rewrite_v1_1,
     metadata_extract_v1,
+    web_article_extract_v1,
+    web_article_rewrite_v1,
 )
 from app.providers.base import LlmProvider
 
@@ -232,6 +234,8 @@ class ExternalLlmProvider(LlmProvider):
                 self.settings.model,
                 self.settings.prompt_version,
                 SCHEMA_VERSION,
+                request.document_type,
+                request.content_kind or "",
             ]
         )
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -270,15 +274,28 @@ class ExternalLlmProvider(LlmProvider):
             return cached
 
         active_client = self.client or self._shared_client()
+        is_web_article = request.document_type == "public_news"
+        is_service_notice = (
+            is_web_article and request.content_kind == "SERVICE_NOTICE"
+        )
+        use_news_prompts = is_web_article and not is_service_notice
         fact_prompt = (
-            guide_extract_v1_1
-            if self.settings.prompt_version == "v1.1"
-            else guide_extract_v1
+            web_article_extract_v1
+            if use_news_prompts
+            else (
+                guide_extract_v1_1
+                if self.settings.prompt_version == "v1.1" or is_service_notice
+                else guide_extract_v1
+            )
         )
         rewrite_prompt = (
-            guide_rewrite_v1_1
-            if self.settings.prompt_version == "v1.1"
-            else guide_rewrite_v1
+            web_article_rewrite_v1
+            if use_news_prompts
+            else (
+                guide_rewrite_v1_1
+                if self.settings.prompt_version == "v1.1" or is_service_notice
+                else guide_rewrite_v1
+            )
         )
         LOGGER.info(
             "external_llm stage=fact_extract prompt_version=%s",
@@ -330,7 +347,11 @@ class ExternalLlmProvider(LlmProvider):
             rewrite_prompt.build_task_prompt(
                 request, facts, structured, self.settings.prompt_version
             )
-            if self.settings.prompt_version == "v1.1"
+            if (
+                self.settings.prompt_version == "v1.1"
+                or is_service_notice
+                or use_news_prompts
+            )
             else rewrite_prompt.build_task_prompt(
                 request, facts, sessions, self.settings.prompt_version
             )

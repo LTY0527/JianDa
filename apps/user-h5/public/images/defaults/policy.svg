@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-label="养老政策默认插图">
+  <rect width="1200" height="675" fill="#edf3fb"/><circle cx="1015" cy="110" r="180" fill="#d5e3f6"/>
+  <path d="M0 570c290-120 530-100 760-20 160 56 295 57 440 5v120H0z" fill="#c8d9ef"/>
+  <rect x="285" y="162" width="520" height="350" rx="18" fill="#fff"/>
+  <path d="M365 256h360M365 332h290M365 408h330" stroke="#416fa8" stroke-width="28" stroke-linecap="round"/>
+  <circle cx="860" cy="430" r="92" fill="#e9a64a"/><path d="M825 430l25 25 50-59" fill="none" stroke="#fff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

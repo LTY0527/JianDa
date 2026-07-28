@@ -1,6 +1,6 @@
 # 任务清单
 
-更新时间：2026-07-23
+更新时间：2026-07-28
 
 ## 运行环境验证记录
 
@@ -334,3 +334,40 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] 375、390、768、1440px 与 24px 大字模式无横向溢出、重叠或截断；Browser 插件不可用，按规范使用 Playwright Chromium，真实 iPhone Safari/Android Chrome 仍需人工抽检。
 - [x] Compose 三个应用镜像完成重建，MySQL、AI、后端和前端四服务均 healthy；四个 HTTP 检查均为 200。
 - [x] External 安全日志包含 provider、model、prompt version、HTTP、request ID、tokens、耗时及 raw/schema/trace/final 字段计数；敏感词扫描和 health access 日志计数均为 0。
+
+## Phase 9：真实内容接入与资讯化升级
+
+### 网页材料、合规采集与来源
+
+- [x] 通过 V5 Flyway 迁移增加 `WEB_ARTICLE` 元数据、图片来源字段、`source_registry` 和 `crawl_job`，不修改历史迁移。
+- [x] 增加手工 URL 预览/确认导入；预览不落正式材料，确认后保存真实 HTML、正文、canonical URL、正文 SHA-256 和真实 segment。
+- [x] 增加手动重新采集；重新检查白名单、robots 和正文 hash，保留已发布内容保护，正文变化后清理旧处理结果并重新进入待处理状态。
+- [x] 仅允许启用的完整域名白名单；检查 robots.txt、公开 IP、User-Agent、单域名限速、超时和连接复用，不绕过受限页面。
+- [x] canonical URL 与正文 hash 去重；相同预览短期缓存，不重复创建公开内容。
+- [x] 修复网页导入 SQL 占位符错位导致 URL 被写入 `import_method` 的 500 错误。
+- [x] 修复真实网页 `<meta charset>` 缺少 `property/name/itemprop` 时的解析异常。
+- [x] 修复网页无文件 SHA-256 时错误共用 `"null"` AI 缓存键；网页现使用真实正文 `content_hash`，上传文件仍优先使用文件 SHA-256。
+- [x] `JIANDA_ALLOW_FAKE_IP_DNS` 默认关闭；仅本地代理/VPN 把公网域名映射到 `198.18.0.0/15` 时可显式开启，生产环境和其他私网、回环、保留地址仍拒绝。
+
+### 内容类型、封面和审核
+
+- [x] 支持 `SERVICE_NOTICE`、`HEALTH_EDUCATION`、`POLICY_NEWS`、`ANTI_FRAUD`、`COMMUNITY_SERVICE`、`GENERAL_NEWS` 分类；服务通知继续走 v1.1 公共服务 Schema，其余网页文章走资讯安全 Prompt。
+- [x] 封面优先级为 OpenGraph → JSON-LD → 正文有效首图；过滤 Logo、二维码、广告、头像、图标、追踪像素、过小和不适合卡片比例的图片。
+- [x] 白名单未明确允许图片下载时不请求原图，直接使用本地分类默认图；允许时才校验 HTTP 200、`image/*`、尺寸、比例与 SHA-256。
+- [x] 保存封面类型、图片来源、alt、缓存状态、许可说明、宽高和 hash；不自动生成 AI 图片。
+- [x] 健康科普、养老政策、防诈提醒、社区服务、文化学习和办事通知共六张本地中性默认图已加入用户端。
+- [x] 机构审核页显示当前封面、来源、类型、缓存状态和官方原文，支持确认原图或更换为分类默认图；第三方封面未经确认后端拒绝发布。
+- [x] 首页主图、资讯卡片和详情封面使用固定比例、`object-fit: cover`、准确 alt 和失败回退；列表图懒加载，官方原文按钮使用文章 URL。
+
+### 验证状态
+
+- [x] AI 全套 58 项通过，覆盖 OpenGraph 优先、JSON-LD 回退、正文首图、Logo/二维码/追踪像素排除、404 回退、无下载许可不请求原图、分类和 Prompt 路由。
+- [x] 后端全套 22 项及打包通过；集成回归覆盖白名单、去重、重新采集、正文 hash 缓存键、默认图、许可原图、图片来源保存和第三方图片发布门禁。
+- [x] 两个前端类型检查和生产构建通过；Docker/Nginx 与 375px 首页封面失败回退、懒加载、比例、无横向溢出、官方原文跳转 Playwright 共 10 项通过。
+- [x] 7 篇 2026 年 7 月真实内容已逐篇预览、导入并使用 External Provider 处理，文档 27–33 均为 `WAITING_REVIEW`、`cache_hit=false`，每篇生成 7 类内容，未自动审核或发布。
+- [x] 文档 27–33 分类依次为 `HEALTH_EDUCATION`、`POLICY_NEWS`、`POLICY_NEWS`、`COMMUNITY_SERVICE`、`HEALTH_EDUCATION`、`HEALTH_EDUCATION`、`ANTI_FRAUD`；字段数依次为 4、1、4、2、3、4、4。
+- [x] 文档 27–33 Token 用量依次为 3956、1901、3053、2183、2175、2384、2882；总耗时依次为 13339、5747、9710、6137、6728、6775、10575 ms。
+- [x] 第 7 篇官方 HTTPS 地址在当前本地代理/OpenSSL 组合下出现 `BAD_ECPOINT`；同一官方站点公开 HTTP 入口通过白名单与 robots 检查后导入，未绕过登录、验证码或访问控制。
+- [x] Docker 三个应用镜像已重建，MySQL、AI、后端和前端四服务均为 healthy；AI 容器确认使用 External Provider，未读取或输出模型密钥。
+- [ ] 文档 27–33 的标题、日期、关键数字、医疗安全、原文链接和图片来源仍需平台管理员人工事实复核；完成前不得标记已审核或发布。
+- [ ] 真实 iPhone Safari / Android Chrome 的远程图片失败回退和 24px 大字模式仍需人工抽检。

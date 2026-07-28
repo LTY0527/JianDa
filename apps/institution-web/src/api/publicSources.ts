@@ -34,6 +34,7 @@ export interface ImportRecord {
   source_published_at: string;
   imported_at: string;
   source_name: string;
+  source_type?: string;
   failure_reason?: string;
 }
 
@@ -47,6 +48,33 @@ export interface ManualImportPayload {
   publishedAt: string;
   body: string;
   category: string;
+}
+
+export interface WebArticlePreview {
+  title: string;
+  source_name: string;
+  published_at?: string;
+  author?: string;
+  cover_image_url?: string;
+  cover_image_type:
+    | "ORIGINAL_COVER"
+    | "ARTICLE_IMAGE"
+    | "CATEGORY_DEFAULT"
+    | "AI_ILLUSTRATION";
+  canonical_url: string;
+  content_preview: string;
+  content_kind: string;
+  authority_level: string;
+  robots_allowed: boolean;
+  robots_status: string;
+  warnings: string[];
+  image_alt_text?: string;
+  image_width?: number;
+  image_height?: number;
+  image_source_name?: string;
+  image_source_url?: string;
+  image_cached: boolean;
+  image_license_note?: string;
 }
 
 export const publicSourceApi = {
@@ -80,5 +108,20 @@ export const publicSourceApi = {
   process: (documentId: number) =>
     http.post<ApiResponse<{ status: string }>>(
       `/public-sources/imports/${documentId}/process`,
+    ),
+  previewWebArticle: (url: string) =>
+    http.post<ApiResponse<WebArticlePreview>>("/web-articles/preview", { url }),
+  importWebArticle: (url: string) =>
+    http.post<ApiResponse<{ documentId: number; imageReviewRequired: boolean }>>(
+      "/web-articles/import",
+      { url },
+    ),
+  confirmWebCover: (documentId: number) =>
+    http.post<ApiResponse<null>>(`/web-articles/${documentId}/cover/confirm`),
+  useCategoryDefaultCover: (documentId: number) =>
+    http.post<ApiResponse<null>>(`/web-articles/${documentId}/cover/category-default`),
+  recrawlWebArticle: (documentId: number) =>
+    http.post<ApiResponse<{ documentId: number; contentKind: string }>>(
+      `/web-articles/${documentId}/recrawl`,
     ),
 };

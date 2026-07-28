@@ -35,6 +35,18 @@ export interface DocumentDetail {
   mime_type?: string;
   file_size?: number;
   file_sha256?: string;
+  source_type?: string;
+  canonical_url?: string;
+  source_authority_level?: string;
+  original_published_at?: string;
+  cover_image_url?: string;
+  cover_image_type?: string;
+  image_source_name?: string;
+  image_source_url?: string;
+  image_alt_text?: string;
+  image_cached?: boolean;
+  image_license_note?: string;
+  image_reviewed?: boolean;
   processing_status: string;
 }
 

@@ -24,12 +24,14 @@ public class HttpAiClient implements AiClient {
     private final URI analyzeUri;
     private final URI extractUri;
     private final URI metadataUri;
+    private final URI webPreviewUri;
 
     public HttpAiClient(ObjectMapper objectMapper, @Value("${jianda.ai-service-url}") String baseUrl) {
         this.objectMapper = objectMapper;
         this.analyzeUri = URI.create(baseUrl + "/internal/analyze");
         this.extractUri = URI.create(baseUrl + "/internal/extract-text");
         this.metadataUri = URI.create(baseUrl + "/internal/metadata-preview");
+        this.webPreviewUri = URI.create(baseUrl + "/internal/web-ingest/preview");
     }
 
     @Override
@@ -40,6 +42,14 @@ public class HttpAiClient implements AiClient {
     @Override
     public Map<String, Object> previewMetadata(Path file, String fileName, String contentType) {
         return sendFile(metadataUri, file, fileName, contentType, "AI metadata preview");
+    }
+
+    @Override
+    public Map<String, Object> previewWebArticle(String url, boolean allowImageDownload) {
+        return sendJson(webPreviewUri, Map.of(
+                "url", url,
+                "allow_image_download", allowImageDownload
+        ), "web article preview", 90_000);
     }
 
     private Map<String, Object> sendFile(URI uri, Path file, String fileName,
@@ -78,33 +88,38 @@ public class HttpAiClient implements AiClient {
     public Map<String, Object> analyze(String title, String text, String documentType,
                                        String sourceName, List<Map<String, Object>> segments,
                                        Map<String, Object> context) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("title", title);
+        request.put("text", text);
+        request.put("document_type", documentType);
+        request.put("source_name", sourceName == null ? "" : sourceName);
+        request.put("segments", segments);
+        request.put("content_sha256", context.getOrDefault("content_sha256", ""));
+        request.put("document_id", context.get("document_id"));
+        request.put("processing_job_id", context.get("processing_job_id"));
+            request.put("trace_id", context.getOrDefault("trace_id", ""));
+            request.put("content_kind", context.get("content_kind"));
+        return sendJson(analyzeUri, request, "AI analysis", 60_000);
+    }
+
+    private Map<String, Object> sendJson(URI uri, Map<String, Object> request,
+                                         String operation, int readTimeout) {
         HttpURLConnection connection = null;
         try {
-            Map<String, Object> request = new LinkedHashMap<>();
-            request.put("title", title);
-            request.put("text", text);
-            request.put("document_type", documentType);
-            request.put("source_name", sourceName == null ? "" : sourceName);
-            request.put("segments", segments);
-            request.put("content_sha256", context.getOrDefault("content_sha256", ""));
-            request.put("document_id", context.get("document_id"));
-            request.put("processing_job_id", context.get("processing_job_id"));
-            request.put("trace_id", context.getOrDefault("trace_id", ""));
             byte[] payload = objectMapper.writeValueAsBytes(request);
-            connection = (HttpURLConnection) analyzeUri.toURL().openConnection(Proxy.NO_PROXY);
+            connection = (HttpURLConnection) uri.toURL().openConnection(Proxy.NO_PROXY);
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             connection.setConnectTimeout(10_000);
-            connection.setReadTimeout(60_000);
+            connection.setReadTimeout(readTimeout);
             connection.setDoOutput(true);
             connection.setFixedLengthStreamingMode(payload.length);
             connection.getOutputStream().write(payload);
-
-            return readResponse(connection, "AI analysis");
+            return readResponse(connection, operation);
         } catch (JsonProcessingException exception) {
-            throw new IllegalStateException("AI JSON processing failed", exception);
+            throw new IllegalStateException(operation + " JSON processing failed", exception);
         } catch (IOException exception) {
-            throw new IllegalStateException("AI service connection failed", exception);
+            throw new IllegalStateException(operation + " service connection failed", exception);
         } finally {
             if (connection != null) connection.disconnect();
         }

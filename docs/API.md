@@ -52,6 +52,22 @@ v1.1 通用结构还包括：
 
 导入会校验来源启用状态与 URL 主机名，并以来源 URL 和规范化正文 SHA-256 拦截重复内容。
 
+### 白名单网页文章
+
+以下接口仅允许 `PLATFORM_ADMIN`：
+
+- `GET /api/web-articles/sources`：查看网页来源注册表、权威级别、速率和图片缓存许可。
+- `POST /api/web-articles/preview`：校验白名单与 robots.txt，提取 canonical URL、标题、来源、发布时间、正文和封面候选；预览不会创建正式材料。
+- `POST /api/web-articles/import`：确认预览后创建 `WEB_ARTICLE` 材料、真实正文 segment 和待处理记录。
+- `POST /api/web-articles/{documentId}/recrawl`：手动重新采集尚未发布的网页材料；重新校验来源、robots 和正文 hash，正文变化时清理旧处理结果并回到待处理状态。
+- `POST /api/web-articles/{documentId}/cover/confirm`：人工确认当前第三方封面及来源。
+- `POST /api/web-articles/{documentId}/cover/category-default`：更换为简达本地分类默认图。
+
+请求体为 `{ "url": "https://白名单域名/官方文章" }`。只有来源注册表明确设置
+`allow_image_cache=true` 时，AI 服务才会下载候选图片并校验 HTTP 状态、媒体类型、
+尺寸、比例和哈希；否则不下载原图，直接使用本地分类默认图。第三方封面未经人工确认
+不能发布。`查看官方原文` 始终使用文章 canonical URL，不使用图片 URL。
+
 ## 用户端公开接口
 
 - `GET /api/public/items|categories|search`

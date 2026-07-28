@@ -43,25 +43,41 @@ public class PublicController {
 
     @GetMapping("/items")
     public ApiResponse<List<Map<String, Object>>> items(@RequestParam(required = false) String category) {
-        String sql = "SELECT p.id,p.slug,p.title,p.summary,p.category,p.source_name,p.source_url,p.published_at "
-                + "FROM published_item p WHERE p.status='PUBLISHED' ";
-        return ApiResponse.ok(category == null || category.isBlank() ? jdbc.queryForList(sql + "ORDER BY p.published_at DESC")
-                : jdbc.queryForList(sql + "AND p.category=? ORDER BY p.published_at DESC", category));
+        String sql = "SELECT p.id,p.slug,p.title,p.summary,p.category,p.source_name,p.source_url,p.published_at,"
+                + "p.content_kind,p.cover_image_url,p.is_local,p.reading_minutes,p.pinned,p.importance,"
+                + "d.cover_image_type,d.image_source_name,d.image_source_url,d.image_alt_text,d.image_cached,"
+                + "d.image_license_note "
+                + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
+                + "WHERE p.status='PUBLISHED' ";
+        String order = "ORDER BY p.pinned DESC,p.importance DESC,p.published_at DESC";
+        return ApiResponse.ok(category == null || category.isBlank() ? jdbc.queryForList(sql + order)
+                : jdbc.queryForList(sql + "AND p.category=? " + order, category));
     }
 
     @GetMapping("/search")
     public ApiResponse<List<Map<String, Object>>> search(@RequestParam String keyword) {
         String like = "%" + keyword.trim() + "%";
-        return ApiResponse.ok(jdbc.queryForList("SELECT id,slug,title,summary,category,source_name,published_at FROM published_item "
-                + "WHERE status='PUBLISHED' AND (title LIKE ? OR summary LIKE ?) ORDER BY published_at DESC", like, like));
+        return ApiResponse.ok(jdbc.queryForList("SELECT p.id,p.slug,p.title,p.summary,p.category,p.source_name,"
+                + "p.source_url,p.published_at,p.content_kind,p.cover_image_url,p.is_local,p.reading_minutes,"
+                + "p.pinned,p.importance,d.cover_image_type,d.image_source_name,d.image_source_url,"
+                + "d.image_alt_text,d.image_cached,d.image_license_note "
+                + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
+                + "WHERE p.status='PUBLISHED' AND (p.title LIKE ? OR p.summary LIKE ?) "
+                + "ORDER BY p.published_at DESC", like, like));
     }
 
     @GetMapping("/categories")
-    public ApiResponse<List<String>> categories() { return ApiResponse.ok(List.of("时政", "健康", "养老", "反诈", "生活服务", "文化")); }
+    public ApiResponse<List<String>> categories() {
+        return ApiResponse.ok(List.of("健康", "养老政策", "防诈", "社区服务", "文化学习", "办事通知"));
+    }
 
     @GetMapping("/items/{slug}")
     public ApiResponse<Map<String, Object>> detail(@PathVariable String slug) {
-        List<Map<String, Object>> rows = jdbc.queryForList("SELECT p.*,d.raw_text,d.page_count,d.allow_public_original,d.mime_type FROM published_item p "
+        List<Map<String, Object>> rows = jdbc.queryForList("SELECT p.*,d.raw_text,d.page_count,d.allow_public_original,d.mime_type,"
+                + "d.source_type,d.original_url,d.canonical_url,d.original_published_at,d.crawl_time,"
+                + "d.cover_image_type,d.image_source_name,d.image_source_url,d.image_alt_text,d.image_cached,"
+                + "d.image_license_note,d.image_width,d.image_height,d.original_page_available "
+                + "FROM published_item p "
                 + "JOIN source_document d ON d.id=p.document_id WHERE p.slug=? AND p.status='PUBLISHED'", slug);
         if (rows.isEmpty()) throw new BusinessException(404, "内容不存在或已撤回");
         Map<String, Object> result = new LinkedHashMap<>(rows.get(0));
@@ -71,6 +87,9 @@ public class PublicController {
             try {
                 generated.put(row.get("content_type").toString(), row.get("content_json") == null ? row.get("plain_text")
                         : objectMapper.readValue(row.get("content_json").toString(), new TypeReference<Object>() {}));
+                if ("SUMMARY".equals(row.get("content_type")) && row.get("plain_text") != null) {
+                    generated.put("ACCESSIBLE_TEXT", row.get("plain_text"));
+                }
             } catch (Exception exception) { generated.put(row.get("content_type").toString(), row.get("plain_text")); }
         }
         result.put("generated", generated);

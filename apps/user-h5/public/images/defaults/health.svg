@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-label="健康科普默认插图">
+  <rect width="1200" height="675" fill="#e8f5ef"/><circle cx="935" cy="160" r="170" fill="#c6eadb"/>
+  <path d="M0 545c210-85 353-58 535 2 195 64 385 72 665-52v180H0z" fill="#b6dfcf"/>
+  <path d="M455 225c-77-80-205-8-175 105 31 116 175 196 175 196s145-80 176-196c30-113-99-185-176-105z" fill="#fff"/>
+  <path d="M455 259v181M365 350h180" stroke="#23845f" stroke-width="42" stroke-linecap="round"/>
+</svg>

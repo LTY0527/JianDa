@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -31,6 +32,14 @@ SupportedFieldType = Literal[
     "WARNING",
     "RESULT_TIME",
 ]
+ContentKind = Literal[
+    "SERVICE_NOTICE",
+    "HEALTH_EDUCATION",
+    "POLICY_NEWS",
+    "ANTI_FRAUD",
+    "COMMUNITY_SERVICE",
+    "GENERAL_NEWS",
+]
 
 
 class SourceSegment(BaseModel):
@@ -51,6 +60,7 @@ class TextRequest(BaseModel):
     document_id: int | None = None
     processing_job_id: int | None = None
     trace_id: str = ""
+    content_kind: ContentKind | None = None
 
 
 class ExtractedField(BaseModel):
@@ -296,4 +306,42 @@ class MetadataPreview(BaseModel):
         "HEADER", "SIGNATURE", "SEAL", "PUBLISHER_FIELD", "FILENAME", "NONE"
     ]
     page_no: int = Field(ge=1)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class WebArticleRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=1500)
+    allow_image_download: bool = False
+
+
+class WebArticleImage(BaseModel):
+    url: str
+    caption: str = ""
+
+
+class WebArticlePreview(BaseModel):
+    title: str
+    source_name: str = ""
+    published_at: datetime | None = None
+    author: str = ""
+    cover_image_url: str = ""
+    cover_image_type: Literal[
+        "ORIGINAL_COVER", "ARTICLE_IMAGE", "CATEGORY_DEFAULT", "AI_ILLUSTRATION"
+    ] = "CATEGORY_DEFAULT"
+    image_alt_text: str = ""
+    image_width: int | None = None
+    image_height: int | None = None
+    image_hash: str = ""
+    image_validated: bool = False
+    canonical_url: str
+    content_preview: str
+    extracted_text: str
+    original_html: str
+    content_hash: str
+    content_kind: ContentKind
+    classification_confidence: float = Field(ge=0, le=1)
+    robots_allowed: bool
+    robots_status: str
+    original_page_available: bool = True
+    images: list[WebArticleImage] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

@@ -16,6 +16,19 @@ export interface PublicItem {
   category: string;
   source_name: string;
   published_at: string;
+  source_url?: string;
+  content_kind?: string;
+  cover_image_url?: string;
+  cover_image_type?: "ORIGINAL_COVER" | "ARTICLE_IMAGE" | "CATEGORY_DEFAULT" | "AI_ILLUSTRATION";
+  image_source_name?: string;
+  image_source_url?: string;
+  image_alt_text?: string;
+  image_cached?: boolean;
+  image_license_note?: string;
+  is_local?: boolean;
+  reading_minutes?: number;
+  pinned?: boolean;
+  importance?: number;
 }
 
 export interface AssistantCitation {

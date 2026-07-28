@@ -41,7 +41,7 @@ const h5Url = computed(() =>
         isDev: import.meta.env.DEV,
         protocol: window.location.protocol,
         hostname: window.location.hostname,
-      })
+      }, document.value?.source_type === "WEB_ARTICLE" ? "news" : "guide")
     : "",
 );
 
@@ -150,6 +150,10 @@ async function publish() {
             <option>反诈</option>
             <option>生活服务</option>
             <option>时政</option>
+            <option>养老政策</option>
+            <option>社区服务</option>
+            <option>文化学习</option>
+            <option>办事通知</option>
           </select>
         </label>
       </div>
@@ -167,7 +171,7 @@ async function publish() {
       <label class="field"
         >来源 URL<input v-model="form.sourceUrl" type="url"
       /></label>
-      <label class="check"
+      <label v-if="document?.source_type !== 'WEB_ARTICLE'" class="check"
         ><input
           v-model="agreed"
           type="checkbox"

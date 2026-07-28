@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-label="防诈提醒默认插图">
+  <rect width="1200" height="675" fill="#fff2e8"/><circle cx="180" cy="135" r="165" fill="#ffe0c9"/>
+  <path d="M0 565c235-100 470-83 690-7 177 62 334 53 510-30v147H0z" fill="#f7d4bb"/>
+  <path d="M600 142l245 83v145c0 139-106 226-245 281-139-55-245-142-245-281V225z" fill="#fff"/>
+  <path d="M600 218v234M600 510v7" stroke="#c95538" stroke-width="38" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-label="文化学习默认插图">
+  <rect width="1200" height="675" fill="#f6f0fa"/><circle cx="200" cy="125" r="170" fill="#e6d9ef"/>
+  <path d="M0 565c205-78 407-73 608-9 217 69 410 58 592-21v140H0z" fill="#ddd0e8"/>
+  <path d="M255 218c153-47 279 1 345 70v283c-82-70-207-96-345-51zM945 218c-153-47-279 1-345 70v283c82-70 207-96 345-51z" fill="#fff" stroke="#76558f" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M600 288v283" stroke="#76558f" stroke-width="18"/>
+</svg>

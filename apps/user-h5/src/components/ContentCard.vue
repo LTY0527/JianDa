@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ShieldCheck, ChevronRight, Heart, Volume2 } from "lucide-vue-next";
+import { ShieldCheck, ChevronRight, ExternalLink, Heart, MapPin, Volume2 } from "lucide-vue-next";
 import { setFavorite } from "../api";
 import { cleanDisplayTitle, contentKind, isFavorite, isRead } from "../content";
 import { saveFavorite } from "../library";
+import { articleCover, categoryDefaultCover } from "../utils/coverImage";
 const props = withDefaults(defineProps<{ item: any; kind?: "guide" | "news"; actions?: boolean }>(), { actions: false });
 const kind = computed(() => props.kind || contentKind(props.item));
 const favorite = ref(isFavorite(props.item.id));
@@ -15,18 +16,35 @@ async function toggleFavorite() {
   localStorage.setItem(`favorite_${props.item.id}`, next ? "1" : "0");
   saveFavorite(props.item, next);
 }
+function fallbackCover(event: Event) {
+  const image = event.currentTarget as HTMLImageElement;
+  const fallback = categoryDefaultCover(props.item);
+  if (!image.src.endsWith(fallback)) image.src = fallback;
+}
+function listen() {
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(`${props.item.title}。${props.item.summary}`);
+  utterance.lang = "zh-CN";
+  utterance.rate = 0.9;
+  window.speechSynthesis.speak(utterance);
+}
 </script>
 <template>
-  <article class="content-row" :class="{ 'content-row--read': read }">
+  <article class="content-row editorial-card" :class="{ 'content-row--read': read }">
+    <RouterLink class="editorial-card__image" :to="`/${kind}/${item.slug}`">
+      <img :src="articleCover(item)" :alt="item.image_alt_text || `${item.title}配图`" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="fallbackCover" />
+    </RouterLink>
     <RouterLink class="content-row__body" :to="`/${kind}/${item.slug}`">
-      <span class="category-text">{{ item.category }} · {{ kind === "news" ? "权威资讯" : "办事指南" }}</span>
+      <span class="category-text">{{ item.category }} · {{ kind === "news" ? "权威资讯" : "办事指南" }} <template v-if="item.is_local">· <MapPin/>本地</template></span>
       <h3>{{ cleanDisplayTitle(item.title) }}</h3>
       <p>{{ item.summary }}</p>
-      <footer><ShieldCheck />{{ item.source || item.source_name }}<span>· {{ String(item.date || item.published_at).slice(0, 10) }}</span><span v-if="read">· 已读</span></footer>
+      <footer><ShieldCheck />{{ item.source || item.source_name }}<span>· {{ String(item.date || item.published_at).slice(0, 10) }}</span><span>· {{ item.reading_minutes || 1 }}分钟</span><span v-if="read">· 已读</span></footer>
     </RouterLink>
     <div v-if="actions" class="content-row__actions">
-      <span title="详情支持语音朗读"><Volume2 />可听</span>
+      <RouterLink :to="`/${kind}/${item.slug}`">查看适老版</RouterLink>
+      <button type="button" aria-label="朗读摘要" @click="listen"><Volume2 />听一听</button>
       <button type="button" :aria-label="favorite ? '取消收藏' : '收藏'" @click="toggleFavorite"><Heart :fill="favorite ? 'currentColor' : 'none'" /></button>
+      <a v-if="item.source_url" :href="item.source_url" target="_blank" rel="noopener noreferrer" aria-label="查看官方原文"><ExternalLink/>官方原文</a>
     </div>
     <ChevronRight class="row-arrow" />
   </article>

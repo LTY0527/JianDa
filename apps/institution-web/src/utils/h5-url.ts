@@ -8,6 +8,7 @@ export interface H5UrlEnvironment {
 export function buildH5GuideUrl(
   publishedSlug: string,
   environment: H5UrlEnvironment,
+  kind: "guide" | "news" = "guide",
 ): string {
   const configuredBaseUrl = environment.configuredBaseUrl?.trim();
   const baseUrl = configuredBaseUrl
@@ -17,7 +18,7 @@ export function buildH5GuideUrl(
       : `${environment.protocol}//${environment.hostname}`;
 
   return new URL(
-    `/guide/${encodeURIComponent(publishedSlug)}`,
+    `/${kind}/${encodeURIComponent(publishedSlug)}`,
     baseUrl,
   ).toString();
 }

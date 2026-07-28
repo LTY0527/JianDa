@@ -8,10 +8,13 @@ import {
   type ProcessingJob,
 } from "../api/documents";
 import { apiMessage } from "../api/http";
+import { publicSourceApi } from "../api/publicSources";
 import {
   Save,
   CheckCircle2,
+  ExternalLink,
   FileText,
+  ImageOff,
   RefreshCw,
   TriangleAlert,
 } from "lucide-vue-next";
@@ -38,7 +41,12 @@ const serviceSchedule = ref<any>({ service_windows: [], closure_rules: [] });
 const conditionalMaterials = ref<any[]>([]);
 const structuredFees = ref<any[]>([]);
 const resultDelivery = ref<any[]>([]);
+const summaryItems = ref<string[]>([]);
+const plainText = ref("");
+const coverReviewed = ref(false);
 const isImage = computed(() => document.value?.mime_type?.startsWith("image/"));
+const isWebArticle = computed(() => document.value?.source_type === "WEB_ARTICLE");
+const canFinish = computed(() => fields.value.length > 0 || (isWebArticle.value && summaryItems.value.length > 0));
 const isDirty = computed(() => values.value.some((value, index) => value !== fields.value[index]?.value));
 onBeforeRouteLeave(() => {
   if (allowLeave.value || !isDirty.value) return true;
@@ -55,7 +63,7 @@ const emptyReviewResult = computed(
   () =>
     !loading.value &&
     document.value?.processing_status === "WAITING_REVIEW" &&
-    fields.value.length === 0,
+    !canFinish.value,
 );
 const failureMessage = computed(
   () =>
@@ -99,6 +107,9 @@ async function load() {
     conditionalMaterials.value = parsed("CONDITIONAL_MATERIALS", []);
     structuredFees.value = parsed("FEES", []);
     resultDelivery.value = parsed("RESULT_DELIVERY", []);
+    summaryItems.value = parsed("SUMMARY", []);
+    plainText.value = generated.find((item) => item.content_type === "PLAIN_TEXT")?.plain_text || "";
+    coverReviewed.value = Boolean(document.value.image_reviewed);
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -193,6 +204,28 @@ async function finish() {
     submitting.value = false;
   }
 }
+
+async function confirmCover() {
+  try {
+    await publicSourceApi.confirmWebCover(documentId);
+    coverReviewed.value = true;
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
+async function useCategoryDefaultCover() {
+  try {
+    await publicSourceApi.useCategoryDefaultCover(documentId);
+    if (document.value) {
+      document.value.cover_image_url = "";
+      document.value.cover_image_type = "CATEGORY_DEFAULT";
+    }
+    coverReviewed.value = true;
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
 </script>
 
 <template>
@@ -212,7 +245,7 @@ async function finish() {
       </button>
       <button
         class="btn primary"
-        :disabled="!fields.length || submitting"
+        :disabled="!canFinish || submitting"
         @click="finish"
       >
         {{ submitting ? "正在提交…" : "完成字段审核" }}
@@ -235,6 +268,19 @@ async function finish() {
     </div>
     <p v-if="error" class="form-error">{{ error }}</p>
 
+    <section v-if="isWebArticle" class="panel web-source-review">
+      <div class="web-source-review__cover">
+        <img v-if="document?.cover_image_url" :src="document.cover_image_url" :alt="document.image_alt_text || document.title" referrerpolicy="no-referrer" />
+        <div v-else><ImageOff/><span>分类默认图</span></div>
+      </div>
+      <div>
+        <h2>网页来源与封面审核</h2>
+        <dl><div><dt>权威来源</dt><dd>{{ document?.source_name }} · {{ document?.source_authority_level }}级</dd></div><div><dt>原始发布时间</dt><dd>{{ String(document?.original_published_at || "待人工确认").slice(0, 19) }}</dd></div><div><dt>封面类型</dt><dd>{{ document?.cover_image_type }}</dd></div><div><dt>图片来源</dt><dd>{{ document?.image_source_name || "简达本地分类默认图" }}</dd></div><div><dt>是否缓存</dt><dd>{{ document?.image_cached ? "是" : "否" }}</dd></div></dl>
+        <p>{{ document?.image_license_note }}</p>
+        <div class="web-source-review__actions"><a class="btn secondary" :href="document?.canonical_url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="17"/>查看官方原文</a><button v-if="document?.cover_image_url" class="btn secondary" :disabled="coverReviewed" @click="confirmCover">{{coverReviewed?"封面已确认":"确认使用当前封面"}}</button><button class="btn secondary" @click="useCategoryDefaultCover">更换为分类默认图</button></div>
+      </div>
+    </section>
+
     <section
       v-if="emptyReviewResult"
       class="panel process-failure review-empty"
@@ -256,13 +302,13 @@ async function finish() {
       </div>
     </section>
 
-    <div v-if="fields.length" class="compare">
+    <div v-if="canFinish" class="compare">
       <section class="source-pane">
         <div class="pane-title">
-          <FileText :size="18" /><b>{{ isImage ? "材料原图" : "材料原文" }}</b
-          ><span>第 {{ fields[active].page }} 页 / 共 {{ pageCount }} 页</span>
+          <FileText :size="18" /><b>{{ isWebArticle ? "网页正文" : isImage ? "材料原图" : "材料原文" }}</b
+          ><span>第 {{ fields[active]?.page || 1 }} 页 / 共 {{ pageCount }} 页</span>
         </div>
-        <div class="source-tabs" role="tablist" aria-label="材料查看方式">
+        <div v-if="!isWebArticle" class="source-tabs" role="tablist" aria-label="材料查看方式">
           <button :class="{ active: sourceMode === 'file' }" @click="showOriginal">
             {{ isImage ? "原图" : "原PDF" }}
           </button>
@@ -283,8 +329,10 @@ async function finish() {
             :key="index"
             :class="{
               highlight:
-                paragraph.includes(fields[active].quote) ||
-                fields[active].quote.includes(paragraph),
+                fields[active] && (
+                  paragraph.includes(fields[active].quote) ||
+                  fields[active].quote.includes(paragraph)
+                ),
             }"
           >
             {{ paragraph }}
@@ -295,6 +343,12 @@ async function finish() {
         <div class="pane-title">
           <b>AI 结构化结果</b><span>请逐项确认</span>
         </div>
+        <section v-if="isWebArticle" class="structured-review web-ai-review">
+          <h3>三句话看懂</h3>
+          <ol><li v-for="item in summaryItems" :key="item">{{item}}</li></ol>
+          <h3>适老化正文</h3>
+          <p class="web-ai-review__plain">{{ plainText }}</p>
+        </section>
         <section v-if="serviceSchedule.service_windows?.length || conditionalMaterials.length || structuredFees.length || resultDelivery.length" class="structured-review">
           <h3>通用结构化结果</h3>
           <div v-if="serviceSchedule.service_windows?.length">

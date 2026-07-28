@@ -9,6 +9,7 @@ import SpeechRateSelector from "../components/SpeechRateSelector.vue";
 import { useSpeechPlayer } from "../composables/useSpeechPlayer";
 import { buildTelephoneHref, copyText } from "../utils/contactActions";
 import { deduplicateWarnings, sameDisplayText } from "../utils/contentNormalization";
+import { articleCover, categoryDefaultCover } from "../utils/coverImage";
 import {
   ShieldCheck,
   Volume2,
@@ -24,6 +25,9 @@ import {
   CheckCircle2,
   TriangleAlert,
   MessageCircleQuestion,
+  ExternalLink,
+  Stethoscope,
+  Landmark,
 } from "lucide-vue-next";
 const route = useRoute();
 const font = ref(Number(localStorage.getItem("jianda_font") || 18));
@@ -31,8 +35,11 @@ const favorite = ref(false);
 const loading = ref(true);
 const speech = useSpeechPlayer();
 const isNews = computed(() => route.path.startsWith("/news/"));
+const isHealth = computed(() => item.value.content_kind === "HEALTH_EDUCATION");
+const isPolicy = computed(() => item.value.content_kind === "POLICY_NEWS");
 const error = ref("");
 const copyFeedback = ref("");
+const accessibleText = ref("");
 const item = ref<any>({
   id: 0,
   slug: String(route.params.slug),
@@ -160,6 +167,7 @@ onMounted(async () => {
       typeof generated.TERM_EXPLANATION === "object"
         ? generated.TERM_EXPLANATION
         : {};
+    accessibleText.value = typeof generated.ACCESSIBLE_TEXT === "string" ? generated.ACCESSIBLE_TEXT : "";
     if (detail.value.terms["预防接种门诊"]) {
       detail.value.terms["预防接种门诊"] =
         "社区卫生服务机构中负责疫苗登记、接种前询问、健康检查和疫苗接种的服务区域。";
@@ -205,6 +213,19 @@ function grow() {
   font.value = font.value >= 24 ? 18 : font.value + 2;
   localStorage.setItem("jianda_font", String(font.value));
 }
+function fallbackCover(event: Event) {
+  (event.currentTarget as HTMLImageElement).src = categoryDefaultCover(item.value);
+}
+function openOfficial() {
+  const url = item.value.canonical_url || item.value.source_url;
+  if (!url || item.value.original_page_available === false) {
+    error.value = "官方原文链接当前已失效";
+    return;
+  }
+  if (window.confirm("即将离开简达并在新标签页打开官方原文，是否继续？")) {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
 </script>
 <template>
   <div class="detail-page" :style="{ '--reader-size': font + 'px' }">
@@ -212,6 +233,7 @@ function grow() {
     <main class="reader">
 
       <article class="article-head">
+        <img v-if="isNews" class="article-head__cover" :src="articleCover(item)" :alt="item.image_alt_text || `${item.title}配图`" referrerpolicy="no-referrer" @error="fallbackCover" />
         <span class="category-text">{{ item.category }} · {{ isNews ? "权威资讯" : "办事指南" }}</span>
         <h1>{{ cleanDisplayTitle(item.title) }}</h1>
         <div class="source">
@@ -219,7 +241,8 @@ function grow() {
             ><b>{{ item.source_name }}</b
             ><small
               >权威来源 ·
-              {{ String(item.published_at).slice(0, 10) }} 发布</small
+              {{ String(item.original_published_at || item.published_at).slice(0, 10) }} 原始发布 ·
+              {{ String(item.published_at).slice(0, 10) }} 简达处理</small
             ></span
           >
         </div>
@@ -241,6 +264,7 @@ function grow() {
           ><FileText /><span>提取文本</span></RouterLink
         >
         <RouterLink v-if="item.original_file_available" :to="{ path: `/original-file/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"><FileText /><span>原{{ String(item.mime_type || '').startsWith('image/') ? '图' : 'PDF' }}</span></RouterLink>
+        <button v-if="isNews" type="button" @click="openOfficial"><ExternalLink/><span>官方原文</span></button>
       </nav>
       <div v-if="loading" class="detail-skeleton" aria-label="正在加载详情"><i v-for="n in 5" :key="n"></i></div>
       <section v-else-if="error" class="withdrawn-state" role="status">
@@ -256,6 +280,18 @@ function grow() {
             <p>{{ s }}</p>
           </li>
         </ol>
+      </section>
+      <section v-if="isNews && accessibleText" class="reader-section article-readable">
+        <h2>与我有什么关系？</h2>
+        <p v-for="paragraph in accessibleText.split(/\n+/).filter(Boolean)" :key="paragraph">{{paragraph}}</p>
+      </section>
+      <section v-if="isHealth" class="reader-section safety-note">
+        <h2><Stethoscope/>健康内容提醒</h2>
+        <p>出现明显不适、症状持续或加重时，请及时咨询医疗机构。本文仅供健康科普提示，不能替代医生诊疗。</p>
+      </section>
+      <section v-if="isPolicy" class="reader-section policy-note">
+        <h2><Landmark/>政策信息说明</h2>
+        <p>{{ detail.fields.ELIGIBILITY || "这是政策资讯，不等同于个人已经取得申请资格。是否需要个人办理，请以官方原文和属地部门通知为准。" }}</p>
       </section>
       <section v-if="targetAudience || eligibility" class="reader-section">
         <h2>我是否符合条件？</h2>
@@ -400,6 +436,8 @@ function grow() {
       /></RouterLink>
       <RouterLink v-if="item.original_file_available" class="original-link" :to="{ path: `/original-file/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"
         ><FileText /><span><b>查看原{{ String(item.mime_type || '').startsWith('image/') ? '图' : 'PDF' }}</b><small>保留上传文件的分页、表格和排版</small></span><ChevronRight /></RouterLink>
+      <button v-if="isNews" type="button" class="original-link official-source-link" @click="openOfficial"><ExternalLink/><span><b>查看官方原文</b><small>{{ item.source_name }} · {{ item.canonical_url || item.source_url }}</small></span><ChevronRight/></button>
+      <section v-if="isNews" class="image-source-note"><b>图片来源</b><span>{{ item.image_source_name || "简达本地分类默认图" }}</span><small>{{ item.cover_image_type === "CATEGORY_DEFAULT" ? "本地中性分类插图，不代表原文现场" : item.image_license_note }}</small></section>
       <p class="disclaimer">内容由简达整理并经人工审核，具体要求以权威来源最新规定为准。</p>
       <nav class="detail-action-bar" aria-label="详情操作">
         <button type="button" @click="speech.toggle(speechText)"><Volume2 /><span>{{ speech.status.value === "playing" ? "暂停" : speech.status.value === "paused" ? "继续" : "听全文" }}</span></button>

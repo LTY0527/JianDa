@@ -20,23 +20,35 @@ user-h5 (Vue 3, :5174) ─────────┘              │
 ## 公开信息采集链路
 
 ```text
-FixtureCollector / ManualImportCollector
+FixtureCollector / ManualImportCollector / WebArticleCollector
   -> ContentImportService（来源启用、域名白名单、URL/正文去重）
   -> source_document（保留原文、来源、导入方式和时间）
-  -> MockProvider（按主题稳定生成）
+  -> MockProvider / ExternalLlmProvider（按内容类型路由）
   -> 人工字段确认与审核
   -> published_item
   -> 用户 H5
   -> 撤回后公开接口立即不可见
 ```
 
-`ContentCollector` 是可替换接口。当前只实现确定性 fixture 与手工导入，不访问任意网站；未来真实采集器必须继续经过相同白名单、去重、审核和发布边界。
+网页文章采集仅接受 `source_registry` 中启用的完整域名，先检查 robots.txt，再以明确
+User-Agent、单域名限速、连接复用和超时提取公开 HTML；不会绕过登录、验证码、付费墙或
+反爬机制。预览与正式导入分离，canonical URL 和正文 SHA-256 双重去重。普通解析失败时
+不会默认启动浏览器绕过网站限制。
+
+封面按 OpenGraph、JSON-LD、正文有效首图的顺序选择。图片下载许可来自白名单；未明确
+许可时直接使用本地分类默认图。第三方原图必须通过尺寸/类型校验并经管理员确认后才能随
+文章发布，用户端加载失败仍回退本地默认图。
 
 ## 关键约束
 
 原始文件与导入原文只读保留；生成内容版本化。所有机构业务查询必须带组织范围，平台管理员除外。公开来源接口仅允许平台管理员。发布必须存在审核记录。AI 不可用不会影响已发布公开内容。
 
 本地服务统一使用 `127.0.0.1`。后端到 FastAPI 的内部回环连接显式绕过系统代理，避免开发机代理改写本地请求；真实外部模型仍由独立 Provider 和环境变量配置。
+
+网页采集的 SSRF 校验默认拒绝私网、回环和保留地址。若本地代理或 VPN 的 fake-IP DNS
+把公网域名映射到 `198.18.0.0/15`，开发者可显式设置
+`JIANDA_ALLOW_FAKE_IP_DNS=true`；该开关默认关闭且生产环境必须保持关闭，其他私网和
+保留网段不会随之放行。
 
 ## 开发运行模式
 

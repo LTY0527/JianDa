@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-label="办事通知默认插图">
+  <rect width="1200" height="675" fill="#eef5f5"/><circle cx="1015" cy="125" r="175" fill="#d9e9e8"/>
+  <path d="M0 565c235-105 462-83 676-15 195 62 360 55 524-16v141H0z" fill="#cce1df"/>
+  <rect x="300" y="150" width="500" height="390" rx="24" fill="#fff"/>
+  <path d="M398 255h304M398 340h304M398 425h185" stroke="#347d79" stroke-width="27" stroke-linecap="round"/>
+  <circle cx="835" cy="455" r="90" fill="#e39a44"/><path d="M800 455l25 25 50-59" fill="none" stroke="#fff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
