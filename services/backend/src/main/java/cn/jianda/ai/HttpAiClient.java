@@ -76,7 +76,8 @@ public class HttpAiClient implements AiClient {
 
     @Override
     public Map<String, Object> analyze(String title, String text, String documentType,
-                                       String sourceName, List<Map<String, Object>> segments) {
+                                       String sourceName, List<Map<String, Object>> segments,
+                                       Map<String, Object> context) {
         HttpURLConnection connection = null;
         try {
             Map<String, Object> request = new LinkedHashMap<>();
@@ -85,6 +86,10 @@ public class HttpAiClient implements AiClient {
             request.put("document_type", documentType);
             request.put("source_name", sourceName == null ? "" : sourceName);
             request.put("segments", segments);
+            request.put("content_sha256", context.getOrDefault("content_sha256", ""));
+            request.put("document_id", context.get("document_id"));
+            request.put("processing_job_id", context.get("processing_job_id"));
+            request.put("trace_id", context.getOrDefault("trace_id", ""));
             byte[] payload = objectMapper.writeValueAsBytes(request);
             connection = (HttpURLConnection) analyzeUri.toURL().openConnection(Proxy.NO_PROXY);
             connection.setRequestMethod("POST");

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
 import {
@@ -30,6 +30,15 @@ const loading = ref(true);
 const retrying = ref(false);
 const jobs = ref<ProcessingJob[]>([]);
 const allowLeave = ref(false);
+const sourceMode = ref<"file" | "text">("text");
+const originalUrl = ref("");
+const originalError = ref("");
+const originalLoading = ref(false);
+const serviceSchedule = ref<any>({ service_windows: [], closure_rules: [] });
+const conditionalMaterials = ref<any[]>([]);
+const structuredFees = ref<any[]>([]);
+const resultDelivery = ref<any[]>([]);
+const isImage = computed(() => document.value?.mime_type?.startsWith("image/"));
 const isDirty = computed(() => values.value.some((value, index) => value !== fields.value[index]?.value));
 onBeforeRouteLeave(() => {
   if (allowLeave.value || !isDirty.value) return true;
@@ -58,10 +67,11 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [detailResponse, fieldResponse, jobResponse] = await Promise.all([
+    const [detailResponse, fieldResponse, jobResponse, generatedResponse] = await Promise.all([
       documentApi.detail(documentId),
       documentApi.fields(documentId),
       documentApi.jobs(documentId),
+      documentApi.generated(documentId),
     ]);
     document.value = detailResponse.data.data;
     jobs.value = jobResponse.data.data;
@@ -79,12 +89,41 @@ async function load() {
     confirmed.value = fields.value
       .map((field, index) => (field.reviewStatus === "CONFIRMED" ? index : -1))
       .filter((index) => index >= 0);
+    const generated = generatedResponse.data.data;
+    const parsed = (type: string, fallback: any) => {
+      const value = generated.find((item) => item.content_type === type)?.content_json;
+      if (!value) return fallback;
+      try { return JSON.parse(value); } catch { return fallback; }
+    };
+    serviceSchedule.value = parsed("SERVICE_SCHEDULE", { service_windows: [], closure_rules: [] });
+    conditionalMaterials.value = parsed("CONDITIONAL_MATERIALS", []);
+    structuredFees.value = parsed("FEES", []);
+    resultDelivery.value = parsed("RESULT_DELIVERY", []);
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
     loading.value = false;
   }
 }
+
+async function showOriginal() {
+  sourceMode.value = "file";
+  if (originalUrl.value || originalLoading.value) return;
+  originalLoading.value = true;
+  originalError.value = "";
+  try {
+    const response = await documentApi.originalFile(documentId);
+    originalUrl.value = URL.createObjectURL(response.data);
+  } catch (cause) {
+    originalError.value = apiMessage(cause);
+  } finally {
+    originalLoading.value = false;
+  }
+}
+
+onBeforeUnmount(() => {
+  if (originalUrl.value) URL.revokeObjectURL(originalUrl.value);
+});
 
 async function retry() {
   retrying.value = true;
@@ -220,10 +259,24 @@ async function finish() {
     <div v-if="fields.length" class="compare">
       <section class="source-pane">
         <div class="pane-title">
-          <FileText :size="18" /><b>原始材料</b
+          <FileText :size="18" /><b>{{ isImage ? "材料原图" : "材料原文" }}</b
           ><span>第 {{ fields[active].page }} 页 / 共 {{ pageCount }} 页</span>
         </div>
-        <article class="paper">
+        <div class="source-tabs" role="tablist" aria-label="材料查看方式">
+          <button :class="{ active: sourceMode === 'file' }" @click="showOriginal">
+            {{ isImage ? "原图" : "原PDF" }}
+          </button>
+          <button :class="{ active: sourceMode === 'text' }" @click="sourceMode = 'text'">
+            提取文本
+          </button>
+        </div>
+        <div v-if="sourceMode === 'file'" class="original-file-pane">
+          <p v-if="originalLoading">正在读取原文件…</p>
+          <p v-else-if="originalError" class="form-error">{{ originalError }}</p>
+          <img v-else-if="originalUrl && isImage" :src="originalUrl" :alt="document?.original_filename || '材料原图'" />
+          <iframe v-else-if="originalUrl" :src="originalUrl" title="原PDF预览"></iframe>
+        </div>
+        <article v-else class="paper">
           <h2>{{ document?.title }}</h2>
           <p
             v-for="(paragraph, index) in sourceParagraphs"
@@ -242,6 +295,24 @@ async function finish() {
         <div class="pane-title">
           <b>AI 结构化结果</b><span>请逐项确认</span>
         </div>
+        <section v-if="serviceSchedule.service_windows?.length || conditionalMaterials.length || structuredFees.length || resultDelivery.length" class="structured-review">
+          <h3>通用结构化结果</h3>
+          <div v-if="serviceSchedule.service_windows?.length">
+            <b>分时受理安排</b>
+            <table><tbody><tr v-for="(window, index) in serviceSchedule.service_windows" :key="index">
+              <td>{{ [...(window.days || []), ...(window.dates || [])].join("、") }}</td>
+              <td>{{ (window.time_ranges || []).join("、") }}</td>
+              <td>{{ window.unavailable_note || window.location }}</td>
+            </tr></tbody></table>
+            <p v-for="rule in serviceSchedule.closure_rules" :key="rule.value">{{ rule.value }}</p>
+          </div>
+          <div v-if="conditionalMaterials.length">
+            <b>分人群材料</b>
+            <p v-for="group in conditionalMaterials" :key="group.applicable_to"><strong>{{ group.applicable_to }}</strong>：必需 {{ (group.required || []).join("、") || "无" }}；可选 {{ (group.optional || []).join("、") || "无" }}</p>
+          </div>
+          <div v-if="structuredFees.length"><b>费用与支付</b><p v-for="fee in structuredFees" :key="fee.fee_type">{{ fee.fee_type }}：{{ fee.amount || fee.rule }}；{{ (fee.payment_methods || []).join("、") }}</p></div>
+          <div v-if="resultDelivery.length"><b>领取与邮寄</b><p v-for="delivery in resultDelivery" :key="delivery.method">{{ delivery.method }}：{{ [delivery.available_after, delivery.location, delivery.fee_rule].filter(Boolean).join("；") }}</p></div>
+        </section>
         <div class="review-fields">
           <article
             v-for="(field, index) in fields"

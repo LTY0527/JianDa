@@ -47,6 +47,10 @@ class TextRequest(BaseModel):
     document_type: Literal["guide", "public_news"] = "guide"
     source_name: str = ""
     segments: list[SourceSegment] = Field(default_factory=list)
+    content_sha256: str = ""
+    document_id: int | None = None
+    processing_job_id: int | None = None
+    trace_id: str = ""
 
 
 class ExtractedField(BaseModel):
@@ -80,6 +84,99 @@ class ServiceSession(BaseModel):
         return stripped
 
 
+class TraceableItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_quote: str = Field(min_length=1)
+    page_no: int = Field(ge=1)
+    segment_id: int
+    needs_human_review: bool = False
+
+
+class AudienceItem(TraceableItem):
+    value: str = Field(min_length=1)
+
+
+class AudienceRules(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    audience: list[AudienceItem] = Field(default_factory=list)
+    conditions: list[AudienceItem] = Field(default_factory=list)
+
+
+class ServiceWindow(TraceableItem):
+    days: list[str] = Field(default_factory=list)
+    dates: list[str] = Field(default_factory=list)
+    time_ranges: list[str] = Field(default_factory=list)
+    location: str | None = None
+    unavailable_note: str | None = None
+
+
+class ClosureRule(TraceableItem):
+    value: str = Field(min_length=1)
+
+
+class ServiceSchedule(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    service_windows: list[ServiceWindow] = Field(default_factory=list)
+    closure_rules: list[ClosureRule] = Field(default_factory=list)
+
+
+class ConditionalMaterial(TraceableItem):
+    applicable_to: str = Field(min_length=1)
+    required: list[str] = Field(default_factory=list)
+    optional: list[str] = Field(default_factory=list)
+
+
+class FeeRule(TraceableItem):
+    fee_type: str = Field(min_length=1)
+    amount: str | None = None
+    rule: str | None = None
+    payment_methods: list[str] = Field(default_factory=list)
+
+
+class ResultDelivery(TraceableItem):
+    method: str = Field(min_length=1)
+    optional: bool = False
+    available_after: str | None = None
+    location: str | None = None
+    fee_rule: str | None = None
+
+
+class DeadlineRule(TraceableItem):
+    rule_type: Literal[
+        "FIXED_DATE",
+        "RELATIVE_PERIOD",
+        "CAPACITY_LIMIT",
+        "NO_FIXED_DATE",
+        "CHANNEL_SPECIFIC",
+    ]
+    value: str = Field(min_length=1)
+    channel: str | None = None
+
+
+class Amendment(TraceableItem):
+    original_information: str = Field(min_length=1)
+    corrected_information: str = Field(min_length=1)
+    effective_priority: str = Field(min_length=1)
+    supersedes: list[str] = Field(default_factory=list)
+
+
+class ProcessingMetrics(BaseModel):
+    schema_version: str = "1.1"
+    cache_hit: bool = False
+    text_extract_ms: int = 0
+    fact_extract_ms: int = 0
+    trace_validation_ms: int = 0
+    accessible_rewrite_ms: int = 0
+    persistence_ms: int = 0
+    total_ms: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
 class StepCard(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -97,6 +194,14 @@ class AnalyzeResult(BaseModel):
     term_explanations: dict[str, str]
     warnings: list[str]
     audio_script: str
+    audience_rules: AudienceRules = Field(default_factory=AudienceRules)
+    service_schedule: ServiceSchedule = Field(default_factory=ServiceSchedule)
+    conditional_materials: list[ConditionalMaterial] = Field(default_factory=list)
+    fees: list[FeeRule] = Field(default_factory=list)
+    result_delivery: list[ResultDelivery] = Field(default_factory=list)
+    deadline_rules: list[DeadlineRule] = Field(default_factory=list)
+    amendments: list[Amendment] = Field(default_factory=list)
+    metrics: ProcessingMetrics = Field(default_factory=ProcessingMetrics)
 
 
 class FactField(BaseModel):
@@ -109,6 +214,7 @@ class FactField(BaseModel):
     page_no: int = Field(ge=1)
     segment_id: int
     confidence: float = Field(ge=0, le=1)
+    needs_human_review: bool = False
 
     @field_validator("label", "value", "source_quote")
     @classmethod
@@ -125,6 +231,13 @@ class FactExtractionResponse(BaseModel):
     prompt_version: str = Field(min_length=1)
     fields: list[FactField]
     sessions: list[ServiceSession] = Field(default_factory=list)
+    audience_rules: AudienceRules = Field(default_factory=AudienceRules)
+    service_schedule: ServiceSchedule = Field(default_factory=ServiceSchedule)
+    conditional_materials: list[ConditionalMaterial] = Field(default_factory=list)
+    fees: list[FeeRule] = Field(default_factory=list)
+    result_delivery: list[ResultDelivery] = Field(default_factory=list)
+    deadline_rules: list[DeadlineRule] = Field(default_factory=list)
+    amendments: list[Amendment] = Field(default_factory=list)
 
 
 class RewriteResponse(BaseModel):

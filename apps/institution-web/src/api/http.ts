@@ -36,7 +36,9 @@ export function apiMessage(error: unknown): string {
     const requestId = error.response?.headers?.["x-request-id"];
     let message = serverMessage || "操作失败，请稍后重试";
     if (!error.response) message = "服务暂时不可达，请检查网络后重试";
-    else if (status === 401 || status === 403) message = "登录已失效，请重新登录";
+    else if (status === 401 && location.pathname === "/login") {
+      message = serverMessage || "账号或密码错误";
+    } else if (status === 401 || status === 403) message = "登录已失效，请重新登录";
     else if (status === 400) message = serverMessage || "材料信息不完整，请检查后重试";
     else if (status === 413) message = "文件超过 20MB，请选择较小的文件";
     else if (status === 500) message = "服务器处理失败，请稍后重试";

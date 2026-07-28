@@ -3,6 +3,7 @@ package cn.jianda;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -44,7 +45,7 @@ class CoreFlowIntegrationTest {
 
     @BeforeEach
     void configureAi() {
-        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList())).thenReturn(Map.of(
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap())).thenReturn(Map.of(
                 "fields", List.of(
                         Map.of("field_type", "TARGET_AUDIENCE", "label", "适用对象", "value", "年满80周岁的本市户籍老人",
                                 "page_no", 1, "source_quote", "补贴对象为年满八十周岁的本市户籍老人。", "confidence", 0.98),
@@ -136,6 +137,22 @@ class CoreFlowIntegrationTest {
         mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(file).header("Authorization", auth)
                         .param("manualText", "补贴对象为年满八十周岁的本市户籍老人。\n申请材料包括身份证、户口簿和银行卡。"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.file_name").value("补贴通知.pdf"));
+        byte[] original = mvc.perform(get("/api/documents/{id}/original-file", documentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(result -> org.junit.jupiter.api.Assertions.assertTrue(
+                        result.getResponse().getContentType().startsWith("application/pdf")))
+                .andExpect(result -> org.junit.jupiter.api.Assertions.assertNotNull(
+                        result.getResponse().getHeader("X-Content-SHA256")))
+                .andReturn().getResponse().getContentAsByteArray();
+        org.junit.jupiter.api.Assertions.assertArrayEquals("%PDF-demo".getBytes(), original);
+        mvc.perform(get("/api/documents/{id}/original-file", documentId)
+                        .header("Authorization", auth).header("Range", "bytes=0-3"))
+                .andExpect(status().isPartialContent())
+                .andExpect(result -> org.junit.jupiter.api.Assertions.assertArrayEquals(
+                        "%PDF".getBytes(), result.getResponse().getContentAsByteArray()));
+        mvc.perform(get("/api/documents/{id}/original-file", documentId))
+                .andExpect(status().isForbidden());
 
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
@@ -157,13 +174,18 @@ class CoreFlowIntegrationTest {
 
         String publish = mvc.perform(post("/api/documents/{id}/publish", documentId).header("Authorization", auth)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"title\":\"集成测试补贴指南\",\"category\":\"养老\",\"sourceName\":\"浦江街道社区服务中心\",\"sourceUrl\":\"https://example.org/test\"}"))
+                        .content("{\"title\":\"集成测试补贴指南\",\"category\":\"养老\",\"sourceName\":\"浦江街道社区服务中心\",\"sourceUrl\":\"https://example.org/test\",\"allowPublicOriginal\":true}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.slug").exists())
                 .andReturn().getResponse().getContentAsString();
         String slug = objectMapper.readTree(publish).path("data").path("slug").asText();
         mvc.perform(get("/api/public/items/{slug}", slug)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.title").value("集成测试补贴指南"))
-                .andExpect(jsonPath("$.data.generated.STEP_CARDS[0].title").value("准备材料"));
+                .andExpect(jsonPath("$.data.generated.STEP_CARDS[0].title").value("准备材料"))
+                .andExpect(jsonPath("$.data.original_file_available").value(true));
+        mvc.perform(get("/api/public/items/{slug}/original-file", slug).header("Range", "bytes=-4"))
+                .andExpect(status().isPartialContent())
+                .andExpect(result -> org.junit.jupiter.api.Assertions.assertArrayEquals(
+                        "demo".getBytes(), result.getResponse().getContentAsByteArray()));
     }
 
     @Test
@@ -186,7 +208,7 @@ class CoreFlowIntegrationTest {
                 .andExpect(jsonPath("$.data[0].text").value("第一页真实正文"))
                 .andExpect(jsonPath("$.data[1].page_no").value(2));
 
-        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList())).thenReturn(Map.of(
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap())).thenReturn(Map.of(
                 "fields", List.of(Map.of(
                         "field_type", "LOCATION", "label", "地点", "value", "第二页",
                         "page_no", 2, "segment_no", 1, "source_quote", "第二页真实正文", "confidence", 0.99)),
@@ -203,7 +225,8 @@ class CoreFlowIntegrationTest {
                 eq("第一页真实正文\n第二页真实正文"),
                 eq("guide"),
                 eq("浦江街道社区服务中心"),
-                segmentsCaptor.capture());
+                segmentsCaptor.capture(),
+                anyMap());
         List<Map<String, Object>> sentSegments = segmentsCaptor.getValue();
         org.junit.jupiter.api.Assertions.assertEquals(2, sentSegments.size());
         org.junit.jupiter.api.Assertions.assertEquals(1, sentSegments.get(0).get("page_no"));
@@ -229,7 +252,7 @@ class CoreFlowIntegrationTest {
                         .header("Authorization", auth).param("manualText", "用于验证 AI 服务不可用时的任务状态。"))
                 .andExpect(status().isOk());
 
-        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList()))
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
                 .thenThrow(new IllegalStateException("AI service unavailable"));
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
                 .andExpect(status().isServiceUnavailable())
@@ -258,7 +281,7 @@ class CoreFlowIntegrationTest {
                         .header("Authorization", auth).param("manualText", sourceText))
                 .andExpect(status().isOk());
 
-        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList()))
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
                 .thenReturn(Map.of(
                         "fields", List.of(),
                         "summary", List.of("没有字段的摘要"),
@@ -289,7 +312,7 @@ class CoreFlowIntegrationTest {
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].text").value(sourceText));
 
-        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList()))
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
                 .thenReturn(Map.of(
                         "fields", List.of(Map.of(
                                 "field_type", "CONTACT",

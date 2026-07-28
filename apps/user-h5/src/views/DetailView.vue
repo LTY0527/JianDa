@@ -49,10 +49,22 @@ const detail = ref<{
   terms: Record<string, string>;
   fields: Record<string, string>;
   sessions: Array<{ date: string; time: string; location: string; needs_human_review?: boolean }>;
-}>({ summary: [], materials: [], steps: [], warnings: [], terms: {}, fields: {}, sessions: [] });
-const targetAudience = computed(() => detail.value.fields.TARGET_AUDIENCE || "");
+  audienceRules: any;
+  serviceSchedule: any;
+  conditionalMaterials: any[];
+  fees: any[];
+  deliveries: any[];
+  deadlines: any[];
+  amendments: any[];
+}>({ summary: [], materials: [], steps: [], warnings: [], terms: {}, fields: {}, sessions: [],
+  audienceRules: { audience: [], conditions: [] }, serviceSchedule: { service_windows: [], closure_rules: [] },
+  conditionalMaterials: [], fees: [], deliveries: [], deadlines: [], amendments: [] });
+const targetAudience = computed(() =>
+  detail.value.audienceRules.audience?.map((item: any) => item.value).filter(Boolean).join("；")
+  || detail.value.fields.TARGET_AUDIENCE || "");
 const eligibility = computed(() => {
-  const value = detail.value.fields.ELIGIBILITY || "";
+  const value = detail.value.audienceRules.conditions?.map((item: any) => item.value).filter(Boolean).join("；")
+    || detail.value.fields.ELIGIBILITY || "";
   return value && sameDisplayText(value, targetAudience.value) ? "" : value;
 });
 const startDate = computed(() => detail.value.fields.START_DATE || "");
@@ -108,6 +120,21 @@ onMounted(async () => {
             typeof session.location === "string",
         )
       : [];
+    detail.value.audienceRules =
+      generated.AUDIENCE_RULES && typeof generated.AUDIENCE_RULES === "object"
+        ? generated.AUDIENCE_RULES : { audience: [], conditions: [] };
+    detail.value.serviceSchedule =
+      generated.SERVICE_SCHEDULE && typeof generated.SERVICE_SCHEDULE === "object"
+        ? generated.SERVICE_SCHEDULE : { service_windows: [], closure_rules: [] };
+    detail.value.conditionalMaterials = Array.isArray(generated.CONDITIONAL_MATERIALS)
+      ? generated.CONDITIONAL_MATERIALS : [];
+    detail.value.fees = Array.isArray(generated.FEES) ? generated.FEES : [];
+    detail.value.deliveries = Array.isArray(generated.RESULT_DELIVERY)
+      ? generated.RESULT_DELIVERY : [];
+    detail.value.deadlines = Array.isArray(generated.DEADLINE_RULES)
+      ? generated.DEADLINE_RULES : [];
+    detail.value.amendments = Array.isArray(generated.AMENDMENTS)
+      ? generated.AMENDMENTS : [];
     if (detail.value.sessions.length) {
       const schedule = detail.value.sessions
         .map((session) => `${session.date}接种时间为${session.time}`)
@@ -118,14 +145,12 @@ onMounted(async () => {
         detail.value.summary[2],
       ].filter(Boolean);
     }
-    detail.value.steps = detail.value.sessions.length
-      ? detail.value.sessions.map((session) => [
+    detail.value.steps = Array.isArray(generated.STEP_CARDS)
+      ? generated.STEP_CARDS.map((step: any) => [step.title, step.description])
+      : detail.value.sessions.map((session) => [
           `${session.date}场次`,
           `${session.date} ${session.time}，地点：${session.location}。`,
-        ])
-      : Array.isArray(generated.STEP_CARDS)
-      ? generated.STEP_CARDS.map((step: any) => [step.title, step.description])
-      : [];
+        ]);
     detail.value.warnings = deduplicateWarnings([
       ...(Array.isArray(generated.RISK_WARNING) ? generated.RISK_WARNING : []),
       fieldWarning.value,
@@ -213,8 +238,9 @@ function grow() {
             favorite ? "已收藏" : "收藏"
           }}</span></button
         ><RouterLink :to="{ path: `/original/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"
-          ><FileText /><span>查看原文</span></RouterLink
+          ><FileText /><span>提取文本</span></RouterLink
         >
+        <RouterLink v-if="item.original_file_available" :to="{ path: `/original-file/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"><FileText /><span>原{{ String(item.mime_type || '').startsWith('image/') ? '图' : 'PDF' }}</span></RouterLink>
       </nav>
       <div v-if="loading" class="detail-skeleton" aria-label="正在加载详情"><i v-for="n in 5" :key="n"></i></div>
       <section v-else-if="error" class="withdrawn-state" role="status">
@@ -247,8 +273,33 @@ function grow() {
           <li v-for="m in detail.materials"><CheckCircle2 />{{ m }}</li>
         </ul>
       </section>
+      <section v-if="detail.serviceSchedule.service_windows?.length || detail.serviceSchedule.closure_rules?.length" class="reader-section structured-section">
+        <h2>什么时候能办？</h2>
+        <div class="service-window-list">
+          <article v-for="(window, index) in detail.serviceSchedule.service_windows" :key="index">
+            <CalendarClock />
+            <div>
+              <b>{{ [...(window.days || []), ...(window.dates || [])].join("、") || "开放时段" }}</b>
+              <span v-for="time in window.time_ranges" :key="time">{{ time }}</span>
+              <small v-if="window.location">{{ window.location }}</small>
+              <em v-if="window.unavailable_note">{{ window.unavailable_note }}</em>
+            </div>
+          </article>
+        </div>
+        <p v-for="rule in detail.serviceSchedule.closure_rules" :key="rule.value" class="closure-note">
+          <TriangleAlert />{{ rule.value }}
+        </p>
+      </section>
+      <section v-if="detail.conditionalMaterials.length" class="reader-section structured-section">
+        <h2>不同人群带什么？</h2>
+        <article v-for="group in detail.conditionalMaterials" :key="group.applicable_to" class="conditional-material-card">
+          <h3>{{ group.applicable_to }}</h3>
+          <p v-if="group.required?.length"><b>必须准备</b>{{ group.required.join("、") }}</p>
+          <p v-if="group.optional?.length" class="optional-material"><b>可自愿携带</b>{{ group.optional.join("、") }}</p>
+        </article>
+      </section>
       <section v-if="detail.sessions.length" class="reader-section session-section">
-        <h2>接种场次</h2>
+        <h2>服务场次</h2>
         <div class="session-list">
           <article v-for="session in detail.sessions" :key="`${session.date}-${session.time}`">
             <CalendarClock />
@@ -256,6 +307,35 @@ function grow() {
             <em v-if="session.needs_human_review">请人工确认</em>
           </article>
         </div>
+      </section>
+      <section v-if="detail.fees.length" class="reader-section structured-section">
+        <h2>需要多少钱？</h2>
+        <article v-for="feeItem in detail.fees" :key="feeItem.fee_type" class="structured-row">
+          <div><b>{{ feeItem.fee_type }}</b><p>{{ feeItem.amount || feeItem.rule }}</p></div>
+          <small v-if="feeItem.payment_methods?.length">支付方式：{{ feeItem.payment_methods.join("、") }}</small>
+        </article>
+      </section>
+      <section v-if="detail.deliveries.length" class="reader-section structured-section">
+        <h2>怎么办理领取？</h2>
+        <article v-for="delivery in detail.deliveries" :key="delivery.method" class="structured-row">
+          <div><b>{{ delivery.method }}<em v-if="delivery.optional">（自愿选择）</em></b>
+            <p>{{ [delivery.available_after, delivery.location, delivery.fee_rule].filter(Boolean).join("；") }}</p>
+          </div>
+        </article>
+      </section>
+      <section v-if="detail.deadlines.length" class="reader-section structured-section">
+        <h2>什么时候前办理？</h2>
+        <article v-for="deadline in detail.deadlines" :key="`${deadline.channel}-${deadline.value}`" class="structured-row">
+          <div><b>{{ deadline.channel || "期限规则" }}</b><p>{{ deadline.value }}</p></div>
+        </article>
+      </section>
+      <section v-if="detail.amendments.length" class="reader-section amendment-section">
+        <h2>更正信息</h2>
+        <article v-for="amendment in detail.amendments" :key="amendment.corrected_information">
+          <p><del>{{ amendment.original_information }}</del></p>
+          <p><b>以此为准：</b>{{ amendment.corrected_information }}</p>
+          <small>{{ amendment.effective_priority }}</small>
+        </article>
       </section>
       <section
         v-if="registrationDate || location || contact || fee"
@@ -314,16 +394,18 @@ function grow() {
       <RouterLink v-if="!isNews" class="ask-assistant-link" :to="{ path: '/assistant', query: { about: item.slug } }"><MessageCircleQuestion /><span><b>问问这个事项</b><small>助手将根据这份已审核材料回答</small></span><ChevronRight /></RouterLink>
       <RouterLink class="original-link" :to="{ path: `/original/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"
         ><FileText /><span
-          ><b>查看原文</b
-          ><small>共 {{ item.page_count || 1 }} 页，可核对原文内容</small></span
+          ><b>查看提取文本</b
+          ><small>共 {{ item.page_count || 1 }} 页，可按字段核对文本</small></span
         ><ChevronRight
       /></RouterLink>
+      <RouterLink v-if="item.original_file_available" class="original-link" :to="{ path: `/original-file/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"
+        ><FileText /><span><b>查看原{{ String(item.mime_type || '').startsWith('image/') ? '图' : 'PDF' }}</b><small>保留上传文件的分页、表格和排版</small></span><ChevronRight /></RouterLink>
       <p class="disclaimer">内容由简达整理并经人工审核，具体要求以权威来源最新规定为准。</p>
       <nav class="detail-action-bar" aria-label="详情操作">
         <button type="button" @click="speech.toggle(speechText)"><Volume2 /><span>{{ speech.status.value === "playing" ? "暂停" : speech.status.value === "paused" ? "继续" : "听全文" }}</span></button>
         <button type="button" @click="grow"><Type /><span>{{ font }}px</span></button>
         <button type="button" @click="toggleFav"><Heart :fill="favorite ? 'currentColor' : 'none'" /><span>{{ favorite ? "已收藏" : "收藏" }}</span></button>
-        <RouterLink :to="{ path: `/original/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"><FileText /><span>查看原文</span></RouterLink>
+        <RouterLink :to="{ path: `/original/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"><FileText /><span>提取文本</span></RouterLink>
       </nav>
       </template>
     </main>

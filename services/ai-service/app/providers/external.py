@@ -1,8 +1,11 @@
+import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 import time
+import threading
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,20 +16,72 @@ from pydantic import ValidationError
 
 from app.models import (
     AnalyzeResult,
+    Amendment,
+    AudienceItem,
+    AudienceRules,
+    ClosureRule,
+    ConditionalMaterial,
+    DeadlineRule,
     ExtractedField,
+    FactExtractionResponse,
     FactField,
+    FeeRule,
     MetadataPreview,
+    ProcessingMetrics,
+    ResultDelivery,
     RewriteResponse,
+    ServiceSchedule,
     ServiceSession,
+    ServiceWindow,
     SourceSegment,
     StepCard,
     TextRequest,
 )
-from app.prompts import guide_extract_v1, guide_rewrite_v1, metadata_extract_v1
+from app.prompts import (
+    guide_extract_v1,
+    guide_extract_v1_1,
+    guide_rewrite_v1,
+    guide_rewrite_v1_1,
+    metadata_extract_v1,
+)
 from app.providers.base import LlmProvider
 
 
 LOGGER = logging.getLogger("uvicorn.error")
+SCHEMA_VERSION = "1.1"
+_RESULT_CACHE: dict[str, AnalyzeResult] = {}
+_ASYNC_LOOP = asyncio.new_event_loop()
+_ASYNC_THREAD = threading.Thread(target=_ASYNC_LOOP.run_forever, daemon=True)
+_ASYNC_THREAD.start()
+
+
+class _AsyncClientAdapter:
+    """Sync provider bridge backed by one process-level AsyncClient event loop."""
+
+    def __init__(self, timeout: float) -> None:
+        async def create() -> httpx.AsyncClient:
+            return httpx.AsyncClient(
+                timeout=timeout,
+                limits=httpx.Limits(
+                    max_connections=20,
+                    max_keepalive_connections=10,
+                    keepalive_expiry=30,
+                ),
+            )
+
+        self.client = asyncio.run_coroutine_threadsafe(create(), _ASYNC_LOOP).result()
+
+    @property
+    def is_closed(self) -> bool:
+        return self.client.is_closed
+
+    def post(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        return asyncio.run_coroutine_threadsafe(
+            self.client.post(*args, **kwargs), _ASYNC_LOOP
+        ).result()
+
+
+_SHARED_CLIENTS: dict[tuple[str, float], _AsyncClientAdapter] = {}
 
 
 def _deduplicate_warnings(warnings: list[str]) -> list[str]:
@@ -110,9 +165,9 @@ class ExternalSettings:
             raise ExternalProviderError(
                 "外部模型配置错误：EXTERNAL_LLM_THINKING 只能是 disabled 或 enabled"
             )
-        if prompt_version != "v1":
+        if prompt_version not in {"v1", "v1.1"}:
             raise ExternalProviderError(
-                "外部模型配置错误：当前仅支持 JIANDA_PROMPT_VERSION=v1"
+                "外部模型配置错误：JIANDA_PROMPT_VERSION 仅支持 v1 或 v1.1"
             )
         return cls(
             base_url=base_url,
@@ -159,97 +214,184 @@ class ExternalLlmProvider(LlmProvider):
             return normalized
         return f"{normalized}/chat/completions"
 
-    def analyze(self, request: TextRequest) -> AnalyzeResult:
-        active_client = self.client or httpx.Client(
-            timeout=self.settings.timeout_seconds
-        )
-        try:
-            LOGGER.info(
-                "external_llm stage=fact_extract prompt_version=%s",
-                self.settings.prompt_version,
-            )
-            fact_result = self._completion(
-                active_client,
-                [
-                    {"role": "system", "content": guide_extract_v1.SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": guide_extract_v1.build_task_prompt(
-                            request, self.settings.prompt_version
-                        ),
-                    },
-                ],
-                stage="fact_extract",
-            )
-            model_facts = self._validate_facts(fact_result.payload, request)
-            facts = self._complete_explicit_temporal_facts(
-                model_facts, request
-            )
-            facts = self._split_duplicate_audience_eligibility(facts)
-            model_sessions = self._validate_sessions(
-                fact_result.payload.get("sessions"), request
-            )
-            sessions = self._complete_explicit_sessions(
-                model_sessions, request
-            )
-            LOGGER.info(
-                "provider=external model=%s prompt_version=%s "
-                "stage=fact_completion model_field_count=%s "
-                "source_rule_added_count=%s final_field_count=%s",
+    def _shared_client(self) -> _AsyncClientAdapter:
+        key = (self.settings.base_url, self.settings.timeout_seconds)
+        client = _SHARED_CLIENTS.get(key)
+        if client is None or client.is_closed:
+            client = _AsyncClientAdapter(self.settings.timeout_seconds)
+            _SHARED_CLIENTS[key] = client
+        return client
+
+    def _cache_key(self, request: TextRequest) -> str:
+        content_hash = request.content_sha256 or hashlib.sha256(
+            request.text.encode("utf-8")
+        ).hexdigest()
+        value = "|".join(
+            [
+                content_hash,
                 self.settings.model,
                 self.settings.prompt_version,
-                len(model_facts),
-                len(facts) - len(model_facts),
-                len(facts),
-            )
+                SCHEMA_VERSION,
+            ]
+        )
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
-            LOGGER.info(
-                "external_llm stage=accessible_rewrite prompt_version=%s",
-                self.settings.prompt_version,
+    def _dynamic_fact_max_tokens(self, request: TextRequest) -> int:
+        if self.settings.prompt_version == "v1.1":
+            # v1.1 returns both the compatible flat fields and the richer
+            # public-service structures. Short, information-dense notices can
+            # therefore need substantially more output than their input size
+            # suggests. Keep the deployment-wide cap, but avoid truncating
+            # valid structured JSON merely because the source document is short.
+            return min(self.settings.max_tokens, max(4200, len(request.text) * 5))
+        return min(self.settings.max_tokens, max(1800, len(request.text) * 3))
+
+    def _dynamic_rewrite_max_tokens(self, request: TextRequest) -> int:
+        return min(self.settings.max_tokens, max(1400, len(request.text) * 2))
+
+    def analyze(self, request: TextRequest) -> AnalyzeResult:
+        total_started = time.perf_counter()
+        cache_key = self._cache_key(request) if request.content_sha256 else ""
+        if cache_key and cache_key in _RESULT_CACHE:
+            cached = _RESULT_CACHE[cache_key].model_copy(deep=True)
+            cached.metrics = cached.metrics.model_copy(
+                update={
+                    "cache_hit": True,
+                    "fact_extract_ms": 0,
+                    "trace_validation_ms": 0,
+                    "accessible_rewrite_ms": 0,
+                    "total_ms": self._elapsed_ms(total_started),
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                }
             )
-            rewrite_result = self._completion(
-                active_client,
-                [
-                    {"role": "system", "content": guide_rewrite_v1.SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": guide_rewrite_v1.build_task_prompt(
-                            request,
-                            facts,
-                            sessions,
-                            self.settings.prompt_version,
-                        ),
-                    },
-                ],
-                stage="accessible_rewrite",
+            self._log_business_audit(request, cached.metrics)
+            return cached
+
+        active_client = self.client or self._shared_client()
+        fact_prompt = (
+            guide_extract_v1_1
+            if self.settings.prompt_version == "v1.1"
+            else guide_extract_v1
+        )
+        rewrite_prompt = (
+            guide_rewrite_v1_1
+            if self.settings.prompt_version == "v1.1"
+            else guide_rewrite_v1
+        )
+        LOGGER.info(
+            "external_llm stage=fact_extract prompt_version=%s",
+            self.settings.prompt_version,
+        )
+        fact_result = self._completion(
+            active_client,
+            [
+                {"role": "system", "content": fact_prompt.SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": fact_prompt.build_task_prompt(
+                        request, self.settings.prompt_version
+                    ),
+                },
+            ],
+            stage="fact_extract",
+            max_tokens=self._dynamic_fact_max_tokens(request),
+        )
+        trace_started = time.perf_counter()
+        model_facts = self._validate_facts(fact_result.payload, request)
+        facts = self._complete_explicit_temporal_facts(model_facts, request)
+        facts = self._split_duplicate_audience_eligibility(facts)
+        model_sessions = self._validate_sessions(
+            fact_result.payload.get("sessions"), request
+        )
+        sessions = self._complete_explicit_sessions(model_sessions, request)
+        structured = self._validate_structured(
+            fact_result.payload, model_facts, sessions, request
+        )
+        structured = self._complete_common_structures(structured, request)
+        trace_validation_ms = self._elapsed_ms(trace_started)
+        LOGGER.info(
+            "provider=external model=%s prompt_version=%s "
+            "stage=fact_completion model_field_count=%s "
+            "source_rule_added_count=%s final_field_count=%s",
+            self.settings.model,
+            self.settings.prompt_version,
+            len(model_facts),
+            len(facts) - len(model_facts),
+            len(facts),
+        )
+
+        LOGGER.info(
+            "external_llm stage=accessible_rewrite prompt_version=%s",
+            self.settings.prompt_version,
+        )
+        rewrite_user = (
+            rewrite_prompt.build_task_prompt(
+                request, facts, structured, self.settings.prompt_version
             )
-            rewrite = self._validate_rewrite(rewrite_result.payload)
-            rewrite = self._rewrite_with_sessions(rewrite, facts, sessions)
-            return AnalyzeResult(
-                fields=[
-                    ExtractedField(
-                        field_type=field.field_type,
-                        label=field.label,
-                        value=field.value,
-                        page_no=field.page_no,
-                        segment_no=1,
-                        segment_id=field.segment_id,
-                        source_quote=field.source_quote,
-                        confidence=field.confidence,
-                    )
-                    for field in facts
-                ],
-                sessions=sessions,
-                summary=rewrite.summary,
-                plain_text=rewrite.plain_text,
-                steps=rewrite.steps,
-                warnings=rewrite.warnings,
-                term_explanations=rewrite.term_explanations,
-                audio_script=rewrite.audio_script,
+            if self.settings.prompt_version == "v1.1"
+            else rewrite_prompt.build_task_prompt(
+                request, facts, sessions, self.settings.prompt_version
             )
-        finally:
-            if self.client is None:
-                active_client.close()
+        )
+        rewrite_result = self._completion(
+            active_client,
+            [
+                {"role": "system", "content": rewrite_prompt.SYSTEM_PROMPT},
+                {"role": "user", "content": rewrite_user},
+            ],
+            stage="accessible_rewrite",
+            max_tokens=self._dynamic_rewrite_max_tokens(request),
+        )
+        rewrite = self._validate_rewrite(rewrite_result.payload)
+        rewrite = self._rewrite_with_sessions(rewrite, facts, sessions)
+        metrics = ProcessingMetrics(
+            schema_version=SCHEMA_VERSION,
+            cache_hit=False,
+            fact_extract_ms=fact_result.elapsed_ms,
+            trace_validation_ms=trace_validation_ms,
+            accessible_rewrite_ms=rewrite_result.elapsed_ms,
+            total_ms=self._elapsed_ms(total_started),
+            prompt_tokens=fact_result.prompt_tokens + rewrite_result.prompt_tokens,
+            completion_tokens=fact_result.completion_tokens
+            + rewrite_result.completion_tokens,
+            total_tokens=fact_result.total_tokens + rewrite_result.total_tokens,
+        )
+        result = AnalyzeResult(
+            fields=[
+                ExtractedField(
+                    field_type=field.field_type,
+                    label=field.label,
+                    value=field.value,
+                    page_no=field.page_no,
+                    segment_no=1,
+                    segment_id=field.segment_id,
+                    source_quote=field.source_quote,
+                    confidence=field.confidence,
+                )
+                for field in facts
+            ],
+            sessions=sessions,
+            summary=rewrite.summary,
+            plain_text=rewrite.plain_text,
+            steps=rewrite.steps,
+            warnings=rewrite.warnings,
+            term_explanations=rewrite.term_explanations,
+            audio_script=rewrite.audio_script,
+            audience_rules=structured.audience_rules,
+            service_schedule=structured.service_schedule,
+            conditional_materials=structured.conditional_materials,
+            fees=structured.fees,
+            result_delivery=structured.result_delivery,
+            deadline_rules=structured.deadline_rules,
+            amendments=structured.amendments,
+            metrics=metrics,
+        )
+        if cache_key:
+            _RESULT_CACHE[cache_key] = result.model_copy(deep=True)
+        self._log_business_audit(request, metrics)
+        return result
 
     def preview_metadata(
         self,
@@ -257,41 +399,35 @@ class ExternalLlmProvider(LlmProvider):
         filename: str,
         deterministic: MetadataPreview,
     ) -> MetadataPreview:
-        active_client = self.client or httpx.Client(
-            timeout=self.settings.timeout_seconds
+        active_client = self.client or self._shared_client()
+        result = self._completion(
+            active_client,
+            [
+                {"role": "system", "content": metadata_extract_v1.SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": metadata_extract_v1.build_prompt(
+                        text, filename, deterministic.model_dump()
+                    ),
+                },
+            ],
+            stage="metadata_preview",
+            max_tokens=800,
         )
         try:
-            result = self._completion(
-                active_client,
-                [
-                    {"role": "system", "content": metadata_extract_v1.SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": metadata_extract_v1.build_prompt(
-                            text, filename, deterministic.model_dump()
-                        ),
-                    },
-                ],
-                stage="metadata_preview",
-                max_tokens=800,
+            preview = MetadataPreview.model_validate(result.payload)
+        except ValidationError as exc:
+            raise ExternalProviderError("外部模型元数据结果不符合 JSON Schema") from exc
+        if (
+            preview.authority_status == "DOCUMENT_EVIDENCE"
+            and (
+                not preview.evidence_quote
+                or preview.evidence_quote not in text
+                or preview.source_name not in preview.evidence_quote
             )
-            try:
-                preview = MetadataPreview.model_validate(result.payload)
-            except ValidationError as exc:
-                raise ExternalProviderError("外部模型元数据结果不符合 JSON Schema") from exc
-            if (
-                preview.authority_status == "DOCUMENT_EVIDENCE"
-                and (
-                    not preview.evidence_quote
-                    or preview.evidence_quote not in text
-                    or preview.source_name not in preview.evidence_quote
-                )
-            ):
-                raise ExternalProviderError("外部模型元数据发布机构证据无法追溯")
-            return preview
-        finally:
-            if self.client is None:
-                active_client.close()
+        ):
+            raise ExternalProviderError("外部模型元数据发布机构证据无法追溯")
+        return preview
 
     def _completion(
         self,
@@ -553,7 +689,12 @@ class ExternalLlmProvider(LlmProvider):
             reasons,
         )
         if not trace_valid:
-            raise ExternalProviderError("模型未生成可追溯的关键字段")
+            safe_reasons = ",".join(
+                f"{name}={count}" for name, count in sorted(reasons.items())
+            ) or "unknown=1"
+            raise ExternalProviderError(
+                f"模型未生成可追溯的关键字段（{safe_reasons}）"
+            )
         return trace_valid
 
     def _validate_rewrite(
@@ -655,6 +796,355 @@ class ExternalLlmProvider(LlmProvider):
                 session.model_copy(update={"source_quote": quote})
             )
         return valid
+
+    def _validate_structured(
+        self,
+        payload: dict[str, Any],
+        facts: list[FactField],
+        sessions: list[ServiceSession],
+        request: TextRequest,
+    ) -> FactExtractionResponse:
+        if self.settings.prompt_version == "v1":
+            return FactExtractionResponse(
+                prompt_version="v1", fields=facts, sessions=sessions
+            )
+
+        audience_payload = payload.get("audience_rules")
+        audience_payload = (
+            audience_payload if isinstance(audience_payload, dict) else {}
+        )
+        schedule_payload = payload.get("service_schedule")
+        schedule_payload = (
+            schedule_payload if isinstance(schedule_payload, dict) else {}
+        )
+        raw_groups = (
+            (audience_payload.get("audience"), AudienceItem),
+            (audience_payload.get("conditions"), AudienceItem),
+            (schedule_payload.get("service_windows"), ServiceWindow),
+            (schedule_payload.get("closure_rules"), ClosureRule),
+            (payload.get("conditional_materials"), ConditionalMaterial),
+            (payload.get("fees"), FeeRule),
+            (payload.get("result_delivery"), ResultDelivery),
+            (payload.get("deadline_rules"), DeadlineRule),
+            (payload.get("amendments"), Amendment),
+        )
+        validated_groups = [
+            self._validate_structured_items(raw, model, request)
+            for raw, model in raw_groups
+        ]
+        raw_count = sum(
+            len(raw) for raw, _ in raw_groups if isinstance(raw, list)
+        )
+        valid_count = sum(len(items) for items in validated_groups)
+        LOGGER.info(
+            "provider=external prompt_version=%s stage=structured_validation "
+            "raw_count=%s valid_count=%s rejected_count=%s",
+            self.settings.prompt_version,
+            raw_count,
+            valid_count,
+            raw_count - valid_count,
+        )
+        if raw_count and not valid_count:
+            raise ExternalProviderError(
+                "外部模型通用结构结果不符合 JSON Schema"
+            )
+
+        (
+            audiences,
+            conditions,
+            service_windows,
+            closure_rules,
+            conditional_materials,
+            fees,
+            result_delivery,
+            deadline_rules,
+            amendments,
+        ) = validated_groups
+        return FactExtractionResponse(
+            prompt_version=self.settings.prompt_version,
+            fields=facts,
+            sessions=sessions,
+            audience_rules=AudienceRules(
+                audience=audiences, conditions=conditions
+            ),
+            service_schedule=ServiceSchedule(
+                service_windows=service_windows,
+                closure_rules=closure_rules,
+            ),
+            conditional_materials=conditional_materials,
+            fees=fees,
+            result_delivery=result_delivery,
+            deadline_rules=deadline_rules,
+            amendments=amendments,
+        )
+
+    def _validate_structured_items(
+        self,
+        raw_items: Any,
+        model: type[Any],
+        request: TextRequest,
+    ) -> list[Any]:
+        if not isinstance(raw_items, list):
+            return []
+        valid: list[Any] = []
+        list_fields = {
+            "days",
+            "dates",
+            "time_ranges",
+            "required",
+            "optional",
+            "payment_methods",
+            "supersedes",
+        }
+        for raw in raw_items:
+            if not isinstance(raw, dict):
+                continue
+            candidate = {
+                key: value
+                for key, value in raw.items()
+                if key in model.model_fields
+            }
+            for name in list_fields.intersection(candidate):
+                if isinstance(candidate[name], str):
+                    candidate[name] = [candidate[name]]
+            if model is FeeRule and isinstance(
+                candidate.get("amount"), (int, float)
+            ):
+                candidate["amount"] = str(candidate["amount"])
+            try:
+                item = model.model_validate(candidate)
+                valid.append(self._validated_trace_item(item, request))
+            except (ValidationError, ExternalProviderError):
+                continue
+        return valid
+
+    def _validated_trace_item(self, item: Any, request: TextRequest) -> Any:
+        segments = request.segments or [
+            SourceSegment(segment_id=1, page_no=1, text=request.text)
+        ]
+        segment = next(
+            (entry for entry in segments if entry.segment_id == item.segment_id),
+            None,
+        )
+        if segment is None or segment.page_no != item.page_no:
+            raise ExternalProviderError("结构化事实的页码或段落无法追溯")
+        quote = self._locate_source_quote(segment.text, item.source_quote)
+        if quote is None:
+            raise ExternalProviderError("结构化事实的原文引用无法追溯")
+        payload = item.model_dump(
+            exclude={
+                "source_quote",
+                "page_no",
+                "segment_id",
+                "needs_human_review",
+            }
+        )
+        value_numbers = self._number_tokens(
+            json.dumps(payload, ensure_ascii=False)
+        )
+        quote_numbers = self._number_tokens(quote)
+        if any(quote_numbers[number] < count for number, count in value_numbers.items()):
+            raise ExternalProviderError("结构化事实中的数字与原文不一致")
+        return item.model_copy(update={"source_quote": quote})
+
+    def _complete_common_structures(
+        self,
+        structured: FactExtractionResponse,
+        request: TextRequest,
+    ) -> FactExtractionResponse:
+        """Complete explicit tables and fee clauses without inventing facts."""
+        windows = list(structured.service_schedule.service_windows)
+        fees = list(structured.fees)
+        segments = request.segments or [
+            SourceSegment(segment_id=1, page_no=1, text=request.text)
+        ]
+        day = (
+            r"(?:周|星期)[一二三四五六日天]"
+            r"(?:[、，,](?:周|星期)[一二三四五六日天])*"
+        )
+        time_range = r"\d{1,2}:\d{2}\s*[-—至]\s*\d{1,2}:\d{2}"
+        window_pattern = re.compile(
+            rf"(?P<quote>(?P<days>{day})\s*\r?\n\s*"
+            rf"(?P<first>{time_range})\s*\r?\n\s*"
+            rf"(?P<second>{time_range}|不开放))"
+        )
+        fee_paragraph_pattern = re.compile(
+            r"(?P<quote>(?P<body>[^\r\n。]{1,160}"
+            r"(?:\d+(?:\.\d+)?元|按[^；。\r\n]{1,50}收取)"
+            r"[^\r\n。]*)(?:。(?P<payment>支持[^。\r\n]+支付))?。?)"
+        )
+        for segment in segments:
+            for match in window_pattern.finditer(segment.text):
+                days = re.split(r"[、，,]", match.group("days"))
+                first = self._normalize_time_range(match.group("first"))
+                second = match.group("second")
+                ranges = [first]
+                unavailable_note = None
+                if second == "不开放":
+                    unavailable_note = "下午不开放"
+                else:
+                    ranges.append(self._normalize_time_range(second))
+                if any(
+                    item.days == days
+                    and item.time_ranges == ranges
+                    and item.unavailable_note == unavailable_note
+                    for item in windows
+                ):
+                    continue
+                windows.append(
+                    ServiceWindow(
+                        days=days,
+                        dates=[],
+                        time_ranges=ranges,
+                        location=None,
+                        unavailable_note=unavailable_note,
+                        source_quote=match.group("quote"),
+                        page_no=segment.page_no,
+                        segment_id=segment.segment_id,
+                        needs_human_review=False,
+                    )
+                )
+
+            for match in fee_paragraph_pattern.finditer(segment.text):
+                body = match.group("body")
+                payment_text = match.group("payment") or ""
+                payment_methods = [
+                    item.strip()
+                    for item in re.split(
+                        r"[、，,]|及",
+                        payment_text.removeprefix("支持"),
+                    )
+                    if item.strip()
+                ]
+                for clause in re.split(r"[；;]", body):
+                    amount_match = re.fullmatch(
+                        r"\s*(?P<type>.+?)"
+                        r"(?P<amount>每(?:证|次|人)?\s*\d+(?:\.\d+)?元"
+                        r"|\d+(?:\.\d+)?元(?:/[^；，。]+)?)\s*",
+                        clause,
+                    )
+                    rule_match = re.fullmatch(
+                        r"\s*(?P<type>.+?)按(?P<rule>.+?收取)\s*",
+                        clause,
+                    )
+                    if amount_match:
+                        fee_type = amount_match.group("type").strip()
+                        amount = amount_match.group("amount").replace(" ", "")
+                        rule = None
+                    elif rule_match:
+                        fee_type = rule_match.group("type").strip()
+                        amount = None
+                        rule = f"按{rule_match.group('rule').strip()}"
+                    else:
+                        continue
+                    if any(item.fee_type == fee_type for item in fees):
+                        continue
+                    fees.append(
+                        FeeRule(
+                            fee_type=fee_type,
+                            amount=amount,
+                            rule=rule,
+                            payment_methods=payment_methods,
+                            source_quote=match.group("quote"),
+                            page_no=segment.page_no,
+                            segment_id=segment.segment_id,
+                            needs_human_review=False,
+                        )
+                    )
+
+        return structured.model_copy(
+            update={
+                "service_schedule": structured.service_schedule.model_copy(
+                    update={"service_windows": self._merge_service_windows(windows)}
+                ),
+                "fees": self._merge_fees(fees),
+            }
+        )
+
+    @staticmethod
+    def _merge_service_windows(
+        windows: list[ServiceWindow],
+    ) -> list[ServiceWindow]:
+        merged: dict[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]], ServiceWindow] = {}
+        for item in windows:
+            key = (
+                tuple(sorted(item.days)),
+                tuple(sorted(item.dates)),
+                tuple(item.time_ranges),
+            )
+            current = merged.get(key)
+            if current is None:
+                merged[key] = item
+                continue
+            unavailable = max(
+                (value for value in (current.unavailable_note, item.unavailable_note) if value),
+                key=len,
+                default=None,
+            )
+            quote = max((current.source_quote, item.source_quote), key=len)
+            merged[key] = current.model_copy(
+                update={
+                    "location": current.location or item.location,
+                    "unavailable_note": unavailable,
+                    "source_quote": quote,
+                    "needs_human_review": (
+                        current.needs_human_review or item.needs_human_review
+                    ),
+                }
+            )
+        return list(merged.values())
+
+    @staticmethod
+    def _merge_fees(fees: list[FeeRule]) -> list[FeeRule]:
+        merged: dict[str, FeeRule] = {}
+        for item in fees:
+            key = re.sub(
+                r"(?:工本费|服务费|费用|费)$",
+                "",
+                re.sub(r"\s+", "", item.fee_type),
+            )
+            current = merged.get(key)
+            if current is None:
+                merged[key] = item
+                continue
+            amount = max(
+                (value for value in (current.amount, item.amount) if value),
+                key=lambda value: (
+                    "元" in value,
+                    "每" in value or "/" in value,
+                    len(value),
+                ),
+                default=None,
+            )
+            rule = max(
+                (value for value in (current.rule, item.rule) if value),
+                key=len,
+                default=None,
+            )
+            methods = list(
+                dict.fromkeys(current.payment_methods + item.payment_methods)
+            )
+            merged[key] = current.model_copy(
+                update={
+                    "fee_type": min(
+                        (current.fee_type, item.fee_type), key=len
+                    ),
+                    "amount": amount,
+                    "rule": rule,
+                    "payment_methods": methods,
+                    "source_quote": max(
+                        (current.source_quote, item.source_quote), key=len
+                    ),
+                    "needs_human_review": (
+                        current.needs_human_review or item.needs_human_review
+                    ),
+                }
+            )
+        return list(merged.values())
+
+    @staticmethod
+    def _normalize_time_range(value: str) -> str:
+        return re.sub(r"\s+", "", value).replace("—", "-").replace("至", "-")
 
     def _complete_explicit_sessions(
         self, sessions: list[ServiceSession], request: TextRequest
@@ -920,6 +1410,33 @@ class ExternalLlmProvider(LlmProvider):
             trace_valid_field_count,
             rejected_field_count,
             rejected_reason,
+        )
+
+    def _log_business_audit(
+        self, request: TextRequest, metrics: ProcessingMetrics
+    ) -> None:
+        LOGGER.info(
+            "provider=external model=%s prompt_version=%s schema_version=%s "
+            "document_id=%s processing_job_id=%s trace_id=%s cache_hit=%s "
+            "text_extract_ms=%s fact_extract_ms=%s trace_validation_ms=%s "
+            "accessible_rewrite_ms=%s persistence_ms=%s total_ms=%s "
+            "prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+            self.settings.model,
+            self.settings.prompt_version,
+            metrics.schema_version,
+            request.document_id or 0,
+            request.processing_job_id or 0,
+            self._safe_identifier(request.trace_id),
+            str(metrics.cache_hit).lower(),
+            metrics.text_extract_ms,
+            metrics.fact_extract_ms,
+            metrics.trace_validation_ms,
+            metrics.accessible_rewrite_ms,
+            metrics.persistence_ms,
+            metrics.total_ms,
+            metrics.prompt_tokens,
+            metrics.completion_tokens,
+            metrics.total_tokens,
         )
 
     @staticmethod

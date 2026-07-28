@@ -27,6 +27,7 @@ const form = reactive({
   sourceName: "",
   sourceUrl: "",
   publishedAt: new Date().toISOString().slice(0, 10),
+  allowPublicOriginal: false,
 });
 const isDirty = computed(() => Boolean(initialForm.value) && JSON.stringify(form) !== initialForm.value);
 onBeforeRouteLeave(() => {
@@ -94,6 +95,7 @@ async function publish() {
       category: form.category,
       sourceName: form.sourceName,
       sourceUrl: form.sourceUrl,
+      allowPublicOriginal: form.allowPublicOriginal,
     });
     publishedSlug.value = response.data.data.slug;
     allowLeave.value = true;
@@ -170,6 +172,9 @@ async function publish() {
           v-model="agreed"
           type="checkbox"
         />我已确认内容准确、来源有效，并同意在用户端公开。</label
+      >
+      <label class="check"
+        ><input v-model="form.allowPublicOriginal" type="checkbox" />允许用户端查看上传的原始{{ document?.mime_type?.startsWith("image/") ? "图片" : "PDF" }}。原文件可能包含个人信息，请确认适合公开。</label
       >
       <p v-if="error" class="form-error">{{ error }}</p>
       <div class="form-actions">

@@ -215,11 +215,13 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
       publicPage.getByRole("button", { name: /22px/ }),
     ).toBeVisible();
     await publicPage
-      .getByRole("link", { name: "查看原文", exact: true })
+      .getByRole("link", { name: "提取文本", exact: true })
       .click();
-    await expect(
-      publicPage.getByText(/夏季气温较高，高血压患者应按医嘱规律服药/),
-    ).toBeVisible();
+    await expect(publicPage).toHaveURL(/\/original\//);
+    await expect(publicPage.locator(".original-text")).toContainText(
+      "夏季气温较高，高血压患者应按医嘱规律服药",
+    );
+    await expect(publicPage.locator(".original-text")).toBeVisible();
     expect(await publicPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
     await publicPage.screenshot({ path: path.join(os.tmpdir(), "jianda-public-info-h5.png"), fullPage: true });
     await publicPage.getByRole("button", { name: "返回" }).click();

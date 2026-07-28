@@ -11,7 +11,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.sql.PreparedStatement;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -133,8 +137,11 @@ public class DocumentService {
             jdbc.update("INSERT INTO document_segment(document_id,page_no,segment_no,text,start_offset,end_offset) VALUES (?,?,?,?,?,?)",
                     id, segment.pageNo(), segment.segmentNo(), segment.text(), segment.startOffset(), segment.endOffset());
         }
-        jdbc.update("UPDATE source_document SET file_name=?,file_type=?,storage_path=?,raw_text=?,page_count=?,processing_status='UPLOADED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                original, file.getContentType(), target.toString(), extracted.text(), extracted.pageCount(), id);
+        String mimeType = file.getContentType() == null ? mimeTypeFor(extension) : file.getContentType();
+        jdbc.update("UPDATE source_document SET file_name=?,file_type=?,original_filename=?,mime_type=?,file_size=?,file_sha256=?,"
+                        + "storage_path=?,raw_text=?,page_count=?,processing_status='UPLOADED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                original, mimeType, original, mimeType, Files.size(target), sha256(target),
+                target.toString(), extracted.text(), extracted.pageCount(), id);
         log(user, "UPLOAD_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
         return detail(id, user);
     }
@@ -150,7 +157,10 @@ public class DocumentService {
         ensureTraceSegment(id, rawText);
         jdbc.update("DELETE FROM extracted_field WHERE document_id=?", id);
         jdbc.update("DELETE FROM generated_content WHERE document_id=?", id);
-        jdbc.update("INSERT INTO processing_job(document_id,job_type,status,progress,started_at) VALUES (?,'FULL_PIPELINE','PROCESSING',15,CURRENT_TIMESTAMP)", id);
+        String traceId = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO processing_job(document_id,job_type,status,stage,progress,trace_id,started_at) "
+                        + "VALUES (?,'FULL_PIPELINE','PROCESSING','EXTRACTING_FACTS',25,?,CURRENT_TIMESTAMP)",
+                id, traceId);
         Long jobId = jdbc.queryForObject("SELECT MAX(id) FROM processing_job WHERE document_id=?", Long.class, id);
         jdbc.update("UPDATE source_document SET processing_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
         try {
@@ -165,11 +175,21 @@ public class DocumentService {
             String sourceName = document.get("source_name") == null
                     ? String.valueOf(document.getOrDefault("organization_name", ""))
                     : String.valueOf(document.get("source_name"));
+            jdbc.update("UPDATE processing_job SET stage='EXTRACTING_FACTS',progress=35 WHERE id=?", jobId);
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("content_sha256", String.valueOf(document.getOrDefault("file_sha256", "")));
+            context.put("document_id", id);
+            context.put("processing_job_id", jobId);
+            context.put("trace_id", traceId);
             Map<String, Object> result = aiClient.analyze(document.get("title").toString(), rawText,
                     publicInformation ? "public_news" : "guide",
                     sourceName,
-                    sourceSegments);
+                    sourceSegments,
+                    context);
+            jdbc.update("UPDATE processing_job SET stage='VALIDATING_TRACE',progress=60 WHERE id=?", jobId);
             List<PreparedField> fields = prepareFields(id, result);
+            long persistenceStarted = System.nanoTime();
+            jdbc.update("UPDATE processing_job SET stage='SAVING_RESULT',progress=85 WHERE id=?", jobId);
             for (PreparedField prepared : fields) {
                 Map<String, Object> field = prepared.field();
                 SourceTrace source = prepared.source();
@@ -184,6 +204,13 @@ public class DocumentService {
             if (result.get("sessions") instanceof List<?> sessions && !sessions.isEmpty()) {
                 saveGenerated(id, "SESSIONS", "服务场次", sessions, sessions);
             }
+            saveStructuredIfPresent(id, result, "audience_rules", "AUDIENCE_RULES", "适用对象与条件");
+            saveStructuredIfPresent(id, result, "service_schedule", "SERVICE_SCHEDULE", "分时受理安排");
+            saveStructuredIfPresent(id, result, "conditional_materials", "CONDITIONAL_MATERIALS", "分人群材料");
+            saveStructuredIfPresent(id, result, "fees", "FEES", "费用与支付方式");
+            saveStructuredIfPresent(id, result, "result_delivery", "RESULT_DELIVERY", "领取与邮寄");
+            saveStructuredIfPresent(id, result, "deadline_rules", "DEADLINE_RULES", "截止规则");
+            saveStructuredIfPresent(id, result, "amendments", "AMENDMENTS", "更正信息");
             if (result.get("warnings") != null) {
                 saveGenerated(id, "RISK_WARNING", "风险提示", result.get("warnings"),
                         String.valueOf(result.get("warnings")));
@@ -194,15 +221,35 @@ public class DocumentService {
                 saveGenerated(id, "SOURCE_INFO", "来源信息", source, source.get("source_name"));
             }
             saveGenerated(id, "AUDIO_SCRIPT", "语音稿", null, result.get("audio_script"));
-            jdbc.update("UPDATE processing_job SET status='SUCCEEDED',progress=100,finished_at=CURRENT_TIMESTAMP WHERE id=?", jobId);
+            long persistenceMs = Math.max(0, (System.nanoTime() - persistenceStarted) / 1_000_000);
+            Map<String, Object> metrics = result.get("metrics") instanceof Map<?, ?> rawMetrics
+                    ? (Map<String, Object>) rawMetrics : Map.of();
+            long totalMs = metric(metrics, "total_ms") + persistenceMs;
+            jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,"
+                            + "schema_version=?,cache_hit=?,text_extract_ms=?,fact_extract_ms=?,trace_validation_ms=?,"
+                            + "accessible_rewrite_ms=?,persistence_ms=?,total_ms=?,prompt_tokens=?,completion_tokens=?,"
+                            + "total_tokens=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    String.valueOf(metrics.getOrDefault("schema_version", "1.0")),
+                    Boolean.TRUE.equals(metrics.get("cache_hit")),
+                    metric(metrics, "text_extract_ms"),
+                    metric(metrics, "fact_extract_ms"),
+                    metric(metrics, "trace_validation_ms"),
+                    metric(metrics, "accessible_rewrite_ms"),
+                    persistenceMs,
+                    totalMs,
+                    metric(metrics, "prompt_tokens"),
+                    metric(metrics, "completion_tokens"),
+                    metric(metrics, "total_tokens"),
+                    jobId);
             jdbc.update("UPDATE source_document SET processing_status='WAITING_REVIEW',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
-            return Map.of("documentId", id, "status", "WAITING_REVIEW", "progress", 100);
+            return Map.of("documentId", id, "status", "WAITING_REVIEW", "stage", "SUCCEEDED",
+                    "progress", 100, "cacheHit", Boolean.TRUE.equals(metrics.get("cache_hit")), "totalMs", totalMs);
         } catch (RuntimeException exception) {
             LOGGER.error("Document processing failed for document {}", id, exception);
             String errorMessage = exception instanceof AiResultValidationException
                     ? EMPTY_AI_FIELDS_MESSAGE : truncate(exception.getMessage());
-            jdbc.update("UPDATE processing_job SET status='FAILED',error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+            jdbc.update("UPDATE processing_job SET status='FAILED',stage='FAILED',error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
                     errorMessage, jobId);
             jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "FAILED");
@@ -239,6 +286,46 @@ public class DocumentService {
         return result;
     }
 
+    public OriginalFile originalFile(long id, AuthUser user) {
+        assertAccess(id, user);
+        return loadOriginal(jdbc.queryForMap(
+                "SELECT storage_path,original_filename,mime_type,file_size,file_sha256 FROM source_document WHERE id=?",
+                id));
+    }
+
+    public OriginalFile publicOriginalFile(String slug) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT d.storage_path,d.original_filename,d.mime_type,d.file_size,d.file_sha256 "
+                        + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
+                        + "WHERE p.slug=? AND p.status='PUBLISHED' AND d.allow_public_original=TRUE",
+                slug);
+        if (rows.isEmpty()) throw new BusinessException(404, "原文件未公开或内容不存在");
+        return loadOriginal(rows.get(0));
+    }
+
+    private OriginalFile loadOriginal(Map<String, Object> row) {
+        String stored = nullableString(row.get("storage_path"));
+        if (stored.isBlank()) throw new BusinessException(404, "该材料没有可预览的原文件");
+        Path path = Paths.get(stored).toAbsolutePath().normalize();
+        if (!path.startsWith(uploadRoot) || !Files.isRegularFile(path)) {
+            throw new BusinessException(404, "原文件不存在");
+        }
+        try {
+            String expectedHash = nullableString(row.get("file_sha256"));
+            String actualHash = sha256(path);
+            if (!expectedHash.isBlank() && !expectedHash.equalsIgnoreCase(actualHash)) {
+                throw new BusinessException(409, "原文件完整性校验失败");
+            }
+            String name = nullableString(row.get("original_filename"));
+            String mime = nullableString(row.get("mime_type"));
+            if (name.isBlank()) name = "material";
+            if (mime.isBlank()) mime = "application/octet-stream";
+            return new OriginalFile(path, name, mime, Files.size(path), actualHash);
+        } catch (IOException exception) {
+            throw new BusinessException(500, "读取原文件失败");
+        }
+    }
+
     @Transactional
     public void updateField(long documentId, long fieldId, String value, boolean confirmed, AuthUser user) {
         assertAccess(documentId, user);
@@ -259,7 +346,8 @@ public class DocumentService {
     }
 
     @Transactional
-    public Map<String, Object> publish(long id, String title, String category, String sourceName, String sourceUrl, AuthUser user) {
+    public Map<String, Object> publish(long id, String title, String category, String sourceName,
+                                       String sourceUrl, boolean allowPublicOriginal, AuthUser user) {
         Map<String, Object> document = detail(id, user);
         int reviews = jdbc.queryForObject("SELECT COUNT(*) FROM review_record WHERE document_id=? AND action='APPROVE'", Integer.class, id);
         if (reviews == 0) throw new BusinessException(400, "发布前必须完成审核");
@@ -267,7 +355,8 @@ public class DocumentService {
         String slug = "guide-" + id;
         jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,source_name,source_url) VALUES (?,?,?,?,?,?,?,?)",
                 id, slug, title, summary, category, user.id(), sourceName, sourceUrl);
-        jdbc.update("UPDATE source_document SET processing_status='PUBLISHED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+        jdbc.update("UPDATE source_document SET processing_status='PUBLISHED',allow_public_original=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                allowPublicOriginal, id);
         jdbc.update("UPDATE generated_content SET status='PUBLISHED' WHERE document_id=?", id);
         log(user, "PUBLISH_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
         return Map.of("id", id, "slug", slug, "title", title, "originalTitle", document.get("title"));
@@ -288,6 +377,15 @@ public class DocumentService {
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("生成内容序列化失败", exception);
         }
+    }
+
+    private void saveStructuredIfPresent(long id, Map<String, Object> result,
+                                         String key, String type, String title) {
+        Object value = result.get(key);
+        if (value instanceof List<?> list && list.isEmpty()) return;
+        if (value instanceof Map<?, ?> map
+                && map.values().stream().allMatch(item -> item instanceof List<?> list && list.isEmpty())) return;
+        if (value != null) saveGenerated(id, type, title, value, value);
     }
 
     private void assertAccess(long id, AuthUser user) {
@@ -315,6 +413,10 @@ public class DocumentService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
+    private static String nullableString(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
     private static String safeOriginalName(MultipartFile file) {
         return Paths.get(file.getOriginalFilename() == null ? "material" : file.getOriginalFilename())
                 .getFileName().toString().replaceAll("[^a-zA-Z0-9._\\-\\u4e00-\\u9fa5]", "_");
@@ -322,6 +424,41 @@ public class DocumentService {
 
     private static String extension(String name) {
         return name.contains(".") ? name.substring(name.lastIndexOf('.') + 1).toLowerCase() : "";
+    }
+
+    private static String mimeTypeFor(String extension) {
+        return switch (extension) {
+            case "pdf" -> "application/pdf";
+            case "png" -> "image/png";
+            case "jpg", "jpeg" -> "image/jpeg";
+            default -> "application/octet-stream";
+        };
+    }
+
+    private static String sha256(Path path) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (var input = Files.newInputStream(path)) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    if (read > 0) digest.update(buffer, 0, read);
+                }
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
+    }
+
+    private static long metric(Map<String, Object> metrics, String name) {
+        Object value = metrics.get(name);
+        if (value instanceof Number number) return number.longValue();
+        try {
+            return value == null ? 0 : Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
     }
 
     private static void markSuspectedDuplicateConditions(List<Map<String, Object>> fields) {
@@ -488,6 +625,8 @@ public class DocumentService {
     private record SourceTrace(long segmentId, int pageNo, String quote) {}
 
     private record PreparedField(Map<String, Object> field, SourceTrace source, double confidence) {}
+
+    public record OriginalFile(Path path, String filename, String mimeType, long size, String sha256) {}
 
     private static final class AiResultValidationException extends RuntimeException {}
 }

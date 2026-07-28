@@ -8,7 +8,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import httpx
 import pytest
 
-from app.models import SourceSegment, TextRequest
+from app.models import (
+    FactExtractionResponse,
+    FeeRule,
+    ServiceWindow,
+    SourceSegment,
+    TextRequest,
+)
 from app.main import get_provider
 from app.providers import MockProvider
 from app.providers.external import (
@@ -16,6 +22,7 @@ from app.providers.external import (
     ExternalProviderError,
     ExternalSettings,
 )
+from app.prompts import guide_extract_v1_1
 
 
 TEST_KEY = "unit-test-secret-value"
@@ -117,7 +124,7 @@ class QueueServer:
         self.thread.join(timeout=2)
 
 
-def settings(base_url, *, retries=2, timeout=5):
+def settings(base_url, *, retries=2, timeout=5, prompt_version="v1"):
     return ExternalSettings(
         base_url=base_url,
         api_key=TEST_KEY,
@@ -126,7 +133,7 @@ def settings(base_url, *, retries=2, timeout=5):
         max_retries=retries,
         max_tokens=6000,
         thinking="disabled",
-        prompt_version="v1",
+        prompt_version=prompt_version,
     )
 
 
@@ -688,3 +695,214 @@ def test_conflicting_dates_are_kept_as_separate_traceable_fields():
         ).analyze(request(material))
     assert [field.value for field in result.fields] == ["8月10日", "8月12日"]
     assert all(field.source_quote in material for field in result.fields)
+
+
+def test_v1_1_validates_general_service_structures_and_relative_deadline():
+    material = (
+        "办理对象为居民身份证有效期不足三个月的人员。\n"
+        "周一、周三08:30-11:30、13:30-16:30在虹桥政务服务分中心二楼公安综合窗口受理。\n"
+        "周六09:00-11:30受理，下午不开放。法定节假日不受理。\n"
+        "本市户籍人员携带原居民身份证；外省户籍人员还需本市居住登记凭证。\n"
+        "到期换领20元/证，支持现金及常用移动支付。\n"
+        "20个工作日后可到原办理窗口领取，也可自愿邮寄，邮寄费用由邮政服务单位另行收取。\n"
+        "请在收到短信提醒后30日内办理。咨询电话021-5566-7788。"
+    )
+    fact_payload = {
+        "prompt_version": "v1.1",
+        "fields": [{
+            "field_type": "CONTACT", "label": "咨询电话", "value": "021-5566-7788",
+            "source_quote": "咨询电话021-5566-7788", "page_no": 1,
+            "segment_id": 101, "confidence": 0.98,
+        }],
+        "audience_rules": {
+            "audience": [{
+                "value": "居民身份证有效期不足三个月的人员",
+                "source_quote": "办理对象为居民身份证有效期不足三个月的人员",
+                "page_no": 1, "segment_id": 101, "needs_human_review": False,
+            }],
+            "conditions": [],
+        },
+        "service_schedule": {
+            "service_windows": [{
+                "days": ["周一", "周三"], "dates": [],
+                "time_ranges": ["08:30-11:30", "13:30-16:30"],
+                "location": "虹桥政务服务分中心二楼公安综合窗口",
+                "unavailable_note": None,
+                "source_quote": "周一、周三08:30-11:30、13:30-16:30在虹桥政务服务分中心二楼公安综合窗口受理",
+                "page_no": 1, "segment_id": 101, "needs_human_review": False,
+            }],
+            "closure_rules": [{
+                "value": "法定节假日不受理", "source_quote": "法定节假日不受理",
+                "page_no": 1, "segment_id": 101, "needs_human_review": False,
+            }],
+        },
+        "conditional_materials": [{
+            "applicable_to": "外省户籍人员",
+            "required": "原居民身份证", "optional": [],
+            "source_quote": "本市户籍人员携带原居民身份证；外省户籍人员还需本市居住登记凭证",
+            "page_no": 1, "segment_id": 101, "needs_human_review": False,
+            "unrecognized_model_note": "must be ignored",
+        }],
+        "fees": [{
+            "fee_type": "到期换领", "amount": "20元/证", "rule": None,
+            "payment_methods": ["现金", "常用移动支付"],
+            "source_quote": "到期换领20元/证，支持现金及常用移动支付",
+            "page_no": 1, "segment_id": 101, "needs_human_review": False,
+        }],
+        "result_delivery": [{
+            "method": "邮寄", "optional": True, "available_after": None,
+            "location": None, "fee_rule": "邮寄费用由邮政服务单位另行收取",
+            "source_quote": "也可自愿邮寄，邮寄费用由邮政服务单位另行收取",
+            "page_no": 1, "segment_id": 101, "needs_human_review": False,
+        }],
+        "deadline_rules": [{
+            "rule_type": "RELATIVE_PERIOD", "value": "收到短信提醒后30日内",
+            "channel": None, "source_quote": "请在收到短信提醒后30日内办理",
+            "page_no": 1, "segment_id": 101, "needs_human_review": False,
+        }],
+        "sessions": [],
+        "amendments": [],
+    }
+    rewrite_payload = {
+        **rewrite("请按分时安排办理。"),
+        "prompt_version": "v1.1",
+    }
+    with QueueServer([
+        response(200, json_completion(fact_payload)),
+        response(200, json_completion(rewrite_payload)),
+    ]) as server:
+        result = ExternalLlmProvider(
+            settings(server.url, prompt_version="v1.1"), sleep=lambda _: None
+        ).analyze(request(material))
+    assert result.service_schedule.service_windows[0].time_ranges == [
+        "08:30-11:30", "13:30-16:30"
+    ]
+    assert result.conditional_materials[0].applicable_to == "外省户籍人员"
+    assert result.conditional_materials[0].required == ["原居民身份证"]
+    assert result.fees[0].payment_methods == ["现金", "常用移动支付"]
+    assert result.result_delivery[0].optional is True
+    assert result.deadline_rules[0].rule_type == "RELATIVE_PERIOD"
+    assert result.deadline_rules[0].value == "收到短信提醒后30日内"
+
+
+def test_cache_key_uses_content_model_prompt_and_schema_and_skips_external_call():
+    material = "地点：青松社区服务站"
+    cached_request = request(material).model_copy(
+        update={"content_sha256": "f" * 64, "document_id": 99, "processing_job_id": 7}
+    )
+    with QueueServer([
+        response(200, json_completion(facts())),
+        response(200, json_completion(rewrite())),
+    ]) as server:
+        provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
+        first = provider.analyze(cached_request)
+        second = provider.analyze(cached_request)
+    assert len(server.requests) == 2
+    assert first.metrics.cache_hit is False
+    assert second.metrics.cache_hit is True
+    assert second.metrics.total_tokens == 0
+
+
+def test_v1_1_reserves_enough_output_tokens_for_dense_structured_notices():
+    provider = ExternalLlmProvider(
+        settings("http://127.0.0.1:9", prompt_version="v1.1"),
+        sleep=lambda _: None,
+    )
+    short_dense_notice = request("办事时段、材料、费用、领取方式和截止规则。" * 20)
+
+    assert provider._dynamic_fact_max_tokens(short_dense_notice) == 4200
+    assert provider._dynamic_rewrite_max_tokens(short_dense_notice) == 1400
+
+
+def test_v1_1_prompt_uses_real_segment_identity_and_accepts_review_marker():
+    source = request("地点：青松社区服务站", segment_id=987, page_no=3)
+    prompt = guide_extract_v1_1.build_task_prompt(source, "v1.1")
+
+    assert '"page_no":3' in prompt
+    assert '"segment_id":987' in prompt
+    payload = facts()
+    payload["fields"][0].update({
+        "value": "青松社区服务站",
+        "source_quote": "地点：青松社区服务站",
+        "page_no": 3,
+        "segment_id": 987,
+        "needs_human_review": True,
+    })
+    with QueueServer([
+        response(200, json_completion(payload)),
+        response(200, json_completion(rewrite())),
+    ]) as server:
+        result = ExternalLlmProvider(
+            settings(server.url), sleep=lambda _: None
+        ).analyze(source)
+    assert result.fields[0].segment_id == 987
+
+
+def test_common_structure_completion_reads_generic_schedule_table_and_fees():
+    material = (
+        "受理日\n上午\n下午\n"
+        "周一、周三\n08:30-11:30\n13:30-16:30\n"
+        "周六\n09:00-11:30\n不开放\n"
+        "到期换领每证20元；证件损坏换领按窗口公示标准收取。"
+        "支持现金及常用移动支付。"
+    )
+    source = request(material)
+    provider = ExternalLlmProvider(
+        settings("http://127.0.0.1:9", prompt_version="v1.1"),
+        sleep=lambda _: None,
+    )
+    completed = provider._complete_common_structures(
+        FactExtractionResponse(prompt_version="v1.1", fields=[]),
+        source,
+    )
+
+    assert len(completed.service_schedule.service_windows) == 2
+    assert completed.service_schedule.service_windows[1].unavailable_note == "下午不开放"
+    assert {item.fee_type for item in completed.fees} == {
+        "到期换领",
+        "证件损坏换领",
+    }
+    assert all(
+        item.payment_methods == ["现金", "常用移动支付"]
+        for item in completed.fees
+    )
+
+
+def test_structured_completion_merges_semantic_window_and_fee_duplicates():
+    provider = ExternalLlmProvider(
+        settings("http://127.0.0.1:9", prompt_version="v1.1"),
+        sleep=lambda _: None,
+    )
+    windows = [
+        ServiceWindow(
+            days=["周六"], dates=[], time_ranges=["09:00-11:30"],
+            unavailable_note="不开放", source_quote="周六\n09:00-11:30\n不开放",
+            page_no=1, segment_id=101,
+        ),
+        ServiceWindow(
+            days=["周六"], dates=[], time_ranges=["09:00-11:30"],
+            unavailable_note="下午不开放", source_quote="周六\n09:00-11:30\n不开放",
+            page_no=1, segment_id=101,
+        ),
+    ]
+    fees = [
+        FeeRule(
+            fee_type="到期换领工本费", amount="20", payment_methods=["现金"],
+            source_quote="到期换领每证20元", page_no=1, segment_id=101,
+        ),
+        FeeRule(
+            fee_type="到期换领", amount="每证20元",
+            payment_methods=["现金", "移动支付"],
+            source_quote="到期换领每证20元；支持现金及移动支付",
+            page_no=1, segment_id=101,
+        ),
+    ]
+
+    merged_windows = provider._merge_service_windows(windows)
+    merged_fees = provider._merge_fees(fees)
+    assert len(merged_windows) == 1
+    assert merged_windows[0].unavailable_note == "下午不开放"
+    assert len(merged_fees) == 1
+    assert merged_fees[0].fee_type == "到期换领"
+    assert merged_fees[0].amount == "每证20元"
+    assert merged_fees[0].payment_methods == ["现金", "移动支付"]

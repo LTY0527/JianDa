@@ -92,9 +92,9 @@ External 配置包括：
 - `EXTERNAL_LLM_MAX_RETRIES`：默认 2，仅用于 429、5xx、超时、临时连接失败和空 content
 - `EXTERNAL_LLM_MAX_TOKENS`：默认 6000
 - `EXTERNAL_LLM_THINKING`：默认 `disabled`
-- `JIANDA_PROMPT_VERSION`：默认 `v1`
+- `JIANDA_PROMPT_VERSION`：默认 `v1.1`；`v1` 仅用于兼容和对比回归
 
-不要配置已弃用的 `deepseek-chat` 或 `deepseek-reasoner`。当前实现和自动测试完成不等于真实模型已经通过生产合规或业务验收；本阶段未发送真实 DeepSeek 请求。
+不要配置已弃用的 `deepseek-chat` 或 `deepseek-reasoner`。真实模型联调完成不等于已经通过生产数据合规或业务验收；生产启用前仍需完成数据处理范围、保留策略和人工审核责任确认。
 
 AI 的 `/internal/*` 接口当前没有应用级服务认证；公网部署前应保持 AI 服务在私有网络，并停止直接映射 8001，或增加后端到 AI 的服务认证。
 

@@ -6,7 +6,7 @@ import { fetchDetail, type PublicItem } from "../api";
 import { contentKind } from "../content";
 import { Download } from "lucide-vue-next";
 const route = useRoute();
-const title = ref("查看原文");
+const title = ref("提取文本");
 const rawText = ref("");
 const source = ref("");
 const error = ref("");
@@ -52,10 +52,10 @@ onMounted(async () => {
 </script>
 <template>
   <div class="detail-page">
-    <AppTopBar title="查看原文" />
+    <AppTopBar title="提取文本" />
     <main class="reader original">
       <div class="original-heading">
-        <div><span>原文来源</span><h1>查看原文</h1></div>
+        <div><span>原文来源</span><h1>提取文本</h1></div>
         <button type="button" aria-label="下载原文" :disabled="Boolean(error)" @click="downloadOriginal"><Download /></button>
       </div>
       <p v-if="downloadStatus" class="page-number" role="status">{{ downloadStatus }}</p>
@@ -65,7 +65,7 @@ onMounted(async () => {
         <footer>{{ source }}</footer>
       </article>
       <p v-if="error" class="page-number">{{ error }}</p>
-      <p v-else class="page-number">原始材料内容 · 可与通俗版逐项核对</p>
+      <p v-else class="page-number">从原文件提取的文本 · 可与通俗版逐项核对</p>
     </main>
   </div>
 </template>

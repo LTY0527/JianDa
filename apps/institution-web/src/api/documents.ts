@@ -31,6 +31,10 @@ export interface DocumentDetail {
   source_published_at?: string;
   organization_name: string;
   source_name?: string;
+  original_filename?: string;
+  mime_type?: string;
+  file_size?: number;
+  file_sha256?: string;
   processing_status: string;
 }
 
@@ -68,6 +72,9 @@ export interface ProcessingJob {
   status: string;
   progress: number;
   error_message?: string;
+  stage?: string;
+  cache_hit?: boolean;
+  total_ms?: number;
 }
 
 export const authApi = {
@@ -119,6 +126,8 @@ export const documentApi = {
     http.get<ApiResponse<GeneratedContent[]>>(`/documents/${id}/generated`),
   segments: (id: number) =>
     http.get<ApiResponse<DocumentSegment[]>>(`/documents/${id}/segments`),
+  originalFile: (id: number) =>
+    http.get<Blob>(`/documents/${id}/original-file`, { responseType: "blob" }),
   jobs: (id: number) =>
     http.get<ApiResponse<ProcessingJob[]>>(`/documents/${id}/jobs`),
   updateField: (
@@ -140,6 +149,7 @@ export const documentApi = {
       category: string;
       sourceName: string;
       sourceUrl?: string;
+      allowPublicOriginal?: boolean;
     },
   ) =>
     http.post<ApiResponse<{ slug: string }>>(

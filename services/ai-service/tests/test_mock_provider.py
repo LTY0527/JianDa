@@ -121,10 +121,15 @@ def test_health_and_unknown_analyze() -> None:
 
 def test_public_news_has_warning() -> None:
     result = MockProvider().analyze(
-        TextRequest(title="健康提示", text="正文", document_type="public_news")
+        TextRequest(
+            title="健康提示",
+            text="按医嘱规律服药，不可自行停药或减量。",
+            document_type="public_news",
+        )
     )
     assert result.steps == []
-    assert result.warnings == ["不能自行停药或减量。"]
+    assert result.warnings == ["按医嘱规律服药，不可自行停药或减量"]
+    assert result.fields[0].source_quote == "按医嘱规律服药，不可自行停药或减量。"
 
 
 def test_public_news_matches_fixture_topic_and_stays_stable() -> None:
@@ -136,5 +141,5 @@ def test_public_news_matches_fixture_topic_and_stays_stable() -> None:
         title="社区养老服务安排", text="提供延时服务", document_type="public_news"
     )
     assert provider.analyze(anti_fraud) == provider.analyze(anti_fraud)
-    assert "安全账户" in provider.analyze(anti_fraud).term_explanations
-    assert provider.analyze(community).fields[0].field_type == "TIME"
+    assert provider.analyze(anti_fraud).fields[0].source_quote == "不要提供验证码"
+    assert provider.analyze(community).fields[0].field_type == "SERVICE_TIME"

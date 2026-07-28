@@ -111,7 +111,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
   test("查看原文下载按钮会产生可保存的文本文件", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`${h5Url}/original/social-security-card-renewal`);
-    await assertRendered(page, "查看原文");
+    await assertRendered(page, "提取文本");
     await screenshot(page, "h5-original-375.png");
     await page.evaluate(() => {
       const original = URL.createObjectURL.bind(URL);
@@ -153,7 +153,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
       await page.goto(`${h5Url}${route}`);
       await expect(page.getByRole("button", { name: "返回" })).toBeVisible();
       if (route.startsWith("/original/")) {
-        await expect(page.getByRole("heading", { name: "查看原文" })).toBeVisible();
+        await expect(page.getByRole("heading", { name: "提取文本" })).toBeVisible();
       }
       await page.getByRole("button", { name: "返回" }).click();
       await expect(page).toHaveURL(`${h5Url}${expected}`);

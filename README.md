@@ -6,9 +6,9 @@
 
 AI 服务默认使用确定性的 `MockProvider`，无需 API Key。设置 `LLM_PROVIDER=external` 后启用 OpenAI-compatible 的 DeepSeek `ExternalLlmProvider`。它先从带页码和段落 ID 的原文中提取可追溯事实，再仅使用已验证事实生成适老化摘要、通俗版、步骤卡片、风险提示、术语解释和朗读稿；任一阶段失败都会明确报错，不会静默回退到 Mock 数据。
 
-External Provider 默认模型为 `deepseek-v4-flash`，也可通过 `EXTERNAL_LLM_MODEL=deepseek-v4-pro` 切换。不要使用已弃用的 `deepseek-chat` 或 `deepseek-reasoner`。提示词版本由 `JIANDA_PROMPT_VERSION=v1` 控制，代码不会记录完整原文、Authorization 请求头或模型推理内容。
+External Provider 默认模型为 `deepseek-v4-flash`，也可通过 `EXTERNAL_LLM_MODEL=deepseek-v4-pro` 切换。不要使用已弃用的 `deepseek-chat` 或 `deepseek-reasoner`。提示词版本由 `JIANDA_PROMPT_VERSION` 控制：`v1` 保留兼容，默认 `v1.1` 增加分时受理、分人群材料、费用支付、领取邮寄、相对期限和更正信息等通用公共服务结构。代码不会记录完整原文、Authorization 请求头或模型推理内容。
 
-本轮只通过本地 mock HTTP Server 完成自动测试，没有调用真实 DeepSeek。真实联调前，在本机未提交的 `.env` 中填写：
+开发者如需真实联调，可在本机未提交的 `.env` 中填写：
 
 ```env
 LLM_PROVIDER=external
@@ -19,7 +19,7 @@ EXTERNAL_LLM_TIMEOUT_SECONDS=60
 EXTERNAL_LLM_MAX_RETRIES=2
 EXTERNAL_LLM_MAX_TOKENS=6000
 EXTERNAL_LLM_THINKING=disabled
-JIANDA_PROMPT_VERSION=v1
+JIANDA_PROMPT_VERSION=v1.1
 ```
 
 `.env` 不得提交到 Git。涉及公共服务材料时，还应先确认模型账号、数据出境、隐私和业务审核要求。
@@ -225,9 +225,18 @@ Remove-Item Env:PIP_PROXY -ErrorAction SilentlyContinue
 2. 使用 `org_admin / Jianda@123` 登录机构端。
 3. 进入“材料管理 → 上传材料”，选择 PDF/PNG/JPG。
 4. 系统保存原始文件、调用稳定 MockProvider，并生成字段、通俗版和步骤卡片。
-5. 在左右对照页修改并确认字段，完成审核。
-6. 设置分类和来源后发布。
-7. 打开用户 H5，查看刚发布的内容，切换 18/20/22/24px 字号，测试朗读、收藏与原文。
+5. 在左右对照页切换“原 PDF/原图”和“提取文本”，核对页码、原文片段及结构化字段，修改并确认字段后完成审核。
+6. 设置分类和来源；如确需公开上传原件，显式勾选“允许用户查看原文件”，再发布。
+7. 打开用户 H5，查看刚发布的内容，切换 18/20/22/24px 字号，测试朗读、收藏、提取文本与获授权公开的原文件。
+
+### 通用材料结构与原文件
+
+- 上传时保存原文件名、MIME、字节大小和 SHA-256；磁盘读取时重新校验 SHA-256，不向前端暴露存储路径。
+- 机构端原文件接口需要 JWT 和机构权限；公开端只有已发布且机构显式授权的材料可读取。
+- PDF/原图接口支持 `Range`、`ETag` 和 `X-Content-SHA256`，便于浏览器按需预览。
+- v1.1 同时保留旧的扁平字段，并生成 `AUDIENCE_RULES`、`SERVICE_SCHEDULE`、`CONDITIONAL_MATERIALS`、`FEES`、`RESULT_DELIVERY`、`DEADLINE_RULES`、`AMENDMENTS`。
+- 每个结构化条目都带原文引用、页码、段落 ID 和人工复核标记；相对期限不会伪造为固定日期，可选材料不会变成必需材料。
+- External 结果缓存键包含文件 SHA-256、模型、提示词版本和 Schema 版本。缓存仅用于完全相同的文件与配置，失败结果不缓存；当前为 AI 进程内缓存，容器重启后失效。
 
 ### 用户端消费级 App 演示
 
@@ -283,7 +292,7 @@ Phase 7.4 自动化验收已覆盖助手同源 POST、检索引用、错误重�
 ## 当前限制
 
 - OCR 未安装时，图片材料使用手工正文或稳定演示正文继续处理。
-- ExternalLlmProvider 仅保留合规扩展点；默认不访问真实模型。
+- ExternalLlmProvider 已具备真实模型适配与自动回归；默认仍使用 MockProvider，不会主动访问真实模型。生产启用前需完成数据合规和业务验收。
 - 本地 Collector 使用 fixture，不执行真实网页抓取。
 - 简达助手当前采用稳定关键词/分类检索，只从 `PUBLISHED` 内容生成带引用的理解提示，不是开放域聊天或医疗、金融、政策决策工具；没有可靠依据时会明确拒绝补充事实，后续可在现有接口边界内替换为 RAG。
 - 游客收藏、历史、偏好和助手会话尚未跨设备同步；办事提醒和用户账号将在后续版本开放。

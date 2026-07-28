@@ -51,6 +51,15 @@ test("document 16 shows real processing counts and traceable external fields", a
   await expect(page.getByText("原文依据 · 第 1 页")).toHaveCount(10);
   await expect(page.getByRole("button", { name: "完成字段审核" })).toBeEnabled();
 
+  await page.getByRole("button", { name: "原PDF", exact: true }).click();
+  await expect(page.locator(".original-file-pane iframe")).toBeVisible();
+  await expect(page.locator(".original-file-pane iframe")).toHaveAttribute(
+    "title",
+    "原PDF预览",
+  );
+  await page.getByRole("button", { name: "提取文本", exact: true }).click();
+  await expect(page.locator(".source-pane")).toContainText("医院门诊预约调整告知");
+
   await fieldCards.nth(6).click();
   await expect(fieldCards.nth(6)).toHaveClass(/active/);
   await page.screenshot({

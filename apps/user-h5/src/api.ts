@@ -69,6 +69,11 @@ export async function fetchDetail(slug: string): Promise<Record<string, any>> {
   return response.data.data;
 }
 
+export function publicOriginalFileUrl(slug: string): string {
+  const base = String(import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
+  return `${base}/public/items/${encodeURIComponent(slug)}/original-file`;
+}
+
 export async function setFavorite(
   id: number,
   favorite: boolean,

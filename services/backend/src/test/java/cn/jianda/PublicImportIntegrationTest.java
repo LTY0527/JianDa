@@ -2,6 +2,7 @@ package cn.jianda;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -35,7 +36,7 @@ class PublicImportIntegrationTest {
 
     @BeforeEach
     void configureAi() {
-        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList())).thenReturn(Map.of(
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap())).thenReturn(Map.of(
                 "fields", List.of(Map.of("field_type", "WARNING", "label", "风险提示", "value", "不要提供验证码",
                         "page_no", 1, "source_quote", "不会索要银行卡密码和验证码。", "confidence", 0.98)),
                 "summary", List.of("核实来电身份。", "不要共享屏幕或验证码。", "被骗后立即报警。"),

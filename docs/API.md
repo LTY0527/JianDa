@@ -14,8 +14,21 @@
 - `GET /api/documents`，`GET /api/documents/{id}`
 - `POST /api/documents/{id}/process`
 - `GET /api/documents/{id}/jobs|segments|fields|generated`
+- `GET /api/documents/{id}/original-file`：需要 JWT 和文档所属机构权限；返回原始 PDF/PNG/JPG，支持 `Range`、`ETag` 和 `X-Content-SHA256`。
 
 预识别结果的 `authority_status` 仅表示材料内部证据：`DOCUMENT_EVIDENCE` 为存在明确发布机构证据，`UNCONFIRMED` 为无法确认，`CONFLICT` 为候选冲突；不表示官网或外部数据库已经核验。正式处理结果的 `generated` 可包含 `SESSIONS`，其中日期、时间、地点和原文追溯信息作为同一场次保存。
+
+v1.1 通用结构还包括：
+
+- `AUDIENCE_RULES`：适用人群与办理/健康条件；
+- `SERVICE_SCHEDULE`：服务窗口和停办规则；
+- `CONDITIONAL_MATERIALS`：按人群区分的必需与可选材料；
+- `FEES`：费用类型、已知金额/收费规则和支付方式；
+- `RESULT_DELIVERY`：窗口领取、邮寄及相关费用规则；
+- `DEADLINE_RULES`：固定日期、相对期限、容量限制和分渠道截止；
+- `AMENDMENTS`：原信息、更正信息和生效优先级。
+
+以上结构条目包含 `source_quote`、`page_no`、`segment_id` 和 `needs_human_review`。`jobs` 同时返回处理阶段、Schema 版本、缓存命中状态、阶段耗时和 token 计数。
 
 ## 审核发布
 
@@ -43,6 +56,7 @@
 
 - `GET /api/public/items|categories|search`
 - `GET /api/public/items/{slug}`
+- `GET /api/public/items/{slug}/original-file`：仅已发布且发布时显式设置 `allowPublicOriginal=true` 的材料可用；同样支持字节范围读取和内容 SHA-256 校验。
 - `POST|DELETE /api/public/items/{id}/favorite`
 - `GET /api/public/assistant/suggestions`：根据当前已发布分类返回稳定推荐问题。
 - `POST /api/public/assistant/chat`：仅检索 `PUBLISHED` 内容并返回回答、来源引用、安全提示和 `mode`；当前稳定降级值为 `retrieval`，预留的外部模型实现可返回 `ai`。

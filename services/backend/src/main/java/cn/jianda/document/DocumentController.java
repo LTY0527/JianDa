@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.RequestHeader;
 
 @RestController
 @RequestMapping("/api/documents")
@@ -63,6 +65,13 @@ public class DocumentController {
     @GetMapping("/{id}/segments")
     public ApiResponse<List<Map<String, Object>>> segments(@PathVariable long id) { return ApiResponse.ok(service.segments(id, UserContext.current())); }
 
+    @GetMapping("/{id}/original-file")
+    public ResponseEntity<byte[]> originalFile(
+            @PathVariable long id,
+            @RequestHeader(value = "Range", required = false) String range) throws IOException {
+        return OriginalFileHttp.response(service.originalFile(id, UserContext.current()), range);
+    }
+
     @GetMapping("/{id}/fields")
     public ApiResponse<List<Map<String, Object>>> fields(@PathVariable long id) { return ApiResponse.ok(service.fields(id, UserContext.current())); }
 
@@ -90,7 +99,8 @@ public class DocumentController {
 
     @PostMapping("/{id}/publish")
     public ApiResponse<Map<String, Object>> publish(@PathVariable long id, @Valid @RequestBody PublishRequest request) {
-        return ApiResponse.ok(service.publish(id, request.title(), request.category(), request.sourceName(), request.sourceUrl(), UserContext.current()));
+        return ApiResponse.ok(service.publish(id, request.title(), request.category(), request.sourceName(),
+                request.sourceUrl(), request.allowPublicOriginal(), UserContext.current()));
     }
 
     @PostMapping("/{id}/withdraw")
@@ -110,5 +120,6 @@ public class DocumentController {
     public record ReviewRequest(String comment) {}
     public record PublishRequest(@NotBlank(message = "请输入标题") String title,
                                  @NotBlank(message = "请选择分类") String category,
-                                 @NotBlank(message = "请输入来源") String sourceName, String sourceUrl) {}
+                                 @NotBlank(message = "请输入来源") String sourceName, String sourceUrl,
+                                 boolean allowPublicOriginal) {}
 }

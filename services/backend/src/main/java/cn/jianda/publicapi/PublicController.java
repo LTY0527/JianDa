@@ -2,6 +2,8 @@ package cn.jianda.publicapi;
 
 import cn.jianda.common.ApiResponse;
 import cn.jianda.common.BusinessException;
+import cn.jianda.document.DocumentService;
+import cn.jianda.document.OriginalFileHttp;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
@@ -19,6 +21,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.ResponseEntity;
+import java.io.IOException;
 
 @RestController
 @RequestMapping("/api/public")
@@ -29,8 +33,13 @@ public class PublicController {
                     + "(?<location>[^\\r\\n。；]{2,80}(?:门诊|窗口|服务台|中心|地点))");
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final DocumentService documentService;
 
-    public PublicController(JdbcTemplate jdbc, ObjectMapper objectMapper) { this.jdbc = jdbc; this.objectMapper = objectMapper; }
+    public PublicController(JdbcTemplate jdbc, ObjectMapper objectMapper, DocumentService documentService) {
+        this.jdbc = jdbc;
+        this.objectMapper = objectMapper;
+        this.documentService = documentService;
+    }
 
     @GetMapping("/items")
     public ApiResponse<List<Map<String, Object>>> items(@RequestParam(required = false) String category) {
@@ -52,7 +61,7 @@ public class PublicController {
 
     @GetMapping("/items/{slug}")
     public ApiResponse<Map<String, Object>> detail(@PathVariable String slug) {
-        List<Map<String, Object>> rows = jdbc.queryForList("SELECT p.*,d.raw_text,d.page_count FROM published_item p "
+        List<Map<String, Object>> rows = jdbc.queryForList("SELECT p.*,d.raw_text,d.page_count,d.allow_public_original,d.mime_type FROM published_item p "
                 + "JOIN source_document d ON d.id=p.document_id WHERE p.slug=? AND p.status='PUBLISHED'", slug);
         if (rows.isEmpty()) throw new BusinessException(404, "内容不存在或已撤回");
         Map<String, Object> result = new LinkedHashMap<>(rows.get(0));
@@ -69,12 +78,20 @@ public class PublicController {
                 "SELECT field_type,field_label,field_value,page_no,segment_id,source_quote "
                         + "FROM extracted_field WHERE document_id=? ORDER BY id", documentId);
         result.put("fields", fields);
+        result.put("original_file_available", Boolean.TRUE.equals(result.get("allow_public_original")));
         if (!generated.containsKey("SESSIONS")) {
             List<Map<String, Object>> sessions =
                     sessionsFromSource(String.valueOf(result.getOrDefault("raw_text", "")), fields);
             if (!sessions.isEmpty()) generated.put("SESSIONS", sessions);
         }
         return ApiResponse.ok(result);
+    }
+
+    @GetMapping("/items/{slug}/original-file")
+    public ResponseEntity<byte[]> originalFile(
+            @PathVariable String slug,
+            @RequestHeader(value = "Range", required = false) String range) throws IOException {
+        return OriginalFileHttp.response(documentService.publicOriginalFile(slug), range);
     }
 
     @PostMapping("/items/{id}/favorite")

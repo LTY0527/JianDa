@@ -28,6 +28,16 @@ const jobs = ref<ProcessingJob[]>([]);
 const error = ref("");
 const loading = ref(true);
 const retrying = ref(false);
+const latestJob = computed(() => jobs.value[0]);
+const stageText: Record<string, string> = {
+  EXTRACTING_TEXT: "正在提取正文",
+  EXTRACTING_FACTS: "正在识别公共服务事实",
+  VALIDATING_TRACE: "正在校验原文追溯",
+  GENERATING_ACCESSIBLE_CONTENT: "正在生成通俗内容",
+  SAVING_RESULT: "正在保存结果",
+  SUCCEEDED: "处理完成",
+  FAILED: "处理失败",
+};
 const failed = computed(() => document.value?.processing_status === "FAILED");
 const emptyReviewResult = computed(
   () =>
@@ -129,6 +139,11 @@ onMounted(load);
         :to="`/documents/${documentId}/review`"
         >进入对照审核<ArrowRight :size="17" /></RouterLink
     ></PageHeader>
+    <p v-if="latestJob" class="info-note process-stage-note">
+      {{ stageText[latestJob.stage || ""] || "正在处理" }}
+      <span v-if="latestJob.total_ms">· 用时 {{ (latestJob.total_ms / 1000).toFixed(1) }} 秒</span>
+      <span v-if="latestJob.cache_hit">· 已复用相同文件的验证结果</span>
+    </p>
     <section class="process-rail">
       <div class="done">
         <CircleCheck /><span><b>材料上传</b><small>原始文件已保存</small></span>
