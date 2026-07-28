@@ -51,7 +51,8 @@ public class DocumentService {
     }
 
     public List<Map<String, Object>> list(AuthUser user) {
-        String sql = "SELECT d.id,d.title,d.file_name,d.file_type,d.processing_status status,d.page_count,d.created_at,d.updated_at,o.name organization_name,"
+        String sql = "SELECT d.id,d.title,d.file_name,d.file_type,d.source_type,d.source_name,d.original_published_at,"
+                + "d.category,d.content_kind,d.processing_status status,d.page_count,d.created_at,d.updated_at,o.name organization_name,"
                 + "COALESCE((SELECT MAX(progress) FROM processing_job j WHERE j.document_id=d.id),0) progress "
                 + "FROM source_document d JOIN organization o ON o.id=d.organization_id ";
         if (user.isPlatformAdmin()) {
@@ -291,9 +292,13 @@ public class DocumentService {
 
     public OriginalFile originalFile(long id, AuthUser user) {
         assertAccess(id, user);
-        return loadOriginal(jdbc.queryForMap(
-                "SELECT storage_path,original_filename,mime_type,file_size,file_sha256 FROM source_document WHERE id=?",
-                id));
+        Map<String, Object> source = jdbc.queryForMap(
+                "SELECT source_type,storage_path,original_filename,mime_type,file_size,file_sha256 "
+                        + "FROM source_document WHERE id=?", id);
+        if ("WEB_ARTICLE".equals(source.get("source_type")) || source.get("storage_path") == null) {
+            throw new BusinessException(404, "网页文章没有 PDF 或图片原文件，请查看网页正文快照");
+        }
+        return loadOriginal(source);
     }
 
     public OriginalFile publicOriginalFile(String slug) {
@@ -412,10 +417,19 @@ public class DocumentService {
     }
 
     private void assertAccess(long id, AuthUser user) {
-        Integer count = user.isPlatformAdmin()
-                ? jdbc.queryForObject("SELECT COUNT(*) FROM source_document WHERE id=?", Integer.class, id)
-                : jdbc.queryForObject("SELECT COUNT(*) FROM source_document WHERE id=? AND organization_id=?", Integer.class, id, user.organizationId());
-        if (count == null || count == 0) throw new BusinessException(404, "材料不存在或无权访问");
+        Integer exists = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_document WHERE id=?", Integer.class, id);
+        if (exists == null || exists == 0) {
+            throw new BusinessException(404, "材料记录不存在");
+        }
+        if (!user.isPlatformAdmin()) {
+            Integer accessible = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM source_document WHERE id=? AND organization_id=?",
+                    Integer.class, id, user.organizationId());
+            if (accessible == null || accessible == 0) {
+                throw new BusinessException(403, "当前机构无权访问该材料");
+            }
+        }
     }
 
     private void log(AuthUser user, String action, String targetType, long targetId, String result) {

@@ -60,7 +60,11 @@ class PublicImportIntegrationTest {
                     Map.entry("content_preview", "老年人减重应保持吃动平衡。"),
                     Map.entry("extracted_text", "老年人减重应保持吃动平衡，不建议采取极端节食。出现持续不适时，应及时咨询医疗机构。"),
                     Map.entry("original_html", "<main><p>老年人减重应保持吃动平衡。</p></main>"),
-                    Map.entry("content_hash", url.contains("approved-cover") ? "c".repeat(64) : "b".repeat(64)),
+                    Map.entry("content_hash",
+                            url.contains("approved-cover") ? "c".repeat(64)
+                                    : url.contains("organization-import") ? "d".repeat(64)
+                                    : url.contains("platform-owned") ? "e".repeat(64)
+                                    : "b".repeat(64)),
                     Map.entry("content_kind", "HEALTH_EDUCATION"),
                     Map.entry("classification_confidence", 0.96),
                     Map.entry("robots_allowed", true),
@@ -143,6 +147,68 @@ class PublicImportIntegrationTest {
                 .andExpect(status().isConflict());
         mvc.perform(post("/api/web-articles/{id}/cover/category-default", id).header("Authorization", auth))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void webArticleImportUsesCurrentOrganizationAndDoesNotRequireOriginalFile() throws Exception {
+        String platformAuth = "Bearer " + login("platform_admin");
+        String organizationAuth = "Bearer " + login("org_admin");
+        long before = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_document", Long.class);
+
+        String organizationUrl = "https://www.news.cn/test/organization-import.html";
+        mvc.perform(post("/api/web-articles/preview").header("Authorization", organizationAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", organizationUrl))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").value("老年人科学减重"));
+        org.junit.jupiter.api.Assertions.assertEquals(before,
+                jdbc.queryForObject("SELECT COUNT(*) FROM source_document", Long.class));
+
+        String imported = mvc.perform(post("/api/web-articles/import").header("Authorization", organizationAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", organizationUrl))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("UPLOADED"))
+                .andReturn().getResponse().getContentAsString();
+        long organizationDocumentId =
+                objectMapper.readTree(imported).path("data").path("documentId").asLong();
+        Map<String, Object> saved = jdbc.queryForMap(
+                "SELECT organization_id,created_by,source_type,storage_path FROM source_document WHERE id=?",
+                organizationDocumentId);
+        org.junit.jupiter.api.Assertions.assertEquals(
+                jdbc.queryForObject("SELECT organization_id FROM staff_user WHERE username='org_admin'", Long.class),
+                ((Number) saved.get("organization_id")).longValue());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                jdbc.queryForObject("SELECT id FROM staff_user WHERE username='org_admin'", Long.class),
+                ((Number) saved.get("created_by")).longValue());
+        org.junit.jupiter.api.Assertions.assertEquals("WEB_ARTICLE", saved.get("source_type"));
+        org.junit.jupiter.api.Assertions.assertNull(saved.get("storage_path"));
+        mvc.perform(get("/api/documents/{id}", organizationDocumentId)
+                        .header("Authorization", organizationAuth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.source_type").value("WEB_ARTICLE"));
+        mvc.perform(get("/api/documents/{id}/original-file", organizationDocumentId)
+                        .header("Authorization", organizationAuth))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message")
+                        .value("网页文章没有 PDF 或图片原文件，请查看网页正文快照"));
+
+        String platformUrl = "https://www.news.cn/test/platform-owned.html";
+        String platformImported = mvc.perform(post("/api/web-articles/import")
+                        .header("Authorization", platformAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", platformUrl))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        long platformDocumentId =
+                objectMapper.readTree(platformImported).path("data").path("documentId").asLong();
+        mvc.perform(get("/api/documents/{id}", platformDocumentId)
+                        .header("Authorization", organizationAuth))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("当前机构无权访问该材料"));
+        mvc.perform(get("/api/web-articles/sources").header("Authorization", organizationAuth))
+                .andExpect(status().isForbidden());
     }
 
     @Test

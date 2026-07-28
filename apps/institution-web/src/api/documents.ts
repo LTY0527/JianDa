@@ -4,6 +4,11 @@ export interface DocumentRow {
   id: number;
   title: string;
   file_name?: string;
+  source_type?: string;
+  source_name?: string;
+  original_published_at?: string;
+  category?: string;
+  content_kind?: string;
   organization_name: string;
   status: string;
   progress: number;
@@ -47,6 +52,10 @@ export interface DocumentDetail {
   image_cached?: boolean;
   image_license_note?: string;
   image_reviewed?: boolean;
+  original_html?: string;
+  extracted_text?: string;
+  original_page_available?: boolean;
+  content_kind?: string;
   processing_status: string;
 }
 

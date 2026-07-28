@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
-import { ExternalLink, Eye, FileInput, Globe2, ImageOff, Info, Play, RefreshCw, X } from "lucide-vue-next";
+import { Eye, FileInput, Info, Play, RefreshCw, X } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
+import WebArticleImportPanel from "../components/WebArticleImportPanel.vue";
 import { apiMessage } from "../api/http";
-import { publicSourceApi, type FixtureContent, type ImportRecord, type PublicSource, type WebArticlePreview } from "../api/publicSources";
+import { publicSourceApi, type FixtureContent, type ImportRecord, type PublicSource } from "../api/publicSources";
 const router = useRouter();
 const tab = ref<"web" | "fixture" | "manual">("web"), sources = ref<PublicSource[]>([]), fixtures = ref<FixtureContent[]>([]), imports = ref<ImportRecord[]>([]);
 const preview = ref<Record<string, unknown> | null>(null), loading = ref(true), busyId = ref<string | number | null>(null), error = ref(""), success = ref("");
-const webUrl = ref("");
-const webPreview = ref<WebArticlePreview | null>(null);
 const manual = reactive({ sourceId: 0, title: "", sourceUrl: "", publishedAt: new Date().toISOString().slice(0, 10), category: "健康", body: "" });
 const selectedSource = computed(() => sources.value.find((item) => item.id === manual.sourceId));
 const statusText: Record<string, string> = { UPLOADED: "待处理", PROCESSING: "处理中", WAITING_REVIEW: "待审核", REVIEWED: "已审核", PUBLISHED: "已发布", FAILED: "处理失败", WITHDRAWN: "已撤回" };
@@ -19,8 +18,7 @@ async function importManual(){const source=selectedSource.value;if(!source)retur
 async function showPreview(id:number){try{preview.value=(await publicSourceApi.preview(id)).data.data}catch(cause){error.value=apiMessage(cause)}}
 async function process(record:ImportRecord){busyId.value=record.id;error.value="";try{await publicSourceApi.process(record.id);await router.push(`/documents/${record.id}/review`)}catch(cause){error.value=apiMessage(cause);await load()}finally{busyId.value=null}}
 async function recrawl(record:ImportRecord){busyId.value=`recrawl-${record.id}`;error.value="";success.value="";try{await publicSourceApi.recrawlWebArticle(record.id);success.value=`“${record.title}”已重新采集，请发起 AI 处理。`;await load()}catch(cause){error.value=apiMessage(cause)}finally{busyId.value=null}}
-async function previewWebArticle(){busyId.value="web-preview";error.value="";success.value="";webPreview.value=null;try{webPreview.value=(await publicSourceApi.previewWebArticle(webUrl.value)).data.data}catch(cause){error.value=apiMessage(cause)}finally{busyId.value=null}}
-async function importWebArticle(){if(!webPreview.value)return;busyId.value="web-import";error.value="";try{const response=await publicSourceApi.importWebArticle(webUrl.value);success.value="网页文章已保存为待处理材料，尚未公开发布。";webPreview.value=null;webUrl.value="";await load();await router.push(`/documents/${response.data.data.documentId}/process`)}catch(cause){error.value=apiMessage(cause)}finally{busyId.value=null}}
+function webImported(documentId:number){success.value=`网页文章已导入为文档 ${documentId}，正在进入处理页。`}
 onMounted(load);
 </script>
 <template>
@@ -29,11 +27,7 @@ onMounted(load);
 <div v-if="success" class="inline-success">{{success}}</div><div v-if="error" class="inline-error">{{error}}</div>
 <section class="panel import-workbench"><div class="import-tabs"><button :class="{active:tab==='web'}" @click="tab='web'">导入网页文章</button><button :class="{active:tab==='fixture'}" @click="tab='fixture'">本地示例导入</button><button :class="{active:tab==='manual'}" @click="tab='manual'">手工录入</button></div>
 <div v-if="tab==='web'" class="web-import">
-  <form class="web-import__url" @submit.prevent="previewWebArticle"><label class="field">官方文章 URL<input v-model="webUrl" required type="url" placeholder="仅支持已加入白名单的官方政府或中央媒体域名"/></label><button class="btn primary" :disabled="busyId==='web-preview'"><Globe2 :size="18"/>{{busyId==='web-preview'?'正在检查 robots.txt 并提取…':'检查并预览'}}</button></form>
-  <div v-if="webPreview" class="web-preview-card">
-    <div class="web-preview-card__cover"><img v-if="webPreview.cover_image_url" :src="webPreview.cover_image_url" :alt="webPreview.image_alt_text||webPreview.title" referrerpolicy="no-referrer"/><div v-else><ImageOff/><span>将使用本地分类默认图</span></div></div>
-    <div class="web-preview-card__content"><div class="web-preview-card__source"><b>{{webPreview.source_name}}</b><span>权威级别 {{webPreview.authority_level}}</span><span>robots：{{webPreview.robots_status}}</span></div><h2>{{webPreview.title}}</h2><p>{{webPreview.content_preview}}</p><dl><div><dt>内容类型</dt><dd>{{webPreview.content_kind}}</dd></div><div><dt>发布时间</dt><dd>{{webPreview.published_at?.slice(0,10)||'待人工确认'}}</dd></div><div><dt>封面类型</dt><dd>{{webPreview.cover_image_type}}</dd></div><div><dt>图片尺寸</dt><dd>{{webPreview.image_width&&webPreview.image_height?`${webPreview.image_width}×${webPreview.image_height}`:'分类默认图'}}</dd></div></dl><p v-for="warning in webPreview.warnings" :key="warning" class="web-preview-card__warning">{{warning}}</p><div class="web-preview-card__actions"><a class="btn secondary" :href="webPreview.canonical_url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="17"/>查看官方原文</a><button class="btn primary" :disabled="busyId==='web-import'" @click="importWebArticle">{{busyId==='web-import'?'正在确认导入…':'确认导入并进入处理'}}</button></div><small>确认导入只创建待处理材料；完成 AI 处理、来源和图片人工审核后才能发布。</small></div>
-  </div>
+  <WebArticleImportPanel @imported="webImported" />
 </div>
 <div v-else-if="tab==='fixture'" class="fixture-list"><article v-for="item in fixtures" :key="item.fixtureId"><div class="fixture-category">{{item.category}}</div><div><h3>{{item.title}}</h3><p>{{item.body}}</p><small>{{item.sourceName}} · {{item.publishedAt?.slice(0,10)}}</small></div><button class="btn primary" :disabled="busyId===item.fixtureId" @click="importFixture(item)"><FileInput :size="16"/>{{busyId===item.fixtureId?'正在导入…':'导入'}}</button></article></div>
 <form v-else class="manual-import" @submit.prevent="importManual"><div class="form-row"><label class="field">权威来源<select v-model.number="manual.sourceId" required><option v-for="source in sources" :key="source.id" :value="source.id">{{source.source_name}}</option></select></label><label class="field">内容分类<select v-model="manual.category"><option>健康</option><option>养老</option><option>反诈</option><option>生活服务</option><option>时政</option></select></label></div><label class="field">信息标题<input v-model="manual.title" required placeholder="请输入公开信息标题"/></label><div class="form-row"><label class="field">来源 URL<input v-model="manual.sourceUrl" required type="url" placeholder="必须与所选白名单来源同域"/></label><label class="field">发布时间<input v-model="manual.publishedAt" required type="date"/></label></div><label class="field">原文内容<textarea v-model="manual.body" required rows="8" placeholder="粘贴完整公开信息原文，审核时可追溯查看"/></label><div class="form-actions"><button class="btn primary" :disabled="busyId==='manual'"><FileInput :size="16"/>{{busyId==='manual'?'正在导入…':'保存导入记录'}}</button></div></form></section>

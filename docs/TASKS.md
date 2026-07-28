@@ -364,10 +364,20 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] AI 全套 58 项通过，覆盖 OpenGraph 优先、JSON-LD 回退、正文首图、Logo/二维码/追踪像素排除、404 回退、无下载许可不请求原图、分类和 Prompt 路由。
 - [x] 后端全套 22 项及打包通过；集成回归覆盖白名单、去重、重新采集、正文 hash 缓存键、默认图、许可原图、图片来源保存和第三方图片发布门禁。
 - [x] 两个前端类型检查和生产构建通过；Docker/Nginx 与 375px 首页封面失败回退、懒加载、比例、无横向溢出、官方原文跳转 Playwright 共 10 项通过。
-- [x] 7 篇 2026 年 7 月真实内容已逐篇预览、导入并使用 External Provider 处理，文档 27–33 均为 `WAITING_REVIEW`、`cache_hit=false`，每篇生成 7 类内容，未自动审核或发布。
+- [x] 7 篇 2026 年 7 月真实内容已逐篇预览、导入并使用 External Provider 处理；初始验收时文档 27–33 均为 `WAITING_REVIEW`、`cache_hit=false`，每篇生成 7 类内容，未自动审核或发布。
 - [x] 文档 27–33 分类依次为 `HEALTH_EDUCATION`、`POLICY_NEWS`、`POLICY_NEWS`、`COMMUNITY_SERVICE`、`HEALTH_EDUCATION`、`HEALTH_EDUCATION`、`ANTI_FRAUD`；字段数依次为 4、1、4、2、3、4、4。
 - [x] 文档 27–33 Token 用量依次为 3956、1901、3053、2183、2175、2384、2882；总耗时依次为 13339、5747、9710、6137、6728、6775、10575 ms。
 - [x] 第 7 篇官方 HTTPS 地址在当前本地代理/OpenSSL 组合下出现 `BAD_ECPOINT`；同一官方站点公开 HTTP 入口通过白名单与 robots 检查后导入，未绕过登录、验证码或访问控制。
 - [x] Docker 三个应用镜像已重建，MySQL、AI、后端和前端四服务均为 healthy；AI 容器确认使用 External Provider，未读取或输出模型密钥。
-- [ ] 文档 27–33 的标题、日期、关键数字、医疗安全、原文链接和图片来源仍需平台管理员人工事实复核；完成前不得标记已审核或发布。
+- [x] 通过 V6 幂等迁移按 7 个 canonical URL 将 Phase 9 评测文章绑定到演示机构 2；文档 27–33 的 `created_by=1`、`source_type=WEB_ARTICLE`、segments、fields 和 generated content 均保持不变。
+- [x] 机构端“上传材料”增加文件/网页双入口；`ORG_ADMIN` 可执行 URL 预览和导入，新文章自动绑定当前登录机构，`REVIEWER` 不显示导入入口。
+- [x] 工作台、当前待办和材料列表统一显示 `WEB_ARTICLE` 来源、机构、分类及原始发布时间，并按真实状态计入统计。
+- [x] 网页审核页展示正文快照、正文图片、分类封面、图片来源、官方 canonical URL、适老摘要和追溯字段；不请求 PDF 原文件，附属资源失败不再清空文档详情。
+- [x] 文档访问已区分 403 跨机构无权与 404 记录不存在；网页文章无 `storage_path` 时原文件接口返回明确 404，不影响审核。
+- [x] 文档 27 已使用现有 4 个 AI 字段完成确认、人工审核并发布为 `news-27`；用户端首页和资讯详情可见，官方原文仍指向新华网 canonical URL。
+- [x] 发布前机构待审核 9 条；文档 27 发布后为 8 条，其中文档 28–33 共 6 篇 Phase 9 文章仍为 `WAITING_REVIEW`。
+- [x] 后端全套 23 项与 `mvn package` 通过；机构端网页导入/列表/审核 Mock Playwright 3 项、封面回退 2 项、真实 Docker 审核/H5 Playwright 2 项通过。
+- [x] 真实 390px 验收发现并修复 canonical URL 导致的横向溢出；机构端 1440×900、用户端 390×844 均无空白页、框架错误层、控制台错误或页面异常。
+- [x] Docker backend/frontend 完成重建，V6 已在 `jianda` 应用；MySQL、AI、后端和前端四服务均 healthy，AI Provider 最终确认仍为 External，未输出模型密钥。
+- [ ] 文档 28–33 的标题、日期、关键数字、医疗安全、原文链接和图片来源仍需机构管理员逐篇人工事实复核；完成前不得标记已审核或发布。
 - [ ] 真实 iPhone Safari / Android Chrome 的远程图片失败回退和 24px 大字模式仍需人工抽检。

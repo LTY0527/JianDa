@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
+import WebArticleImportPanel from "../components/WebArticleImportPanel.vue";
 import { documentApi, type MetadataPreview } from "../api/documents";
 import { apiMessage } from "../api/http";
+import { currentUser } from "../auth";
 import { cleanFilenameTitle } from "../utils/metadata";
 import { UploadCloud, FileText, X, ShieldCheck, RefreshCw, SearchCheck } from "lucide-vue-next";
+const canImportWeb = computed(() => currentUser()?.role !== "REVIEWER");
+const mode = ref<"file" | "web">("file");
 const file = ref<File | null>(null),
   title = ref(""),
   sourceName = ref("");
@@ -77,10 +81,22 @@ async function submit() {
 <template>
   <div class="narrow">
     <PageHeader
-      title="上传材料"
-      description="上传 PDF 或图片后，系统将保存原件并创建 AI 处理任务。"
+      title="新增材料"
+      description="上传 PDF、图片，或从白名单官方来源导入网页文章。"
     />
-    <section class="panel form-panel">
+    <div class="import-tabs material-source-tabs" role="tablist" aria-label="材料导入方式">
+      <button :class="{ active: mode === 'file' }" @click="mode = 'file'">
+        上传 PDF 或图片
+      </button>
+      <button
+        v-if="canImportWeb"
+        :class="{ active: mode === 'web' }"
+        @click="mode = 'web'"
+      >
+        导入网页文章
+      </button>
+    </div>
+    <section v-if="mode === 'file'" class="panel form-panel">
       <label class="field"
         >材料标题<input v-model="title" placeholder="例如：老年补贴申请指南" @input="titleDirty = true"
       /></label>
@@ -143,6 +159,9 @@ async function submit() {
           {{ submitting ? "正在上传并处理…" : "上传并开始处理" }}
         </button>
       </div>
+    </section>
+    <section v-else class="panel form-panel">
+      <WebArticleImportPanel />
     </section>
   </div>
 </template>

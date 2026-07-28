@@ -29,6 +29,11 @@ const error = ref("");
 const loading = ref(true);
 const retrying = ref(false);
 const latestJob = computed(() => jobs.value[0]);
+const isWebArticle = computed(() => document.value?.source_type === "WEB_ARTICLE");
+const textLength = computed(() => (document.value?.raw_text || "").length);
+const imageCount = computed(() =>
+  (document.value?.original_html?.match(/<img\b/gi) || []).length,
+);
 const stageText: Record<string, string> = {
   EXTRACTING_TEXT: "正在提取正文",
   EXTRACTING_FACTS: "正在识别公共服务事实",
@@ -144,16 +149,21 @@ onMounted(load);
       <span v-if="latestJob.total_ms">· 用时 {{ (latestJob.total_ms / 1000).toFixed(1) }} 秒</span>
       <span v-if="latestJob.cache_hit">· 已复用相同文件的验证结果</span>
     </p>
+    <p v-if="route.query.imported === 'web'" class="inline-success">
+      网页文章已导入为文档 {{ documentId }}，预览阶段未创建其他材料。
+    </p>
     <section class="process-rail">
       <div class="done">
-        <CircleCheck /><span><b>材料上传</b><small>原始文件已保存</small></span>
+        <CircleCheck /><span><b>{{ isWebArticle ? "网页抓取" : "材料上传" }}</b><small>{{ isWebArticle ? "官方网页正文快照已保存" : "原始文件已保存" }}</small></span>
       </div>
       <i></i>
       <div class="done">
         <CircleCheck /><span
           ><b>正文提取</b
           ><small
-            >共 {{ document?.page_count || 0 }} 页，{{ segmentCount }} 个段落</small
+            >{{ isWebArticle
+              ? `${textLength} 个字符，${segmentCount} 个段落，${imageCount} 张正文图片`
+              : `共 ${document?.page_count || 0} 页，${segmentCount} 个段落` }}</small
           ></span
         >
       </div>
@@ -162,10 +172,10 @@ onMounted(load);
         <CircleCheck v-if="fields.length" />
         <TriangleAlert v-else-if="failed || emptyReviewResult" />
         <LoaderCircle v-else /><span
-          ><b>AI 分析</b
+          ><b>{{ isWebArticle ? "内容类型识别与 AI 适老化处理" : "AI 分析" }}</b
           ><small>{{
             fields.length
-              ? `已生成 ${fields.length} 个可追溯字段`
+              ? `${isWebArticle ? `${document?.content_kind || "网页文章"} · ` : ""}已生成 ${fields.length} 个可追溯字段`
               : failed || emptyReviewResult
                 ? "未生成可审核字段"
                 : "正在等待分析结果"
@@ -180,6 +190,14 @@ onMounted(load);
           ><small>{{ fields.length ? "请确认关键字段" : "尚未进入审核" }}</small></span
         >
       </div>
+    </section>
+    <section v-if="isWebArticle && document" class="panel web-process-facts">
+      <div><small>来源等级</small><b>{{ document.source_authority_level || "待确认" }}</b></div>
+      <div><small>内容类型</small><b>{{ document.content_kind || "待确认" }}</b></div>
+      <div><small>正文字符</small><b>{{ textLength }}</b></div>
+      <div><small>段落数量</small><b>{{ segmentCount }}</b></div>
+      <div><small>正文图片</small><b>{{ imageCount }}</b></div>
+      <div><small>处理耗时</small><b>{{ latestJob?.total_ms ? `${(latestJob.total_ms / 1000).toFixed(1)} 秒` : "—" }}</b></div>
     </section>
     <section
       v-if="!loading && (failed || emptyReviewResult || error)"

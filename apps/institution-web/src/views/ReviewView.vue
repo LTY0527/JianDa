@@ -14,7 +14,6 @@ import {
   CheckCircle2,
   ExternalLink,
   FileText,
-  ImageOff,
   RefreshCw,
   TriangleAlert,
 } from "lucide-vue-next";
@@ -44,9 +43,54 @@ const resultDelivery = ref<any[]>([]);
 const summaryItems = ref<string[]>([]);
 const plainText = ref("");
 const coverReviewed = ref(false);
+const coverFailed = ref(false);
+const resourceWarnings = ref<string[]>([]);
 const isImage = computed(() => document.value?.mime_type?.startsWith("image/"));
 const isWebArticle = computed(() => document.value?.source_type === "WEB_ARTICLE");
+const officialPageAvailable = computed(
+  () => document.value?.original_page_available !== false,
+);
+const defaultCoverUrl = computed(() => {
+  const name =
+    document.value?.content_kind === "HEALTH_EDUCATION"
+      ? "health"
+      : document.value?.content_kind === "POLICY_NEWS"
+        ? "policy"
+        : document.value?.content_kind === "ANTI_FRAUD"
+          ? "fraud"
+          : document.value?.content_kind === "COMMUNITY_SERVICE"
+            ? "community"
+            : "service";
+  const base = import.meta.env.DEV
+    ? "http://127.0.0.1:5174"
+    : `${window.location.protocol}//${window.location.hostname}`;
+  return new URL(`/images/defaults/${name}.svg`, base).toString();
+});
+const reviewCoverUrl = computed(() =>
+  !coverFailed.value && document.value?.cover_image_url
+    ? document.value.cover_image_url
+    : defaultCoverUrl.value,
+);
+const articleImages = computed(() => {
+  if (!document.value?.original_html) return [];
+  const parsed = new DOMParser().parseFromString(
+    document.value.original_html,
+    "text/html",
+  );
+  return [...parsed.querySelectorAll("article img, main img")].map((image) => ({
+    src: image.getAttribute("src") || "",
+    alt: image.getAttribute("alt") || "网页正文图片",
+  })).filter((image) => /^https?:\/\//.test(image.src));
+});
 const canFinish = computed(() => fields.value.length > 0 || (isWebArticle.value && summaryItems.value.length > 0));
+const canSubmitReview = computed(
+  () => canFinish.value && document.value?.processing_status === "WAITING_REVIEW",
+);
+const reviewActionLabel = computed(() => {
+  if (document.value?.processing_status === "PUBLISHED") return "内容已发布";
+  if (document.value?.processing_status === "REVIEWED") return "字段已审核";
+  return submitting.value ? "正在提交…" : "完成字段审核";
+});
 const isDirty = computed(() => values.value.some((value, index) => value !== fields.value[index]?.value));
 onBeforeRouteLeave(() => {
   if (allowLeave.value || !isDirty.value) return true;
@@ -65,6 +109,12 @@ const emptyReviewResult = computed(
     document.value?.processing_status === "WAITING_REVIEW" &&
     !canFinish.value,
 );
+const reviewStatusLabel = computed(() => {
+  if (emptyReviewResult.value) return "结果异常";
+  if (document.value?.processing_status === "PUBLISHED") return "已发布";
+  if (document.value?.processing_status === "REVIEWED") return "已审核";
+  return "待审核";
+});
 const failureMessage = computed(
   () =>
     jobs.value.find((job) => job.status === "FAILED")?.error_message ||
@@ -74,16 +124,26 @@ const failureMessage = computed(
 async function load() {
   loading.value = true;
   error.value = "";
+  resourceWarnings.value = [];
   try {
-    const [detailResponse, fieldResponse, jobResponse, generatedResponse] = await Promise.all([
-      documentApi.detail(documentId),
+    const detailResponse = await documentApi.detail(documentId);
+    document.value = detailResponse.data.data;
+    const [fieldResponse, jobResponse, generatedResponse] = await Promise.allSettled([
       documentApi.fields(documentId),
       documentApi.jobs(documentId),
       documentApi.generated(documentId),
     ]);
-    document.value = detailResponse.data.data;
-    jobs.value = jobResponse.data.data;
-    fields.value = fieldResponse.data.data.map((field) => ({
+    const fieldData = fieldResponse.status === "fulfilled"
+      ? fieldResponse.value.data.data : [];
+    if (fieldResponse.status === "rejected") {
+      resourceWarnings.value.push(`审核字段暂时无法读取：${apiMessage(fieldResponse.reason)}`);
+    }
+    jobs.value = jobResponse.status === "fulfilled"
+      ? jobResponse.value.data.data : [];
+    if (jobResponse.status === "rejected") {
+      resourceWarnings.value.push(`处理任务暂时无法读取：${apiMessage(jobResponse.reason)}`);
+    }
+    fields.value = fieldData.map((field) => ({
       id: field.id,
       label: field.field_label,
       value: field.field_value,
@@ -97,7 +157,11 @@ async function load() {
     confirmed.value = fields.value
       .map((field, index) => (field.reviewStatus === "CONFIRMED" ? index : -1))
       .filter((index) => index >= 0);
-    const generated = generatedResponse.data.data;
+    const generated = generatedResponse.status === "fulfilled"
+      ? generatedResponse.value.data.data : [];
+    if (generatedResponse.status === "rejected") {
+      resourceWarnings.value.push(`AI 适老化内容暂时无法读取：${apiMessage(generatedResponse.reason)}`);
+    }
     const parsed = (type: string, fallback: any) => {
       const value = generated.find((item) => item.content_type === type)?.content_json;
       if (!value) return fallback;
@@ -234,7 +298,7 @@ async function useCategoryDefaultCover() {
       title="原文对照审核"
       description="逐项核对 AI 结果与原文依据，确认无误后提交审核。"
       :breadcrumbs="['材料管理', '原文对照审核']"
-      :status="emptyReviewResult ? '结果异常' : '待审核'"
+      :status="reviewStatusLabel"
     >
       <button
         class="btn secondary"
@@ -245,10 +309,10 @@ async function useCategoryDefaultCover() {
       </button>
       <button
         class="btn primary"
-        :disabled="!canFinish || submitting"
+        :disabled="!canSubmitReview || submitting"
         @click="finish"
       >
-        {{ submitting ? "正在提交…" : "完成字段审核" }}
+        {{ reviewActionLabel }}
       </button>
     </PageHeader>
     <div class="review-toolbar">
@@ -267,18 +331,25 @@ async function useCategoryDefaultCover() {
       </div>
     </div>
     <p v-if="error" class="form-error">{{ error }}</p>
+    <p v-for="warning in resourceWarnings" :key="warning" class="inline-error">
+      {{ warning }}
+    </p>
 
     <section v-if="isWebArticle" class="panel web-source-review">
       <div class="web-source-review__cover">
-        <img v-if="document?.cover_image_url" :src="document.cover_image_url" :alt="document.image_alt_text || document.title" referrerpolicy="no-referrer" />
-        <div v-else><ImageOff/><span>分类默认图</span></div>
+        <img :src="reviewCoverUrl" :alt="document?.image_alt_text || document?.title || '网页文章分类默认图'" referrerpolicy="no-referrer" @error="coverFailed = true" />
       </div>
       <div>
         <h2>网页来源与封面审核</h2>
         <dl><div><dt>权威来源</dt><dd>{{ document?.source_name }} · {{ document?.source_authority_level }}级</dd></div><div><dt>原始发布时间</dt><dd>{{ String(document?.original_published_at || "待人工确认").slice(0, 19) }}</dd></div><div><dt>封面类型</dt><dd>{{ document?.cover_image_type }}</dd></div><div><dt>图片来源</dt><dd>{{ document?.image_source_name || "简达本地分类默认图" }}</dd></div><div><dt>是否缓存</dt><dd>{{ document?.image_cached ? "是" : "否" }}</dd></div></dl>
         <p>{{ document?.image_license_note }}</p>
-        <div class="web-source-review__actions"><a class="btn secondary" :href="document?.canonical_url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="17"/>查看官方原文</a><button v-if="document?.cover_image_url" class="btn secondary" :disabled="coverReviewed" @click="confirmCover">{{coverReviewed?"封面已确认":"确认使用当前封面"}}</button><button class="btn secondary" @click="useCategoryDefaultCover">更换为分类默认图</button></div>
+        <div class="web-source-review__actions"><a v-if="officialPageAvailable && document?.canonical_url" class="btn secondary" :href="document.canonical_url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="17"/>查看官方原文</a><span v-else class="source-unavailable"><TriangleAlert :size="16"/>原网页暂时不可访问，不影响内部审核</span><button v-if="document?.cover_image_url" class="btn secondary" :disabled="coverReviewed" @click="confirmCover">{{coverReviewed?"封面已确认":"确认使用当前封面"}}</button><button class="btn secondary" @click="useCategoryDefaultCover">使用分类默认图</button></div>
       </div>
+    </section>
+    <section v-if="isWebArticle && articleImages.length" class="panel web-article-images">
+      <h2>正文图片</h2>
+      <p>按网页正文中的原有顺序展示，仅供内部来源核对。</p>
+      <div><figure v-for="image in articleImages" :key="image.src"><img :src="image.src" :alt="image.alt" referrerpolicy="no-referrer"/><figcaption>{{ image.alt }}</figcaption></figure></div>
     </section>
 
     <section
@@ -306,7 +377,7 @@ async function useCategoryDefaultCover() {
       <section class="source-pane">
         <div class="pane-title">
           <FileText :size="18" /><b>{{ isWebArticle ? "网页正文" : isImage ? "材料原图" : "材料原文" }}</b
-          ><span>第 {{ fields[active]?.page || 1 }} 页 / 共 {{ pageCount }} 页</span>
+          ><span>{{ isWebArticle ? `正文快照 · ${document?.raw_text?.length || 0} 字` : `第 ${fields[active]?.page || 1} 页 / 共 ${pageCount} 页` }}</span>
         </div>
         <div v-if="!isWebArticle" class="source-tabs" role="tablist" aria-label="材料查看方式">
           <button :class="{ active: sourceMode === 'file' }" @click="showOriginal">

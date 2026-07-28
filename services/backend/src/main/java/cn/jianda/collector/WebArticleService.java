@@ -168,6 +168,7 @@ public class WebArticleService {
 
     @Transactional
     public void useCategoryDefault(long documentId, AuthUser user) {
+        assertAccess(documentId, user);
         int changed = jdbc.update("UPDATE source_document SET cover_image_url=NULL,cover_image_type='CATEGORY_DEFAULT',"
                 + "image_cached=FALSE,image_reviewed=TRUE WHERE id=? AND source_type='WEB_ARTICLE'", documentId);
         if (changed == 0) throw new BusinessException(404, "网页文章不存在");
@@ -176,6 +177,7 @@ public class WebArticleService {
 
     @Transactional
     public void confirmCover(long documentId, AuthUser user) {
+        assertAccess(documentId, user);
         int changed = jdbc.update("UPDATE source_document SET image_reviewed=TRUE WHERE id=? "
                 + "AND source_type='WEB_ARTICLE' AND cover_image_url IS NOT NULL", documentId);
         if (changed == 0) throw new BusinessException(400, "没有可确认的原文封面");
@@ -184,6 +186,7 @@ public class WebArticleService {
 
     @Transactional
     public Map<String, Object> recrawl(long documentId, AuthUser user) {
+        assertAccess(documentId, user);
         List<Map<String, Object>> rows = jdbc.queryForList(
                 "SELECT * FROM source_document WHERE id=? AND source_type='WEB_ARTICLE'",
                 documentId);
@@ -349,6 +352,23 @@ public class WebArticleService {
         jdbc.update("INSERT INTO operation_log(operator_id,organization_id,action,target_type,target_id,result,ip) "
                         + "VALUES (?,?,?,'SOURCE_DOCUMENT',?,?,'local')",
                 user.id(), user.organizationId(), action, targetId, result);
+    }
+
+    private void assertAccess(long documentId, AuthUser user) {
+        Integer exists = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_document WHERE id=? AND source_type='WEB_ARTICLE'",
+                Integer.class, documentId);
+        if (exists == null || exists == 0) {
+            throw new BusinessException(404, "网页文章不存在");
+        }
+        if (!user.isPlatformAdmin()) {
+            Integer accessible = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM source_document WHERE id=? AND organization_id=?",
+                    Integer.class, documentId, user.organizationId());
+            if (accessible == null || accessible == 0) {
+                throw new BusinessException(403, "当前机构无权访问该网页文章");
+            }
+        }
     }
 
     private record CachedPreview(Instant expiresAt, Map<String, Object> value) {}

@@ -4,7 +4,7 @@ import PageHeader from "../components/PageHeader.vue";
 import StatusTag from "../components/StatusTag.vue";
 import { documentApi, type DocumentRow } from "../api/documents";
 import { apiMessage } from "../api/http";
-import { Search, Upload } from "lucide-vue-next";
+import { Search, Upload, Globe2, FileImage, FileText } from "lucide-vue-next";
 const query = ref("");
 const status = ref("全部状态");
 const loading = ref(true);
@@ -40,6 +40,18 @@ function displayProgress(document: DocumentRow) {
   )
     ? 100
     : document.progress;
+}
+function sourceIcon(document: DocumentRow) {
+  return document.source_type === "WEB_ARTICLE"
+    ? Globe2
+    : document.source_type === "IMAGE"
+      ? FileImage
+      : FileText;
+}
+function sourceLabel(document: DocumentRow) {
+  if (document.source_type === "WEB_ARTICLE") return "网页文章";
+  if (document.source_type === "IMAGE") return "图片材料";
+  return "PDF 材料";
 }
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -103,8 +115,11 @@ onMounted(async () => {
         <tbody v-if="!loading && !error">
           <tr v-for="d in filtered" :key="d.id">
             <td>
-              <b>{{ d.title }}</b
-              ><small>{{ d.file_name || "尚未上传文件" }}</small>
+              <div class="material-title">
+                <component :is="sourceIcon(d)" :size="18" />
+                <span><b>{{ d.title }}</b
+                ><small>{{ sourceLabel(d) }} · {{ d.source_type === "WEB_ARTICLE" ? [d.source_name, d.category, d.original_published_at?.slice(0, 10)].filter(Boolean).join(" · ") : d.file_name || "尚未上传文件" }}</small></span>
+              </div>
             </td>
             <td>{{ d.organization_name }}</td>
             <td>

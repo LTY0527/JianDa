@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/web-articles")
-@PreAuthorize("hasRole('PLATFORM_ADMIN')")
 public class WebArticleController {
     private final WebArticleService service;
 
@@ -25,33 +24,39 @@ public class WebArticleController {
     }
 
     @GetMapping("/sources")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ApiResponse<List<Map<String, Object>>> sources() {
         return ApiResponse.ok(service.registries());
     }
 
     @PostMapping("/preview")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN')")
     public ApiResponse<Map<String, Object>> preview(@Valid @RequestBody UrlRequest request) {
         return ApiResponse.ok(service.preview(request.url()));
     }
 
     @PostMapping("/import")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN')")
     public ApiResponse<Map<String, Object>> importArticle(@Valid @RequestBody UrlRequest request) {
         return ApiResponse.ok(service.importArticle(request.url(), UserContext.current()));
     }
 
     @PostMapping("/{documentId}/cover/confirm")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN','REVIEWER')")
     public ApiResponse<Void> confirmCover(@PathVariable long documentId) {
         service.confirmCover(documentId, UserContext.current());
         return ApiResponse.ok(null);
     }
 
     @PostMapping("/{documentId}/cover/category-default")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN','REVIEWER')")
     public ApiResponse<Void> categoryDefault(@PathVariable long documentId) {
         service.useCategoryDefault(documentId, UserContext.current());
         return ApiResponse.ok(null);
     }
 
     @PostMapping("/{documentId}/recrawl")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN')")
     public ApiResponse<Map<String, Object>> recrawl(@PathVariable long documentId) {
         return ApiResponse.ok(service.recrawl(documentId, UserContext.current()));
     }
