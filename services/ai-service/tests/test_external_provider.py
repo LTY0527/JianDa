@@ -258,7 +258,7 @@ def test_empty_content_is_retried():
         (completion("not-json"), "content 不是合法 JSON"),
         (
             completion('```json\n{"prompt_version":"v1","fields":[]}\n```'),
-            "content 不是合法 JSON",
+            "未生成可追溯",
         ),
         (completion(json.dumps({"prompt_version": "v1"})), "不符合 JSON Schema"),
         (completion(json.dumps(facts()), finish_reason="length"), "长度限制"),
@@ -305,7 +305,7 @@ def test_untraceable_quote_or_page_mismatch_is_rejected_without_retry(invalid_fi
     assert len(server.requests) == 1
 
 
-def test_invalid_rewrite_schema_fails_without_mock_fallback():
+def test_invalid_rewrite_schema_fails_without_mock_fallback(caplog):
     invalid_rewrite = rewrite()
     invalid_rewrite.pop("audio_script")
     with QueueServer(
@@ -315,9 +315,46 @@ def test_invalid_rewrite_schema_fails_without_mock_fallback():
         ]
     ) as server:
         provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
-        with pytest.raises(ExternalProviderError, match="适老化结果不符合 JSON Schema"):
+        with pytest.raises(ExternalProviderError) as captured:
             provider.analyze(request())
+    error = captured.value
+    assert error.error_code == "LLM_SCHEMA_VALIDATION_FAILED"
+    assert error.stage == "accessible_rewrite"
+    assert error.json_path == "$.audio_script"
+    assert error.keyword == "required"
+    assert error.retryable is True
+    assert error.response_fingerprint
+    assert error.fact_checkpoint is not None
+    assert error.fact_checkpoint["facts"]["fields"][0]["value"] == "青松社区服务站"
     assert len(server.requests) == 2
+    assert "error_path=$.audio_script" in caplog.text
+    assert "error_type=missing" in caplog.text
+    assert "response_sha256=" in caplog.text
+    assert TEST_KEY not in caplog.text
+
+
+def test_completion_normalizes_fenced_and_explained_json():
+    payload = json.dumps(facts(), ensure_ascii=False)
+    with QueueServer(
+        [
+            response(200, completion(f"说明文字\n```json\n{payload}\n```\n结束")),
+            response(200, json_completion(rewrite())),
+        ]
+    ) as server:
+        provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
+        result = provider.analyze(request())
+    assert result.fields[0].value == "青松社区服务站"
+
+
+def test_completion_rejects_truncated_json_without_leaking_content(caplog):
+    caplog.set_level(logging.INFO)
+    with QueueServer([response(200, completion('{"prompt_version":"v1","fields":['))]) as server:
+        provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
+        with pytest.raises(ExternalProviderError, match="content 不是合法 JSON"):
+            provider.analyze(request())
+    assert "json_parse_success=false" in caplog.text
+    assert "response_sha256=" in caplog.text
+    assert TEST_KEY not in caplog.text
 
 
 def test_api_key_never_appears_in_logs_or_error(caplog):

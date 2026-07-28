@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.extraction import extract_file
 from app.main import app
+from app.providers.external import ExternalProviderError
 from app.models import TextRequest
 from app.providers.mock import MockProvider
 
@@ -117,6 +118,35 @@ def test_health_and_unknown_analyze() -> None:
     assert response.status_code == 200
     assert response.json()["fields"] == []
     assert response.json()["plain_text"] == "待人工填写。"
+
+
+def test_analyze_returns_structured_safe_provider_error(monkeypatch) -> None:
+    class FailedProvider:
+        def analyze(self, request):
+            raise ExternalProviderError(
+                "缺少必填字段：quick_summary",
+                error_code="LLM_SCHEMA_VALIDATION_FAILED",
+                stage="accessible_rewrite",
+                schema_version="web-v1.1",
+                json_path="$.quick_summary",
+                keyword="required",
+                response_fingerprint="0123456789abcdef",
+                request_id="req-safe",
+                retryable=True,
+            )
+
+    monkeypatch.setattr("app.main.get_provider", lambda: FailedProvider())
+    response = TestClient(app).post(
+        "/internal/analyze",
+        json={"title": "资讯", "text": "短测试正文", "document_type": "public_news"},
+    )
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["error_code"] == "LLM_SCHEMA_VALIDATION_FAILED"
+    assert detail["json_path"] == "$.quick_summary"
+    assert detail["request_id"] == "req-safe"
+    assert detail["retryable"] is True
+    assert "短测试正文" not in response.text
 
 
 def test_public_news_has_warning() -> None:

@@ -110,6 +110,56 @@ def _deduplicate_warnings(warnings: list[str]) -> list[str]:
 class ExternalProviderError(RuntimeError):
     """Safe external-provider failure that never contains credentials."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str = "LLM_PROVIDER_FAILED",
+        stage: str | None = None,
+        schema_version: str | None = None,
+        json_path: str | None = None,
+        keyword: str | None = None,
+        response_fingerprint: str | None = None,
+        request_id: str | None = None,
+        retryable: bool = False,
+        normalization_applied: bool = False,
+        normalization_rules: tuple[str, ...] = (),
+        fact_checkpoint: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.stage = stage
+        self.schema_version = schema_version
+        self.json_path = json_path
+        self.keyword = keyword
+        self.response_fingerprint = response_fingerprint
+        self.request_id = request_id
+        self.retryable = retryable
+        self.normalization_applied = normalization_applied
+        self.normalization_rules = normalization_rules
+        self.fact_checkpoint = fact_checkpoint
+
+    def safe_detail(self) -> dict[str, Any]:
+        detail: dict[str, Any] = {
+            "error_code": self.error_code,
+            "message": str(self),
+            "retryable": self.retryable,
+        }
+        optional = {
+            "stage": self.stage,
+            "schema_version": self.schema_version,
+            "json_path": self.json_path,
+            "keyword": self.keyword,
+            "response_fingerprint": self.response_fingerprint,
+            "request_id": self.request_id,
+        }
+        detail.update({key: value for key, value in optional.items() if value})
+        detail["normalization_applied"] = self.normalization_applied
+        detail["normalization_rules"] = list(self.normalization_rules)
+        if self.fact_checkpoint is not None:
+            detail["fact_checkpoint"] = self.fact_checkpoint
+        return detail
+
 
 @dataclass(frozen=True)
 class ExternalSettings:
@@ -193,6 +243,11 @@ class CompletionResult:
     total_tokens: int
     elapsed_ms: int
     retry_count: int
+    response_length: int
+    response_sha256: str
+    json_parse_success: bool = True
+    normalization_applied: bool = False
+    repaired_paths: tuple[str, ...] = ()
 
 
 class ExternalLlmProvider(LlmProvider):
@@ -285,7 +340,7 @@ class ExternalLlmProvider(LlmProvider):
             if use_news_prompts
             else (
                 guide_extract_v1_1
-                if self.settings.prompt_version == "v1.1" or is_service_notice
+                if active_prompt_version in {"v1.1", "web-v1.1"} or is_service_notice
                 else guide_extract_v1
             )
         )
@@ -294,7 +349,7 @@ class ExternalLlmProvider(LlmProvider):
             if use_news_prompts
             else (
                 guide_rewrite_v1_1
-                if self.settings.prompt_version == "v1.1" or is_service_notice
+                if active_prompt_version in {"v1.1", "web-v1.1"} or is_service_notice
                 else guide_rewrite_v1
             )
         )
@@ -327,7 +382,7 @@ class ExternalLlmProvider(LlmProvider):
         )
         sessions = self._complete_explicit_sessions(model_sessions, request)
         structured = self._validate_structured(
-            fact_result.payload, model_facts, sessions, request
+            fact_result.payload, model_facts, sessions, request, active_prompt_version
         )
         structured = self._complete_common_structures(structured, request)
         trace_validation_ms = self._elapsed_ms(trace_started)
@@ -351,7 +406,7 @@ class ExternalLlmProvider(LlmProvider):
                 request, facts, structured, active_prompt_version
             )
             if (
-                self.settings.prompt_version == "v1.1"
+                active_prompt_version in {"v1.1", "web-v1.1"}
                 or is_service_notice
                 or use_news_prompts
             )
@@ -359,18 +414,49 @@ class ExternalLlmProvider(LlmProvider):
                 request, facts, sessions, active_prompt_version
             )
         )
-        rewrite_result = self._completion(
-            active_client,
-            [
-                {"role": "system", "content": rewrite_prompt.SYSTEM_PROMPT},
-                {"role": "user", "content": rewrite_user},
-            ],
-            stage="accessible_rewrite",
-            max_tokens=self._dynamic_rewrite_max_tokens(request),
-        )
-        rewrite = self._validate_rewrite(
-            rewrite_result.payload, request, active_prompt_version
-        )
+        try:
+            rewrite_result = self._completion(
+                active_client,
+                [
+                    {"role": "system", "content": rewrite_prompt.SYSTEM_PROMPT},
+                    {"role": "user", "content": rewrite_user},
+                ],
+                stage="accessible_rewrite",
+                max_tokens=self._dynamic_rewrite_max_tokens(request),
+            )
+            rewrite = self._validate_rewrite(
+                rewrite_result.payload,
+                request,
+                active_prompt_version,
+                completion=rewrite_result,
+            )
+        except ExternalProviderError as exc:
+            if exc.stage == "accessible_rewrite":
+                checkpoint = FactExtractionResponse(
+                    prompt_version=active_prompt_version,
+                    fields=facts,
+                    sessions=sessions,
+                    audience_rules=structured.audience_rules,
+                    service_schedule=structured.service_schedule,
+                    conditional_materials=structured.conditional_materials,
+                    fees=structured.fees,
+                    result_delivery=structured.result_delivery,
+                    deadline_rules=structured.deadline_rules,
+                    amendments=structured.amendments,
+                )
+                exc.fact_checkpoint = {
+                    "prompt_version": active_prompt_version,
+                    "schema_version": "web-v1.1" if use_news_prompts else SCHEMA_VERSION,
+                    "model": self.settings.model,
+                    "response_fingerprint": fact_result.response_sha256[:16],
+                    "request_id": fact_result.request_id,
+                    "fact_extract_ms": fact_result.elapsed_ms,
+                    "prompt_tokens": fact_result.prompt_tokens,
+                    "completion_tokens": fact_result.completion_tokens,
+                    "total_tokens": fact_result.total_tokens,
+                    "facts": checkpoint.model_dump(mode="json"),
+                }
+            raise
         rewrite = self._rewrite_with_sessions(rewrite, facts, sessions)
         metrics = ProcessingMetrics(
             schema_version=SCHEMA_VERSION,
@@ -459,6 +545,66 @@ class ExternalLlmProvider(LlmProvider):
                 metrics.total_ms,
             )
         return result
+
+    def rewrite_from_checkpoint(
+        self, request: TextRequest, checkpoint_payload: dict[str, Any]
+    ) -> AnalyzeResult:
+        active_prompt_version = self._prompt_version(request)
+        checkpoint = FactExtractionResponse.model_validate(checkpoint_payload)
+        facts = checkpoint.fields
+        sessions = checkpoint.sessions
+        is_web_article = request.document_type == "public_news"
+        is_service_notice = is_web_article and request.content_kind == "SERVICE_NOTICE"
+        use_news_prompts = is_web_article and not is_service_notice
+        rewrite_prompt = web_article_rewrite_v1 if use_news_prompts else guide_rewrite_v1_1
+        rewrite_user = rewrite_prompt.build_task_prompt(
+            request, facts, checkpoint, active_prompt_version
+        )
+        started = time.perf_counter()
+        rewrite_result = self._completion(
+            self.client or self._shared_client(),
+            [
+                {"role": "system", "content": rewrite_prompt.SYSTEM_PROMPT},
+                {"role": "user", "content": rewrite_user},
+            ],
+            stage="accessible_rewrite",
+            max_tokens=self._dynamic_rewrite_max_tokens(request),
+        )
+        rewrite = self._validate_rewrite(
+            rewrite_result.payload, request, active_prompt_version, completion=rewrite_result
+        )
+        rewrite = self._rewrite_with_sessions(rewrite, facts, sessions)
+        metrics = ProcessingMetrics(
+            schema_version=SCHEMA_VERSION,
+            accessible_rewrite_ms=rewrite_result.elapsed_ms,
+            total_ms=self._elapsed_ms(started),
+            prompt_tokens=rewrite_result.prompt_tokens,
+            completion_tokens=rewrite_result.completion_tokens,
+            total_tokens=rewrite_result.total_tokens,
+            source_char_count=len(request.text),
+            accessible_char_count=len(rewrite.plain_text),
+            key_fact_count=len(rewrite.key_facts),
+            action_item_count=len(rewrite.action_checklist),
+        )
+        return AnalyzeResult(
+            fields=[ExtractedField(
+                field_type=field.field_type, label=field.label, value=field.value,
+                page_no=field.page_no, segment_no=1, segment_id=field.segment_id,
+                source_quote=field.source_quote, confidence=field.confidence,
+            ) for field in facts],
+            sessions=sessions, summary=rewrite.summary, plain_text=rewrite.plain_text,
+            steps=rewrite.steps, warnings=rewrite.warnings,
+            term_explanations=rewrite.term_explanations or rewrite.terms,
+            audio_script=rewrite.audio_script, audience_rules=checkpoint.audience_rules,
+            service_schedule=checkpoint.service_schedule,
+            conditional_materials=checkpoint.conditional_materials, fees=checkpoint.fees,
+            result_delivery=checkpoint.result_delivery, deadline_rules=checkpoint.deadline_rules,
+            amendments=checkpoint.amendments, quick_summary=rewrite.quick_summary or rewrite.summary,
+            why_it_matters=rewrite.why_it_matters, action_checklist=rewrite.action_checklist,
+            key_facts=rewrite.key_facts, common_mistakes=rewrite.common_mistakes,
+            faq=rewrite.faq, scope=rewrite.scope, uncertainties=rewrite.uncertainties,
+            metrics=metrics,
+        )
 
     def preview_metadata(
         self,
@@ -644,22 +790,51 @@ class ExternalLlmProvider(LlmProvider):
                     f"外部模型{stage}返回空 content"
                 )
             try:
-                parsed = json.loads(content)
+                parsed, repaired_paths = self._parse_json_content(content)
             except json.JSONDecodeError as exc:
+                response_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                LOGGER.warning(
+                    "provider=external model=%s stage=%s request_id=%s "
+                    "response_length=%s response_sha256=%s json_parse_success=false "
+                    "schema_valid=false normalization_applied=false error_count=1 "
+                    "error_path=$ error_type=json_decode_error",
+                    self.settings.model,
+                    stage,
+                    request_id,
+                    len(content),
+                    response_sha256,
+                )
                 self._log_http_audit(
                     stage, response.status_code, request_id,
                     "invalid_content_json", elapsed_ms, attempt, usage
                 )
                 raise ExternalProviderError(
-                    f"外部模型{stage}content 不是合法 JSON"
+                    f"外部模型{stage}content 不是合法 JSON",
+                    error_code="LLM_JSON_PARSE_FAILED",
+                    stage=stage,
+                    json_path="$",
+                    keyword="json_parse",
+                    response_fingerprint=response_sha256[:16],
+                    request_id=request_id,
+                    retryable=stage == "accessible_rewrite",
                 ) from exc
             if not isinstance(parsed, dict):
                 self._log_http_audit(
                     stage, response.status_code, request_id,
                     "invalid_content_type", elapsed_ms, attempt, usage
                 )
+                response_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 raise ExternalProviderError(
-                    f"外部模型{stage}content 必须是 JSON 对象"
+                    f"外部模型{stage}content 必须是 JSON 对象",
+                    error_code="LLM_SCHEMA_VALIDATION_FAILED",
+                    stage=stage,
+                    json_path="$",
+                    keyword="type",
+                    response_fingerprint=response_sha256[:16],
+                    request_id=request_id,
+                    retryable=stage == "accessible_rewrite",
+                    normalization_applied=bool(repaired_paths),
+                    normalization_rules=tuple(repaired_paths),
                 )
             self._log_http_audit(
                 stage, response.status_code, request_id,
@@ -674,8 +849,150 @@ class ExternalLlmProvider(LlmProvider):
                 total_tokens=self._safe_int(usage.get("total_tokens")),
                 elapsed_ms=elapsed_ms,
                 retry_count=attempt,
+                response_length=len(content),
+                response_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                normalization_applied=bool(repaired_paths),
+                repaired_paths=tuple(repaired_paths),
             )
         raise ExternalProviderError(f"外部模型{stage}请求失败")
+
+    @staticmethod
+    def _parse_json_content(content: str) -> tuple[Any, list[str]]:
+        text = content.lstrip("﻿").strip()
+        repaired: list[str] = []
+        if text != content:
+            repaired.append("trim_bom_or_whitespace")
+        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+        if fenced:
+            text = fenced.group(1).strip()
+            repaired.append("unwrap_markdown_fence")
+        decoder = json.JSONDecoder()
+        try:
+            parsed, end = decoder.raw_decode(text)
+        except json.JSONDecodeError:
+            starts = [index for index in (text.find("{"), text.find("[")) if index >= 0]
+            if not starts:
+                raise
+            start = min(starts)
+            parsed, relative_end = decoder.raw_decode(text[start:])
+            end = start + relative_end
+            repaired.append("extract_json_value")
+        if text[end:].strip():
+            repaired.append("discard_short_explanation")
+        if isinstance(parsed, str):
+            try:
+                parsed = json.loads(parsed)
+            except json.JSONDecodeError:
+                pass
+            else:
+                repaired.append("unwrap_json_string")
+        return parsed, sorted(set(repaired))
+
+    @staticmethod
+    def _validation_path(error: dict[str, Any]) -> str:
+        location = error.get("loc") or ()
+        if not location:
+            return "$"
+        path = "$"
+        for item in location:
+            path += f"[{item}]" if isinstance(item, int) else f".{item}"
+        return path
+
+    @staticmethod
+    def _schema_keyword(error_type: str) -> str:
+        if error_type == "missing":
+            return "required"
+        if error_type == "extra_forbidden":
+            return "additionalProperties"
+        if error_type.startswith("literal_error"):
+            return "enum"
+        if error_type.startswith("too_short"):
+            return "minItems"
+        if error_type.startswith("too_long"):
+            return "maxItems"
+        if error_type.startswith("string_too_short"):
+            return "minLength"
+        if error_type.endswith("_type") or error_type in {"list_type", "dict_type"}:
+            return "type"
+        return error_type
+
+    @staticmethod
+    def _schema_message(keyword: str, path: str) -> str:
+        field = path.removeprefix("$.")
+        if keyword == "required":
+            return f"缺少必填字段：{field}"
+        if keyword == "additionalProperties":
+            return f"包含未允许字段：{field}"
+        if keyword == "type":
+            return f"字段类型不正确：{field}"
+        return f"字段不符合 {keyword} 约束：{field}"
+
+    def _schema_error(
+        self,
+        *,
+        stage: str,
+        request: TextRequest | None,
+        completion: CompletionResult | None,
+        error: ValidationError,
+    ) -> ExternalProviderError:
+        errors = error.errors(include_url=False, include_context=False, include_input=False)
+        first = errors[0] if errors else {}
+        path = self._validation_path(first)
+        keyword = self._schema_keyword(str(first.get("type") or "validation_error"))
+        return ExternalProviderError(
+            self._schema_message(keyword, path),
+            error_code="LLM_SCHEMA_VALIDATION_FAILED",
+            stage=stage,
+            schema_version="web-v1.1" if request and request.document_type == "public_news" else SCHEMA_VERSION,
+            json_path=path,
+            keyword=keyword,
+            response_fingerprint=completion.response_sha256[:16] if completion else None,
+            request_id=completion.request_id if completion else None,
+            retryable=stage == "accessible_rewrite",
+            normalization_applied=completion.normalization_applied if completion else False,
+            normalization_rules=completion.repaired_paths if completion else (),
+        )
+
+    def _log_schema_validation_error(
+        self,
+        *,
+        stage: str,
+        request: TextRequest | None,
+        completion: CompletionResult | None,
+        error: ValidationError,
+    ) -> None:
+        errors = error.errors(include_url=False, include_context=False, include_input=False)
+        for item in errors:
+            error_type = str(item.get("type") or "validation_error")
+            path = self._validation_path(item)
+            missing_field = path if error_type == "missing" else "none"
+            unexpected_field = path if error_type == "extra_forbidden" else "none"
+            LOGGER.warning(
+                "provider=external model=%s document_id=%s processing_job_id=%s "
+                "request_id=%s stage=%s prompt_version=%s response_length=%s "
+                "response_sha256=%s json_parse_success=%s schema_valid=false "
+                "error_count=%s error_path=%s error_type=%s expected_type=%s "
+                "actual_type=%s missing_field=%s unexpected_field=%s "
+                "normalization_applied=%s repaired_paths=%s",
+                self.settings.model,
+                request.document_id if request and request.document_id else 0,
+                request.processing_job_id if request and request.processing_job_id else 0,
+                completion.request_id if completion else "none",
+                stage,
+                self._prompt_version(request) if request else self.settings.prompt_version,
+                completion.response_length if completion else 0,
+                completion.response_sha256 if completion else "none",
+                str(completion.json_parse_success if completion else True).lower(),
+                len(errors),
+                path,
+                error_type,
+                error_type,
+                "redacted",
+                missing_field,
+                unexpected_field,
+                str(completion.normalization_applied if completion else False).lower(),
+                ",".join(completion.repaired_paths) if completion and completion.repaired_paths else "none",
+            )
 
     def _validate_facts(
         self,
@@ -774,12 +1091,22 @@ class ExternalLlmProvider(LlmProvider):
         payload: dict[str, Any],
         request: TextRequest | None = None,
         prompt_version: str | None = None,
+        completion: CompletionResult | None = None,
     ) -> RewriteResponse:
         try:
             response = RewriteResponse.model_validate(payload)
         except ValidationError as exc:
-            raise ExternalProviderError(
-                "外部模型适老化结果不符合 JSON Schema"
+            self._log_schema_validation_error(
+                stage="accessible_rewrite",
+                request=request,
+                completion=completion,
+                error=exc,
+            )
+            raise self._schema_error(
+                stage="accessible_rewrite",
+                request=request,
+                completion=completion,
+                error=exc,
             ) from exc
         self._check_prompt_version(response.prompt_version, prompt_version)
         if request is None:
@@ -888,8 +1215,9 @@ class ExternalLlmProvider(LlmProvider):
         facts: list[FactField],
         sessions: list[ServiceSession],
         request: TextRequest,
+        prompt_version: str,
     ) -> FactExtractionResponse:
-        if self.settings.prompt_version == "v1":
+        if prompt_version == "v1":
             return FactExtractionResponse(
                 prompt_version="v1", fields=facts, sessions=sessions
             )
@@ -946,7 +1274,7 @@ class ExternalLlmProvider(LlmProvider):
             amendments,
         ) = validated_groups
         return FactExtractionResponse(
-            prompt_version=self.settings.prompt_version,
+            prompt_version=prompt_version,
             fields=facts,
             sessions=sessions,
             audience_rules=AudienceRules(

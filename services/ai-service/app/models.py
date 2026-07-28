@@ -61,7 +61,11 @@ class TextRequest(BaseModel):
     processing_job_id: int | None = None
     trace_id: str = ""
     content_kind: ContentKind | None = None
-    prompt_version: str | None = None
+    prompt_version: Literal["v1", "v1.1", "web-v1.1"] | None = None
+
+
+class RewriteOnlyRequest(TextRequest):
+    fact_checkpoint: dict[str, object]
 
 
 class ExtractedField(BaseModel):

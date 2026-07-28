@@ -11,11 +11,13 @@ from app.models import (
     AnalyzeResult,
     ExtractTextResult,
     MetadataPreview,
+    RewriteOnlyRequest,
     TextRequest,
     WebArticlePreview,
     WebArticleRequest,
 )
 from app.providers import ExternalLlmProvider, LlmProvider, MockProvider
+from app.providers.external import ExternalProviderError
 from app.web_ingest import preview_web_article
 
 app = FastAPI(title="简达 AI 服务", version="0.1.0")
@@ -92,8 +94,32 @@ async def metadata_preview(file: UploadFile = File(...)) -> MetadataPreview:
 def analyze(request: TextRequest) -> AnalyzeResult:
     try:
         return get_provider().analyze(request)
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=503, detail=exc.safe_detail()) from exc
     except (RuntimeError, NotImplementedError) as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logging.getLogger("uvicorn.error").exception("Unexpected AI analysis failure")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "AI_SERVICE_UNAVAILABLE",
+                "message": "AI 服务暂时不可用",
+                "retryable": True,
+            },
+        ) from exc
+
+
+@app.post("/internal/rewrite", response_model=AnalyzeResult)
+def rewrite(request: RewriteOnlyRequest) -> AnalyzeResult:
+    try:
+        provider = get_provider()
+        if not isinstance(provider, ExternalLlmProvider):
+            raise ExternalProviderError("仅外部模型支持阶段恢复")
+        checkpoint = request.fact_checkpoint.get("facts", request.fact_checkpoint)
+        if not isinstance(checkpoint, dict):
+            raise ExternalProviderError("事实检查点格式错误")
+        return provider.rewrite_from_checkpoint(request, checkpoint)
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=503, detail=exc.safe_detail()) from exc
 
 
 @app.post("/internal/simplify")
