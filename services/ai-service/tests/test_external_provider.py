@@ -346,6 +346,14 @@ def test_completion_normalizes_fenced_and_explained_json():
     assert result.fields[0].value == "青松社区服务站"
 
 
+def test_completion_rejects_multiple_json_objects():
+    content = json.dumps(facts(), ensure_ascii=False) + " " + json.dumps({"other": True})
+    with QueueServer([response(200, completion(content))]) as server:
+        provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
+        with pytest.raises(ExternalProviderError, match="content 不是合法 JSON"):
+            provider.analyze(request())
+
+
 def test_completion_rejects_truncated_json_without_leaking_content(caplog):
     caplog.set_level(logging.INFO)
     with QueueServer([response(200, completion('{"prompt_version":"v1","fields":['))]) as server:

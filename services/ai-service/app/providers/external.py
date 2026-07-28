@@ -862,10 +862,18 @@ class ExternalLlmProvider(LlmProvider):
         repaired: list[str] = []
         if text != content:
             repaired.append("trim_bom_or_whitespace")
-        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
-        if fenced:
-            text = fenced.group(1).strip()
+        fences = list(re.finditer(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE))
+        if fences:
+            if len(fences) != 1:
+                raise json.JSONDecodeError("multiple JSON fences", text, fences[1].start())
+            fence = fences[0]
+            prefix = text[:fence.start()].strip()
+            suffix = text[fence.end():].strip()
+            ExternalLlmProvider._validate_json_wrapper(prefix, suffix, text)
+            text = fence.group(1).strip()
             repaired.append("unwrap_markdown_fence")
+            if prefix or suffix:
+                repaired.append("discard_short_explanation")
         decoder = json.JSONDecoder()
         try:
             parsed, end = decoder.raw_decode(text)
@@ -874,11 +882,19 @@ class ExternalLlmProvider(LlmProvider):
             if not starts:
                 raise
             start = min(starts)
+            prefix = text[:start].strip()
             parsed, relative_end = decoder.raw_decode(text[start:])
             end = start + relative_end
+            suffix = text[end:].strip()
+            ExternalLlmProvider._validate_json_wrapper(prefix, suffix, text)
             repaired.append("extract_json_value")
-        if text[end:].strip():
-            repaired.append("discard_short_explanation")
+            if prefix or suffix:
+                repaired.append("discard_short_explanation")
+        else:
+            suffix = text[end:].strip()
+            ExternalLlmProvider._validate_json_wrapper("", suffix, text)
+            if suffix:
+                repaired.append("discard_short_explanation")
         if isinstance(parsed, str):
             try:
                 parsed = json.loads(parsed)
@@ -887,6 +903,13 @@ class ExternalLlmProvider(LlmProvider):
             else:
                 repaired.append("unwrap_json_string")
         return parsed, sorted(set(repaired))
+
+    @staticmethod
+    def _validate_json_wrapper(prefix: str, suffix: str, source: str) -> None:
+        wrapper = prefix + suffix
+        if len(prefix) > 200 or len(suffix) > 200 or any(token in wrapper for token in ("{", "}", "[", "]", "```")):
+            position = len(source) - len(suffix) if suffix else 0
+            raise json.JSONDecodeError("ambiguous JSON wrapper", source, position)
 
     @staticmethod
     def _validation_path(error: dict[str, Any]) -> str:
