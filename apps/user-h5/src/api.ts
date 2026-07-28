@@ -77,6 +77,30 @@ export async function searchItems(keyword: string): Promise<PublicItem[]> {
   return response.data.data;
 }
 
+export interface PublicItemNeighbor {
+  id: number;
+  slug: string;
+  title: string;
+  category: string;
+  content_kind?: string;
+  cover_image_url?: string;
+}
+
+export interface PublicItemNeighbors {
+  previous: PublicItemNeighbor | null;
+  next: PublicItemNeighbor | null;
+}
+
+export async function fetchNeighbors(
+  slug: string,
+  sameCategory = true,
+): Promise<PublicItemNeighbors> {
+  const response = await client.get(`/public/items/${slug}/neighbors`, {
+    params: { sameCategory },
+  });
+  return response.data.data;
+}
+
 export async function fetchDetail(slug: string): Promise<Record<string, any>> {
   const response = await client.get(`/public/items/${slug}`);
   return response.data.data;

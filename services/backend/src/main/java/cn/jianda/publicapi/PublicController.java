@@ -106,6 +106,44 @@ public class PublicController {
         return ApiResponse.ok(result);
     }
 
+    @GetMapping("/items/{slug}/neighbors")
+    public ApiResponse<Map<String, Object>> neighbors(
+            @PathVariable String slug,
+            @RequestParam(defaultValue = "false") boolean sameCategory,
+            @RequestParam(required = false) String category) {
+        List<Map<String, Object>> currentRows = jdbc.queryForList(
+                "SELECT id,published_at,category FROM published_item WHERE slug=? AND status='PUBLISHED'", slug);
+        if (currentRows.isEmpty()) throw new BusinessException(404, "内容不存在或已撤回");
+        Map<String, Object> current = currentRows.get(0);
+        long id = ((Number) current.get("id")).longValue();
+        Object publishedAt = current.get("published_at");
+        String activeCategory = category == null || category.isBlank()
+                ? String.valueOf(current.get("category")) : category.trim();
+        String compact = "SELECT p.id,p.slug,p.title,p.category,p.cover_image_url,p.content_kind "
+                + "FROM published_item p WHERE p.status='PUBLISHED' ";
+        String categoryClause = sameCategory ? "AND p.category=? " : "";
+        Object previous = firstOrNull(sameCategory
+                ? jdbc.queryForList(compact + "AND (p.published_at>? OR (p.published_at=? AND p.id>?)) "
+                        + categoryClause + "ORDER BY p.published_at ASC,p.id ASC LIMIT 1",
+                        publishedAt, publishedAt, id, activeCategory)
+                : jdbc.queryForList(compact + "AND (p.published_at>? OR (p.published_at=? AND p.id>?)) "
+                        + "ORDER BY p.published_at ASC,p.id ASC LIMIT 1", publishedAt, publishedAt, id));
+        Object next = firstOrNull(sameCategory
+                ? jdbc.queryForList(compact + "AND (p.published_at<? OR (p.published_at=? AND p.id<?)) "
+                        + categoryClause + "ORDER BY p.published_at DESC,p.id DESC LIMIT 1",
+                        publishedAt, publishedAt, id, activeCategory)
+                : jdbc.queryForList(compact + "AND (p.published_at<? OR (p.published_at=? AND p.id<?)) "
+                        + "ORDER BY p.published_at DESC,p.id DESC LIMIT 1", publishedAt, publishedAt, id));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("previous", previous);
+        result.put("next", next);
+        return ApiResponse.ok(result);
+    }
+
+    private static Object firstOrNull(List<Map<String, Object>> rows) {
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     @GetMapping("/items/{slug}/original-file")
     public ResponseEntity<byte[]> originalFile(
             @PathVariable String slug,

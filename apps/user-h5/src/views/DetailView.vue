@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { useRoute } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
-import { fetchDetail, setFavorite } from "../api";
+import { fetchDetail, fetchNeighbors, setFavorite, type PublicItemNeighbor, type PublicItemNeighbors } from "../api";
 import { cleanDisplayTitle, sanitizeDisplayText } from "../content";
 import { readerPreferences, recordVisit, saveFavorite } from "../library";
 import SpeechRateSelector from "../components/SpeechRateSelector.vue";
@@ -30,6 +30,12 @@ import {
   Landmark,
 } from "lucide-vue-next";
 const route = useRoute();
+const router = useRouter();
+const neighbors = ref<PublicItemNeighbors>({ previous: null, next: null });
+const navigationAnnouncement = ref("");
+const preferences = readerPreferences();
+let loadVersion = 0;
+let pointerStart: { x: number; y: number; time: number; id: number } | null = null;
 const font = ref(Number(localStorage.getItem("jianda_font") || 18));
 const favorite = ref(false);
 const loading = ref(true);
@@ -103,9 +109,27 @@ const speechText = computed(() =>
     ...detail.value.steps.flatMap((step) => step),
   ].join("。"),
 );
-onMounted(async () => {
+async function loadDetail(slug: string) {
+  const version = ++loadVersion;
+  if (preferences.stopSpeechOnNavigation) speech.stop();
+  loading.value = true;
+  error.value = "";
+  copyFeedback.value = "";
+  favorite.value = false;
+  accessibleText.value = "";
+  readingMode.value = "quick";
+  neighbors.value = { previous: null, next: null };
+  item.value = { id: 0, slug, title: "正在加载…", category: "", source_name: "", published_at: "" };
+  detail.value = { summary: [], materials: [], steps: [], warnings: [], terms: {}, fields: {}, sessions: [],
+    audienceRules: { audience: [], conditions: [] }, serviceSchedule: { service_windows: [], closure_rules: [] },
+    conditionalMaterials: [], fees: [], deliveries: [], deadlines: [], amendments: [], whyItMatters: [],
+    actionChecklist: [], keyFacts: [], commonMistakes: [], faq: [], scope: {}, uncertainties: [] };
   try {
-    item.value = await fetchDetail(String(route.params.slug));
+    item.value = await fetchDetail(slug);
+    if (version !== loadVersion) return;
+    fetchNeighbors(slug, preferences.preferSameCategory)
+      .then((value) => { if (version === loadVersion) neighbors.value = value; })
+      .catch(() => undefined);
     const generated = item.value.generated || {};
     const fields = item.value.fields || [];
     detail.value.fields = Object.fromEntries(
@@ -212,9 +236,45 @@ onMounted(async () => {
   } catch {
     error.value = "内容暂时无法读取，可能已撤回";
   } finally {
-    loading.value = false;
+    if (version === loadVersion) loading.value = false;
   }
-});
+}
+
+function neighborPath(target: PublicItemNeighbor): string {
+  const kind = target.content_kind === "SERVICE_NOTICE" ? "guide" : "news";
+  return `/${kind}/${target.slug}`;
+}
+async function navigateTo(target: PublicItemNeighbor | null) {
+  if (!target || loading.value) return;
+  if (preferences.stopSpeechOnNavigation) speech.stop();
+  navigationAnnouncement.value = `正在打开：${cleanDisplayTitle(target.title)}`;
+  await router.push(neighborPath(target));
+  window.scrollTo({ top: 0, behavior: "auto" });
+}
+function onKeydown(event: KeyboardEvent) {
+  if (!preferences.desktopSideNavigation || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.matches("input,textarea,select,[contenteditable='true']")) return;
+  if (event.key === "ArrowLeft" && neighbors.value.previous) { event.preventDefault(); navigateTo(neighbors.value.previous); }
+  if (event.key === "ArrowRight" && neighbors.value.next) { event.preventDefault(); navigateTo(neighbors.value.next); }
+}
+function pointerDown(event: PointerEvent) {
+  if (!preferences.mobileSwipeNavigation || window.innerWidth > 768) return;
+  if ((event.target as HTMLElement)?.closest("a,button,input,select,textarea,label,[role='button']")) return;
+  pointerStart = { x: event.clientX, y: event.clientY, time: Date.now(), id: event.pointerId };
+}
+function pointerUp(event: PointerEvent) {
+  if (!pointerStart || pointerStart.id !== event.pointerId) return;
+  const dx = event.clientX - pointerStart.x;
+  const dy = event.clientY - pointerStart.y;
+  const duration = Date.now() - pointerStart.time;
+  pointerStart = null;
+  if (duration > 800 || Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+  navigateTo(dx < 0 ? neighbors.value.next : neighbors.value.previous);
+}
+watch(() => String(route.params.slug), loadDetail, { immediate: true });
+onMounted(() => window.addEventListener("keydown", onKeydown));
+onBeforeUnmount(() => { window.removeEventListener("keydown", onKeydown); speech.stop(); loadVersion += 1; });
 async function toggleFav() {
   const next = !favorite.value;
   try {
@@ -252,7 +312,10 @@ function openOfficial() {
 }
 </script>
 <template>
-  <div class="detail-page" :style="{ '--reader-size': font + 'px' }">
+  <div class="detail-page" :style="{ '--reader-size': font + 'px' }" @pointerdown="pointerDown" @pointerup="pointerUp">
+    <p class="sr-only" aria-live="polite">{{ navigationAnnouncement }}</p>
+    <button v-if="preferences.desktopSideNavigation && neighbors.previous" type="button" class="article-side-nav article-side-nav--previous" :aria-label="`上一篇：${cleanDisplayTitle(neighbors.previous.title)}`" @click="navigateTo(neighbors.previous)">‹<span>{{ cleanDisplayTitle(neighbors.previous.title) }}</span></button>
+    <button v-if="preferences.desktopSideNavigation && neighbors.next" type="button" class="article-side-nav article-side-nav--next" :aria-label="`下一篇：${cleanDisplayTitle(neighbors.next.title)}`" @click="navigateTo(neighbors.next)"><span>{{ cleanDisplayTitle(neighbors.next.title) }}</span>›</button>
     <AppTopBar />
     <main class="reader">
 
@@ -491,6 +554,10 @@ function openOfficial() {
         ><FileText /><span><b>查看原{{ String(item.mime_type || '').startsWith('image/') ? '图' : 'PDF' }}</b><small>保留上传文件的分页、表格和排版</small></span><ChevronRight /></RouterLink>
       <button v-if="isNews" type="button" class="original-link official-source-link" @click="openOfficial"><ExternalLink/><span><b>查看官方原文</b><small>{{ item.source_name }} · {{ item.canonical_url || item.source_url }}</small></span><ChevronRight/></button>
       <section v-if="isNews" class="image-source-note"><b>图片来源</b><span>{{ item.image_source_name || "简达本地分类默认图" }}</span><small>{{ item.cover_image_type === "CATEGORY_DEFAULT" ? "本地中性分类插图，不代表原文现场" : item.image_license_note }}</small></section>
+      <nav v-if="neighbors.previous || neighbors.next" class="article-neighbors" aria-label="连续阅读">
+        <button type="button" :disabled="!neighbors.previous" @click="navigateTo(neighbors.previous)"><small>上一篇</small><b>{{ neighbors.previous ? cleanDisplayTitle(neighbors.previous.title) : "已经是第一篇" }}</b><span>{{ neighbors.previous?.category || "" }}</span></button>
+        <button type="button" :disabled="!neighbors.next" @click="navigateTo(neighbors.next)"><small>下一篇</small><b>{{ neighbors.next ? cleanDisplayTitle(neighbors.next.title) : "已经是最后一篇" }}</b><span>{{ neighbors.next?.category || "" }}</span></button>
+      </nav>
       <p class="disclaimer">内容由简达整理并经人工审核，具体要求以权威来源最新规定为准。</p>
       <nav class="detail-action-bar" aria-label="详情操作">
         <button type="button" @click="speech.toggle(speechText)"><Volume2 /><span>{{ speech.status.value === "playing" ? "暂停" : speech.status.value === "paused" ? "继续" : "听全文" }}</span></button>
