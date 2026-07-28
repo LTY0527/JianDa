@@ -139,9 +139,10 @@ public class DocumentService {
                     id, segment.pageNo(), segment.segmentNo(), segment.text(), segment.startOffset(), segment.endOffset());
         }
         String mimeType = file.getContentType() == null ? mimeTypeFor(extension) : file.getContentType();
-        jdbc.update("UPDATE source_document SET file_name=?,file_type=?,original_filename=?,mime_type=?,file_size=?,file_sha256=?,"
+        jdbc.update("UPDATE source_document SET file_name=?,file_type=?,source_type=?,original_filename=?,mime_type=?,file_size=?,file_sha256=?,"
                         + "storage_path=?,raw_text=?,page_count=?,processing_status='UPLOADED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                original, mimeType, original, mimeType, Files.size(target), sha256(target),
+                original, mimeType, "pdf".equals(extension) ? "PDF" : "IMAGE",
+                original, mimeType, Files.size(target), sha256(target),
                 target.toString(), extracted.text(), extracted.pageCount(), id);
         log(user, "UPLOAD_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
         return detail(id, user);
@@ -185,6 +186,9 @@ public class DocumentService {
             context.put("processing_job_id", jobId);
             context.put("trace_id", traceId);
             context.put("content_kind", document.get("content_kind"));
+            if ("WEB_ARTICLE".equals(document.get("source_type"))) {
+                context.put("prompt_version", "web-v1.1");
+            }
             Map<String, Object> result = aiClient.analyze(document.get("title").toString(), rawText,
                     publicInformation ? "public_news" : "guide",
                     sourceName,
@@ -215,6 +219,13 @@ public class DocumentService {
             saveStructuredIfPresent(id, result, "result_delivery", "RESULT_DELIVERY", "领取与邮寄");
             saveStructuredIfPresent(id, result, "deadline_rules", "DEADLINE_RULES", "截止规则");
             saveStructuredIfPresent(id, result, "amendments", "AMENDMENTS", "更正信息");
+            saveStructuredIfPresent(id, result, "why_it_matters", "WHY_IT_MATTERS", "与我有什么关系");
+            saveStructuredIfPresent(id, result, "action_checklist", "ACTION_CHECKLIST", "行动清单");
+            saveStructuredIfPresent(id, result, "key_facts", "KEY_FACTS", "关键事实");
+            saveStructuredIfPresent(id, result, "common_mistakes", "COMMON_MISTAKES", "常见误区");
+            saveStructuredIfPresent(id, result, "faq", "FAQ", "常见问题");
+            saveStructuredIfPresent(id, result, "scope", "CONTENT_SCOPE", "适用范围");
+            saveStructuredIfPresent(id, result, "uncertainties", "UNCERTAINTIES", "尚待确认");
             if (result.get("warnings") != null) {
                 saveGenerated(id, "RISK_WARNING", "风险提示", result.get("warnings"),
                         String.valueOf(result.get("warnings")));
@@ -232,7 +243,9 @@ public class DocumentService {
             jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,"
                             + "schema_version=?,cache_hit=?,text_extract_ms=?,fact_extract_ms=?,trace_validation_ms=?,"
                             + "accessible_rewrite_ms=?,persistence_ms=?,total_ms=?,prompt_tokens=?,completion_tokens=?,"
-                            + "total_tokens=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                            + "total_tokens=?,source_char_count=?,accessible_char_count=?,summary_compression_ratio=?,"
+                            + "key_fact_count=?,action_item_count=?,trace_pass_rate=?,hallucinated_field_count=?,"
+                            + "markdown_residue_count=?,prompt_version=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
                     String.valueOf(metrics.getOrDefault("schema_version", "1.0")),
                     Boolean.TRUE.equals(metrics.get("cache_hit")),
                     metric(metrics, "text_extract_ms"),
@@ -244,6 +257,16 @@ public class DocumentService {
                     metric(metrics, "prompt_tokens"),
                     metric(metrics, "completion_tokens"),
                     metric(metrics, "total_tokens"),
+                    metric(metrics, "source_char_count"),
+                    metric(metrics, "accessible_char_count"),
+                    decimalMetric(metrics, "summary_compression_ratio"),
+                    metric(metrics, "key_fact_count"),
+                    metric(metrics, "action_item_count"),
+                    decimalMetric(metrics, "trace_pass_rate"),
+                    metric(metrics, "hallucinated_field_count"),
+                    metric(metrics, "markdown_residue_count"),
+                    "WEB_ARTICLE".equals(document.get("source_type")) ? "web-v1.1"
+                            : String.valueOf(metrics.getOrDefault("schema_version", "1.1")),
                     jobId);
             jdbc.update("UPDATE source_document SET processing_status='WAITING_REVIEW',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
@@ -293,7 +316,7 @@ public class DocumentService {
     public OriginalFile originalFile(long id, AuthUser user) {
         assertAccess(id, user);
         Map<String, Object> source = jdbc.queryForMap(
-                "SELECT source_type,storage_path,original_filename,mime_type,file_size,file_sha256 "
+                "SELECT source_type,storage_path,file_name,original_filename,mime_type,file_size,file_sha256 "
                         + "FROM source_document WHERE id=?", id);
         if ("WEB_ARTICLE".equals(source.get("source_type")) || source.get("storage_path") == null) {
             throw new BusinessException(404, "网页文章没有 PDF 或图片原文件，请查看网页正文快照");
@@ -303,12 +326,63 @@ public class DocumentService {
 
     public OriginalFile publicOriginalFile(String slug) {
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT d.storage_path,d.original_filename,d.mime_type,d.file_size,d.file_sha256 "
+                "SELECT d.source_type,d.storage_path,d.file_name,d.original_filename,d.mime_type,d.file_size,d.file_sha256 "
                         + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
-                        + "WHERE p.slug=? AND p.status='PUBLISHED' AND d.allow_public_original=TRUE",
+                        + "WHERE p.slug=? AND p.status='PUBLISHED' AND d.allow_public_original=TRUE "
+                        + "AND d.source_type IN ('PDF','IMAGE')",
                 slug);
         if (rows.isEmpty()) throw new BusinessException(404, "原文件未公开或内容不存在");
         return loadOriginal(rows.get(0));
+    }
+
+    @Transactional
+    public Map<String, Object> uploadCustomCover(
+            long id, MultipartFile file, AuthUser user) throws IOException {
+        assertAccess(id, user);
+        Map<String, Object> document = detail(id, user);
+        if (!"WEB_ARTICLE".equals(document.get("source_type"))) {
+            throw new BusinessException(400, "只有网页文章可以设置编辑封面");
+        }
+        if (file.isEmpty() || file.getSize() > 5 * 1024 * 1024) {
+            throw new BusinessException(400, "请选择不超过 5MB 的 JPG、PNG 或 WebP 图片");
+        }
+        String original = safeOriginalName(file);
+        String ext = extension(original);
+        if (!Set.of("jpg", "jpeg", "png", "webp").contains(ext)) {
+            throw new BusinessException(400, "封面仅支持 JPG、PNG 或 WebP");
+        }
+        Path coverDir = uploadRoot.resolve("covers").resolve(String.valueOf(user.organizationId())).normalize();
+        Files.createDirectories(coverDir);
+        Path target = coverDir.resolve(UUID.randomUUID() + "." + ext).normalize();
+        if (!target.startsWith(uploadRoot)) throw new BusinessException(400, "封面路径不安全");
+        Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
+        String mime = file.getContentType() == null ? mimeTypeFor(ext) : file.getContentType();
+        jdbc.update("UPDATE source_document SET custom_cover_path=?,custom_cover_mime=?,custom_cover_filename=?,"
+                        + "cover_image_type='EDITOR_UPLOAD',image_source_name='机构编辑上传',"
+                        + "image_source_url=NULL,image_cached=TRUE,image_reviewed=TRUE WHERE id=?",
+                target.toString(), mime, original, id);
+        return Map.of("filename", original, "mimeType", mime, "imageReviewed", true);
+    }
+
+    public OriginalFile publicCover(String slug) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT d.custom_cover_path storage_path,d.custom_cover_filename original_filename,"
+                        + "d.custom_cover_mime mime_type,NULL file_sha256 "
+                        + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
+                        + "WHERE p.slug=? AND p.status='PUBLISHED' AND d.custom_cover_path IS NOT NULL",
+                slug);
+        if (rows.isEmpty()) throw new BusinessException(404, "自定义封面不存在");
+        return loadOriginal(rows.get(0));
+    }
+
+    public boolean publicOriginalFileAvailable(Map<String, Object> document) {
+        if (!Boolean.TRUE.equals(document.get("allow_public_original"))) return false;
+        String sourceType = nullableString(document.get("source_type"));
+        if (!Set.of("PDF", "IMAGE").contains(sourceType)) return false;
+        String stored = nullableString(document.get("storage_path"));
+        if (stored.isBlank()) return false;
+        Path path = Paths.get(stored).toAbsolutePath().normalize();
+        return path.startsWith(uploadRoot) && Files.isRegularFile(path);
     }
 
     private OriginalFile loadOriginal(Map<String, Object> row) {
@@ -325,6 +399,7 @@ public class DocumentService {
                 throw new BusinessException(409, "原文件完整性校验失败");
             }
             String name = nullableString(row.get("original_filename"));
+            if (name.isBlank()) name = nullableString(row.get("file_name"));
             String mime = nullableString(row.get("mime_type"));
             if (name.isBlank()) name = "material";
             if (mime.isBlank()) mime = "application/octet-stream";
@@ -337,10 +412,26 @@ public class DocumentService {
     @Transactional
     public void updateField(long documentId, long fieldId, String value, boolean confirmed, AuthUser user) {
         assertAccess(documentId, user);
+        String previous = jdbc.queryForObject(
+                "SELECT field_value FROM extracted_field WHERE id=? AND document_id=?",
+                String.class, fieldId, documentId);
         int count = jdbc.update("UPDATE extracted_field SET field_value=?,review_status=?,reviewer_id=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND document_id=?",
                 value.trim(), confirmed ? "CONFIRMED" : "MODIFIED", user.id(), fieldId, documentId);
         if (count == 0) throw new BusinessException(404, "字段不存在");
+        if (previous != null && !previous.equals(value.trim())) {
+            jdbc.update("UPDATE processing_job SET human_modified_field_count=human_modified_field_count+1,"
+                            + "human_modified_char_count=human_modified_char_count+? "
+                            + "WHERE id=(SELECT job_id FROM (SELECT MAX(id) job_id FROM processing_job WHERE document_id=?) latest)",
+                    changedCharacters(previous, value.trim()), documentId);
+        }
         log(user, "UPDATE_FIELD", "EXTRACTED_FIELD", fieldId, "SUCCESS");
+    }
+
+    private static int changedCharacters(String before, String after) {
+        int shared = 0;
+        int limit = Math.min(before.length(), after.length());
+        while (shared < limit && before.charAt(shared) == after.charAt(shared)) shared++;
+        return (before.length() - shared) + (after.length() - shared);
     }
 
     @Transactional
@@ -368,6 +459,9 @@ public class DocumentService {
         String contentKind = nullableString(document.get("content_kind"));
         String cover = Boolean.TRUE.equals(document.get("image_reviewed"))
                 ? nullableString(document.get("cover_image_url")) : "";
+        if (!nullableString(document.get("custom_cover_path")).isBlank()) {
+            cover = "/api/public/items/" + slug + "/cover";
+        }
         String raw = nullableString(document.get("extracted_text"));
         int readingMinutes = Math.max(1, (int) Math.ceil(raw.length() / 500.0));
         boolean local = nullableString(document.get("source_domain")).endsWith("shanghai.gov.cn");
@@ -493,6 +587,16 @@ public class DocumentService {
         if (value instanceof Number number) return number.longValue();
         try {
             return value == null ? 0 : Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
+    }
+
+    private static double decimalMetric(Map<String, Object> metrics, String name) {
+        Object value = metrics.get(name);
+        if (value instanceof Number number) return number.doubleValue();
+        try {
+            return value == null ? 0 : Double.parseDouble(String.valueOf(value));
         } catch (NumberFormatException ignored) {
             return 0;
         }

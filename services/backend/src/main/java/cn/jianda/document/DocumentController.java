@@ -68,12 +68,19 @@ public class DocumentController {
     @GetMapping("/{id}/original-file")
     public ResponseEntity<byte[]> originalFile(
             @PathVariable long id,
-            @RequestHeader(value = "Range", required = false) String range) throws IOException {
-        return OriginalFileHttp.response(service.originalFile(id, UserContext.current()), range);
+            @RequestHeader(value = "Range", required = false) String range,
+            @RequestParam(defaultValue = "false") boolean download) throws IOException {
+        return OriginalFileHttp.response(service.originalFile(id, UserContext.current()), range, download);
     }
 
     @GetMapping("/{id}/fields")
     public ApiResponse<List<Map<String, Object>>> fields(@PathVariable long id) { return ApiResponse.ok(service.fields(id, UserContext.current())); }
+
+    @PostMapping("/{id}/cover")
+    public ApiResponse<Map<String, Object>> uploadCover(
+            @PathVariable long id, @RequestPart("file") MultipartFile file) throws IOException {
+        return ApiResponse.ok(service.uploadCustomCover(id, file, UserContext.current()));
+    }
 
     @GetMapping("/{id}/generated")
     public ApiResponse<List<Map<String, Object>>> generated(@PathVariable long id) { return ApiResponse.ok(service.generated(id, UserContext.current())); }

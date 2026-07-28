@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import cn.jianda.ai.AiClient;
@@ -186,6 +187,11 @@ class CoreFlowIntegrationTest {
                 .andExpect(status().isPartialContent())
                 .andExpect(result -> org.junit.jupiter.api.Assertions.assertArrayEquals(
                         "demo".getBytes(), result.getResponse().getContentAsByteArray()));
+        mvc.perform(get("/api/public/items/{slug}/original-file", slug)
+                        .param("download", "true"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition",
+                        org.hamcrest.Matchers.containsString("attachment")));
     }
 
     @Test

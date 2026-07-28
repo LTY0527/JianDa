@@ -5,6 +5,7 @@ import StatusTag from "../components/StatusTag.vue";
 import { documentApi, type DocumentRow } from "../api/documents";
 import { apiMessage } from "../api/http";
 import { Search, Upload, Globe2, FileImage, FileText } from "lucide-vue-next";
+import { formatDisplayDate, formatDisplayDateTime, statusLabel } from "../utils/display";
 const query = ref("");
 const status = ref("全部状态");
 const loading = ref(true);
@@ -18,20 +19,11 @@ if (savedState) {
 }
 watch([query, status], () => sessionStorage.setItem("jianda_documents_state", JSON.stringify({ query: query.value, status: status.value, scroll: window.scrollY })));
 onUnmounted(() => sessionStorage.setItem("jianda_documents_state", JSON.stringify({ query: query.value, status: status.value, scroll: window.scrollY })));
-const statusText: Record<string, string> = {
-  UPLOADED: "待处理",
-  PROCESSING: "处理中",
-  WAITING_REVIEW: "待审核",
-  REVIEWED: "已审核",
-  PUBLISHED: "已发布",
-  FAILED: "失败",
-  WITHDRAWN: "已撤回",
-};
 const filtered = computed(() =>
   documents.value.filter(
     (d) =>
       (!query.value || d.title.includes(query.value)) &&
-      (status.value === "全部状态" || statusText[d.status] === status.value),
+      (status.value === "全部状态" || statusLabel(d.status) === status.value),
   ),
 );
 function displayProgress(document: DocumentRow) {
@@ -52,16 +44,6 @@ function sourceLabel(document: DocumentRow) {
   if (document.source_type === "WEB_ARTICLE") return "网页文章";
   if (document.source_type === "IMAGE") return "图片材料";
   return "PDF 材料";
-}
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
 }
 onMounted(async () => {
   try {
@@ -118,14 +100,14 @@ onMounted(async () => {
               <div class="material-title">
                 <component :is="sourceIcon(d)" :size="18" />
                 <span><b>{{ d.title }}</b
-                ><small>{{ sourceLabel(d) }} · {{ d.source_type === "WEB_ARTICLE" ? [d.source_name, d.category, d.original_published_at?.slice(0, 10)].filter(Boolean).join(" · ") : d.file_name || "尚未上传文件" }}</small></span>
+                ><small>{{ sourceLabel(d) }} · {{ d.source_type === "WEB_ARTICLE" ? [d.source_name, d.category, formatDisplayDate(d.original_published_at)].filter(Boolean).join(" · ") : d.file_name || "尚未上传文件" }}</small></span>
               </div>
             </td>
             <td>{{ d.organization_name }}</td>
             <td>
               <StatusTag
                 :status="d.status"
-                :text="statusText[d.status] || d.status"
+                :text="statusLabel(d.status)"
               />
             </td>
             <td>
@@ -134,7 +116,7 @@ onMounted(async () => {
               </div>
               <small>{{ displayProgress(d) }}%</small>
             </td>
-            <td>{{ formatDate(d.updated_at) }}</td>
+            <td>{{ formatDisplayDateTime(d.updated_at) }}</td>
             <td>
               <RouterLink
                 :to="

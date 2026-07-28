@@ -1,0 +1,11 @@
+ALTER TABLE processing_job ADD COLUMN source_char_count INT NOT NULL DEFAULT 0;
+ALTER TABLE processing_job ADD COLUMN accessible_char_count INT NOT NULL DEFAULT 0;
+ALTER TABLE processing_job ADD COLUMN summary_compression_ratio DECIMAL(8,4) NOT NULL DEFAULT 0;
+ALTER TABLE processing_job ADD COLUMN key_fact_count INT NOT NULL DEFAULT 0;
+ALTER TABLE processing_job ADD COLUMN action_item_count INT NOT NULL DEFAULT 0;
+ALTER TABLE processing_job ADD COLUMN trace_pass_rate DECIMAL(8,4) NOT NULL DEFAULT 0;
+ALTER TABLE processing_job ADD COLUMN human_modified_field_count INT NOT NULL DEFAULT 0;
+ALTER TABLE processing_job ADD COLUMN human_modified_char_count INT NOT NULL DEFAULT 0;
+ALTER TABLE processing_job ADD COLUMN hallucinated_field_count INT NOT NULL DEFAULT 0;
+ALTER TABLE processing_job ADD COLUMN markdown_residue_count INT NOT NULL DEFAULT 0;
+ALTER TABLE processing_job ADD COLUMN prompt_version VARCHAR(30);

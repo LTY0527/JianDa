@@ -803,6 +803,70 @@ def test_cache_key_uses_content_model_prompt_and_schema_and_skips_external_call(
     assert second.metrics.total_tokens == 0
 
 
+def test_web_v1_1_uses_request_version_and_keeps_only_traceable_deep_content():
+    material = "本次健康讲座面向社区老年居民，活动免费。建议提前十分钟到场。"
+    web_request = request(material).model_copy(update={
+        "document_type": "public_news",
+        "content_kind": "HEALTH_EDUCATION",
+        "prompt_version": "web-v1.1",
+    })
+    fact_payload = facts([{
+        "field_type": "FEE",
+        "label": "费用",
+        "value": "免费",
+        "source_quote": "活动免费",
+        "page_no": 1,
+        "segment_id": 101,
+        "confidence": 0.98,
+        "needs_human_review": False,
+    }])
+    fact_payload["prompt_version"] = "web-v1.1"
+    rewrite_payload = {
+        **rewrite("活动免费，建议提前到场。"),
+        "prompt_version": "web-v1.1",
+        "quick_summary": ["社区有健康讲座。", "面向社区老年居民。", "活动免费。"],
+        "why_it_matters": ["社区老年居民可以了解健康知识。"],
+        "action_checklist": [{
+            "action": "提前十分钟到场",
+            "priority": "近期",
+            "source_quote": "建议提前十分钟到场",
+            "segment_id": 101,
+        }, {
+            "action": "携带身份证",
+            "priority": "立即",
+            "source_quote": "原文不存在的内容",
+            "segment_id": 101,
+        }],
+        "key_facts": [{
+            "label": "费用",
+            "value": "免费",
+            "source_quote": "活动免费",
+            "segment_id": 101,
+        }],
+        "common_mistakes": [],
+        "faq": [],
+        "terms": {},
+        "scope": {
+            "national_or_local": "具体机构",
+            "applicable_region": "社区",
+            "needs_personal_action": True,
+        },
+        "uncertainties": ["原文未说明报名方式。"],
+    }
+    with QueueServer([
+        response(200, json_completion(fact_payload)),
+        response(200, json_completion(rewrite_payload)),
+    ]) as server:
+        result = ExternalLlmProvider(
+            settings(server.url), sleep=lambda _: None
+        ).analyze(web_request)
+    assert [item.action for item in result.action_checklist] == ["提前十分钟到场"]
+    assert result.key_facts[0].source_quote in material
+    assert result.metrics.key_fact_count == 1
+    assert result.metrics.action_item_count == 1
+    assert result.metrics.markdown_residue_count == 0
+
+
 def test_v1_1_reserves_enough_output_tokens_for_dense_structured_notices():
     provider = ExternalLlmProvider(
         settings("http://127.0.0.1:9", prompt_version="v1.1"),

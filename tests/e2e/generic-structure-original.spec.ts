@@ -179,10 +179,9 @@ test("public original PDF route uses same-origin API and preserves safe back nav
     `${h5Url}/original-file/guide-generic-105?from=guide`,
   );
   await expect(page.getByText("查看原PDF")).toBeVisible();
-  await expect(page.locator(".original-file-page iframe")).toHaveAttribute(
-    "src",
-    "/api/public/items/guide-generic-105/original-file",
-  );
+  await expect(page.locator(".original-file-page iframe")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "PDF 在线阅读器" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "重新加载" })).toBeVisible();
   await page.getByRole("button", { name: "返回" }).click();
   await expect(page).toHaveURL(`${h5Url}/guide/guide-generic-105`);
   expect(consoleErrors).toEqual([]);

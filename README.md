@@ -225,7 +225,7 @@ Remove-Item Env:PIP_PROXY -ErrorAction SilentlyContinue
 2. 使用 `org_admin / Jianda@123` 登录机构端。
 3. 进入“材料管理 → 上传材料”，选择 PDF/PNG/JPG。
 4. 系统保存原始文件、调用稳定 MockProvider，并生成字段、通俗版和步骤卡片。
-5. 在左右对照页切换“原 PDF/原图”和“提取文本”，核对页码、原文片段及结构化字段，修改并确认字段后完成审核。
+5. 在左右对照页切换“原 PDF/原图”和“提取文本”。内置 PDF.js 阅读器支持翻页、缩放、适合宽度、全屏、重试和独立下载；原图支持缩放与下载。核对页码、引用片段和字段后完成审核。
 6. 设置分类和来源；如确需公开上传原件，显式勾选“允许用户查看原文件”，再发布。
 7. 打开用户 H5，查看刚发布的内容，切换 18/20/22/24px 字号，测试朗读、收藏、提取文本与获授权公开的原文件。
 
@@ -233,7 +233,7 @@ Remove-Item Env:PIP_PROXY -ErrorAction SilentlyContinue
 
 - 上传时保存原文件名、MIME、字节大小和 SHA-256；磁盘读取时重新校验 SHA-256，不向前端暴露存储路径。
 - 机构端原文件接口需要 JWT 和机构权限；公开端只有已发布且机构显式授权的材料可读取。
-- PDF/原图接口支持 `Range`、`ETag` 和 `X-Content-SHA256`，便于浏览器按需预览。
+- PDF/原图接口支持 `Range`、`ETag` 和 `X-Content-SHA256`。在线阅读保持 `inline`，下载按钮使用 `download=true` 获取 `attachment` 和原始文件名，不依赖 iframe，避免 `X-Frame-Options` 或下载插件接管预览。
 - v1.1 同时保留旧的扁平字段，并生成 `AUDIENCE_RULES`、`SERVICE_SCHEDULE`、`CONDITIONAL_MATERIALS`、`FEES`、`RESULT_DELIVERY`、`DEADLINE_RULES`、`AMENDMENTS`。
 - 每个结构化条目都带原文引用、页码、段落 ID 和人工复核标记；相对期限不会伪造为固定日期，可选材料不会变成必需材料。
 - External 结果缓存键包含文件 SHA-256、模型、提示词版本和 Schema 版本。缓存仅用于完全相同的文件与配置，失败结果不缓存；当前为 AI 进程内缓存，容器重启后失效。
@@ -276,6 +276,18 @@ AI 摘要和可追溯字段，不会因原文件接口返回 404 而清空整页
 网页采集只处理 `source_registry` 白名单中的公开页面，遵守 robots.txt、限速和站点访问
 边界，不绕过登录、验证码、付费墙或防盗链。未明确允许图片下载的来源不下载原图，直接
 使用不含金额、日期、人物或机构 Logo 的本地分类默认图。
+
+网页资讯使用请求级 Prompt 版本 `web-v1.1`，保留旧摘要和通俗版结果兼容，同时增加三句话看懂、关系、行动清单、关键事实、常见误区、FAQ、适用范围和尚待确认。事实性模块的原文引用通过 segment 校验后才会保存；用户端可切换“快速看懂”和“完整解读”。
+
+默认测试不会调用真实模型。只有明确设置以下变量时才执行真实网页烟雾测试：
+
+```powershell
+$env:RUN_EXTERNAL_SMOKE = "1"
+$env:EXTERNAL_SMOKE_URL = "https://白名单官方站点/尚未导入的文章"
+npx playwright test tests/e2e/external-web-smoke.spec.ts
+```
+
+该测试会消耗真实模型额度并创建材料，但仍须经过机构端人工审核后才会发布。
 
 若本地代理或 VPN 使用 fake-IP DNS，将公网域名解析到 `198.18.0.0/15`，可仅在本地
 评测时设置 `JIANDA_ALLOW_FAKE_IP_DNS=true`。该配置默认是 `false`，生产环境必须保持

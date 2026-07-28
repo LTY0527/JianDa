@@ -17,6 +17,13 @@ import {
   RefreshCw,
   TriangleAlert,
 } from "lucide-vue-next";
+import PdfReader from "@jianda/shared-ui/PdfReader.vue";
+import ImageReader from "@jianda/shared-ui/ImageReader.vue";
+import {
+  authorityLevelLabel,
+  coverTypeLabel,
+  formatDisplayDateTime,
+} from "../utils/display";
 
 const route = useRoute();
 const router = useRouter();
@@ -33,9 +40,9 @@ const retrying = ref(false);
 const jobs = ref<ProcessingJob[]>([]);
 const allowLeave = ref(false);
 const sourceMode = ref<"file" | "text">("text");
-const originalUrl = ref("");
-const originalError = ref("");
-const originalLoading = ref(false);
+const originalUrl = computed(() => documentApi.originalFileUrl(documentId));
+const originalDownloadUrl = computed(() => documentApi.originalFileUrl(documentId, true));
+const originalHeaders = computed(() => documentApi.originalFileHeaders());
 const serviceSchedule = ref<any>({ service_windows: [], closure_rules: [] });
 const conditionalMaterials = ref<any[]>([]);
 const structuredFees = ref<any[]>([]);
@@ -45,6 +52,9 @@ const plainText = ref("");
 const coverReviewed = ref(false);
 const coverFailed = ref(false);
 const resourceWarnings = ref<string[]>([]);
+const customCoverPreview = ref("");
+const coverPosition = ref(50);
+const coverUploading = ref(false);
 const isImage = computed(() => document.value?.mime_type?.startsWith("image/"));
 const isWebArticle = computed(() => document.value?.source_type === "WEB_ARTICLE");
 const officialPageAvailable = computed(
@@ -67,9 +77,9 @@ const defaultCoverUrl = computed(() => {
   return new URL(`/images/defaults/${name}.svg`, base).toString();
 });
 const reviewCoverUrl = computed(() =>
-  !coverFailed.value && document.value?.cover_image_url
+  customCoverPreview.value || (!coverFailed.value && document.value?.cover_image_url
     ? document.value.cover_image_url
-    : defaultCoverUrl.value,
+    : defaultCoverUrl.value),
 );
 const articleImages = computed(() => {
   if (!document.value?.original_html) return [];
@@ -181,24 +191,9 @@ async function load() {
   }
 }
 
-async function showOriginal() {
+function showOriginal() {
   sourceMode.value = "file";
-  if (originalUrl.value || originalLoading.value) return;
-  originalLoading.value = true;
-  originalError.value = "";
-  try {
-    const response = await documentApi.originalFile(documentId);
-    originalUrl.value = URL.createObjectURL(response.data);
-  } catch (cause) {
-    originalError.value = apiMessage(cause);
-  } finally {
-    originalLoading.value = false;
-  }
 }
-
-onBeforeUnmount(() => {
-  if (originalUrl.value) URL.revokeObjectURL(originalUrl.value);
-});
 
 async function retry() {
   retrying.value = true;
@@ -214,6 +209,9 @@ async function retry() {
 }
 
 onMounted(load);
+onBeforeUnmount(() => {
+  if (customCoverPreview.value) URL.revokeObjectURL(customCoverPreview.value);
+});
 
 async function confirm(index: number) {
   try {
@@ -285,7 +283,49 @@ async function useCategoryDefaultCover() {
       document.value.cover_image_url = "";
       document.value.cover_image_type = "CATEGORY_DEFAULT";
     }
+    customCoverPreview.value = "";
     coverReviewed.value = true;
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
+async function uploadCustomCover(event: Event) {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  coverUploading.value = true;
+  error.value = "";
+  try {
+    await documentApi.uploadCover(documentId, file);
+    if (customCoverPreview.value) URL.revokeObjectURL(customCoverPreview.value);
+    customCoverPreview.value = URL.createObjectURL(file);
+    if (document.value) {
+      document.value.cover_image_type = "EDITOR_UPLOAD";
+      document.value.image_source_name = "机构编辑上传";
+      document.value.image_reviewed = true;
+    }
+    coverReviewed.value = true;
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    coverUploading.value = false;
+    input.value = "";
+  }
+}
+
+async function selectArticleImage(url: string) {
+  try {
+    await publicSourceApi.selectArticleCover(documentId, url);
+    if (document.value) {
+      document.value.cover_image_url = url;
+      document.value.cover_image_type = "ARTICLE_IMAGE";
+      document.value.image_source_name = "原网页正文配图";
+      document.value.image_reviewed = false;
+    }
+    customCoverPreview.value = "";
+    coverFailed.value = false;
+    coverReviewed.value = false;
   } catch (cause) {
     error.value = apiMessage(cause);
   }
@@ -337,19 +377,23 @@ async function useCategoryDefaultCover() {
 
     <section v-if="isWebArticle" class="panel web-source-review">
       <div class="web-source-review__cover">
-        <img :src="reviewCoverUrl" :alt="document?.image_alt_text || document?.title || '网页文章分类默认图'" referrerpolicy="no-referrer" @error="coverFailed = true" />
+        <img :src="reviewCoverUrl" :alt="document?.image_alt_text || document?.title || '网页文章分类默认图'" :style="{ objectPosition: `${coverPosition}% center` }" referrerpolicy="no-referrer" @error="coverFailed = true" />
+        <label class="cover-crop-control">裁剪预览位置
+          <input v-model.number="coverPosition" type="range" min="0" max="100" />
+        </label>
       </div>
       <div>
         <h2>网页来源与封面审核</h2>
-        <dl><div><dt>权威来源</dt><dd>{{ document?.source_name }} · {{ document?.source_authority_level }}级</dd></div><div><dt>原始发布时间</dt><dd>{{ String(document?.original_published_at || "待人工确认").slice(0, 19) }}</dd></div><div><dt>封面类型</dt><dd>{{ document?.cover_image_type }}</dd></div><div><dt>图片来源</dt><dd>{{ document?.image_source_name || "简达本地分类默认图" }}</dd></div><div><dt>是否缓存</dt><dd>{{ document?.image_cached ? "是" : "否" }}</dd></div></dl>
+        <dl><div><dt>权威来源</dt><dd>{{ document?.source_name }} · {{ authorityLevelLabel(document?.source_authority_level) }}</dd></div><div><dt>原始发布时间</dt><dd>{{ formatDisplayDateTime(document?.original_published_at) }}</dd></div><div><dt>封面类型</dt><dd>{{ coverTypeLabel(document?.cover_image_type) }}</dd></div><div><dt>图片来源</dt><dd>{{ document?.image_source_name || "简达本地分类默认图" }}</dd></div><div><dt>是否缓存</dt><dd>{{ document?.image_cached ? "是" : "否" }}</dd></div></dl>
+        <details class="technical-info"><summary>技术信息</summary><p>内容类型：{{ document?.content_kind }}；封面类型：{{ document?.cover_image_type }}；来源等级：{{ document?.source_authority_level }}</p></details>
         <p>{{ document?.image_license_note }}</p>
-        <div class="web-source-review__actions"><a v-if="officialPageAvailable && document?.canonical_url" class="btn secondary" :href="document.canonical_url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="17"/>查看官方原文</a><span v-else class="source-unavailable"><TriangleAlert :size="16"/>原网页暂时不可访问，不影响内部审核</span><button v-if="document?.cover_image_url" class="btn secondary" :disabled="coverReviewed" @click="confirmCover">{{coverReviewed?"封面已确认":"确认使用当前封面"}}</button><button class="btn secondary" @click="useCategoryDefaultCover">使用分类默认图</button></div>
+        <div class="web-source-review__actions"><a v-if="officialPageAvailable && document?.canonical_url" class="btn secondary" :href="document.canonical_url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="17"/>查看官方原文</a><span v-else class="source-unavailable"><TriangleAlert :size="16"/>原网页暂时不可访问，不影响内部审核</span><button v-if="document?.cover_image_url" class="btn secondary" :disabled="coverReviewed" @click="confirmCover">{{coverReviewed?"封面已确认":"确认使用当前封面"}}</button><label class="btn secondary cover-upload-button">{{coverUploading?"上传中…":"上传自定义封面"}}<input type="file" accept="image/png,image/jpeg,image/webp" :disabled="coverUploading" @change="uploadCustomCover"/></label><button class="btn secondary" @click="useCategoryDefaultCover">使用分类默认图 / 删除封面</button></div>
       </div>
     </section>
     <section v-if="isWebArticle && articleImages.length" class="panel web-article-images">
       <h2>正文图片</h2>
       <p>按网页正文中的原有顺序展示，仅供内部来源核对。</p>
-      <div><figure v-for="image in articleImages" :key="image.src"><img :src="image.src" :alt="image.alt" referrerpolicy="no-referrer"/><figcaption>{{ image.alt }}</figcaption></figure></div>
+      <div><figure v-for="image in articleImages" :key="image.src"><img :src="image.src" :alt="image.alt" referrerpolicy="no-referrer"/><figcaption>{{ image.alt }}</figcaption><button class="btn secondary" type="button" @click="selectArticleImage(image.src)">选为封面</button></figure></div>
     </section>
 
     <section
@@ -388,10 +432,21 @@ async function useCategoryDefaultCover() {
           </button>
         </div>
         <div v-if="sourceMode === 'file'" class="original-file-pane">
-          <p v-if="originalLoading">正在读取原文件…</p>
-          <p v-else-if="originalError" class="form-error">{{ originalError }}</p>
-          <img v-else-if="originalUrl && isImage" :src="originalUrl" :alt="document?.original_filename || '材料原图'" />
-          <iframe v-else-if="originalUrl" :src="originalUrl" title="原PDF预览"></iframe>
+          <ImageReader
+            v-if="isImage"
+            :src="originalUrl"
+            :download-url="originalDownloadUrl"
+            :headers="originalHeaders"
+            :filename="document?.original_filename || '材料原图'"
+            :alt="document?.title || '材料原图'"
+          />
+          <PdfReader
+            v-else
+            :src="originalUrl"
+            :download-url="originalDownloadUrl"
+            :headers="originalHeaders"
+            :filename="document?.original_filename || '材料原文.pdf'"
+          />
         </div>
         <article v-else class="paper">
           <h2>{{ document?.title }}</h2>

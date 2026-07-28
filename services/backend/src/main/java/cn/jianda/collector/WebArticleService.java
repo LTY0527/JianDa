@@ -2,6 +2,7 @@ package cn.jianda.collector;
 
 import cn.jianda.ai.AiClient;
 import cn.jianda.common.BusinessException;
+import cn.jianda.document.DocumentService;
 import cn.jianda.security.AuthUser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,16 +28,35 @@ public class WebArticleService {
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
     private final ObjectMapper objectMapper;
+    private final DocumentService documentService;
     private final Map<String, CachedPreview> previews = new ConcurrentHashMap<>();
 
-    public WebArticleService(JdbcTemplate jdbc, AiClient aiClient, ObjectMapper objectMapper) {
+    public WebArticleService(JdbcTemplate jdbc, AiClient aiClient, ObjectMapper objectMapper,
+                             DocumentService documentService) {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
         this.objectMapper = objectMapper;
+        this.documentService = documentService;
     }
 
     public List<Map<String, Object>> registries() {
         return jdbc.queryForList("SELECT * FROM source_registry ORDER BY authority_level,source_name");
+    }
+
+    public List<Map<String, Object>> crawlJobs() {
+        return jdbc.queryForList(
+                "SELECT j.*,r.source_name,r.domain FROM crawl_job j "
+                        + "JOIN source_registry r ON r.id=j.source_registry_id "
+                        + "ORDER BY j.updated_at DESC,j.id DESC");
+    }
+
+    public void stopJob(long jobId) {
+        int changed = jdbc.update(
+                "UPDATE crawl_job SET status='STOPPED',updated_at=CURRENT_TIMESTAMP "
+                        + "WHERE id=? AND status IN ('QUEUED','RUNNING')", jobId);
+        if (changed == 0) {
+            throw new BusinessException(409, "当前采集任务已经结束，不能停止");
+        }
     }
 
     public Map<String, Object> preview(String rawUrl) {
@@ -97,6 +117,12 @@ public class WebArticleService {
         if (duplicate != null && duplicate > 0) {
             throw new BusinessException(409, "该网页或相同正文已经导入，请勿重复操作");
         }
+        return persistArticle(preview, user);
+    }
+
+    private Map<String, Object> persistArticle(Map<String, Object> preview, AuthUser user) {
+        String canonical = text(preview.get("canonical_url"));
+        String contentHash = text(preview.get("content_hash"));
         long registryId = number(preview.get("source_registry_id"));
         long sourceId = ensureContentSource(registryId, preview);
         String body = text(preview.get("extracted_text"));
@@ -115,7 +141,7 @@ public class WebArticleService {
                             + "extracted_text,crawl_status,robots_status,original_page_available,external_source_verified,"
                             + "content_kind,prompt_version,schema_version) "
                             + "VALUES (?,?,?,'text/html',?,1,'UPLOADED',?,?,?,?,?,?,'WEB_URL','WEB_ARTICLE',?,?,?,?,?,?,?,?,"
-                            + "?,?,?,?,?,?,?,?,?,?,?,?,?,'SUCCEEDED',?,TRUE,TRUE,?,'web-v1','1.0')",
+                            + "?,?,?,?,?,?,?,?,?,?,?,?,?,'SUCCEEDED',?,TRUE,TRUE,?,'web-v1.1','1.1')",
                     new String[] {"id"});
             int index = 1;
             statement.setLong(index++, user.organizationId());
@@ -170,9 +196,27 @@ public class WebArticleService {
     public void useCategoryDefault(long documentId, AuthUser user) {
         assertAccess(documentId, user);
         int changed = jdbc.update("UPDATE source_document SET cover_image_url=NULL,cover_image_type='CATEGORY_DEFAULT',"
-                + "image_cached=FALSE,image_reviewed=TRUE WHERE id=? AND source_type='WEB_ARTICLE'", documentId);
+                + "image_cached=FALSE,image_reviewed=TRUE,custom_cover_path=NULL,custom_cover_mime=NULL,"
+                + "custom_cover_filename=NULL WHERE id=? AND source_type='WEB_ARTICLE'", documentId);
         if (changed == 0) throw new BusinessException(404, "网页文章不存在");
         log(user, "USE_CATEGORY_DEFAULT_COVER", documentId, "SUCCESS");
+    }
+
+    @Transactional
+    public void selectArticleCover(long documentId, String imageUrl, AuthUser user) {
+        assertAccess(documentId, user);
+        Map<String, Object> document = jdbc.queryForMap(
+                "SELECT original_html,canonical_url FROM source_document WHERE id=?", documentId);
+        String normalized = normalizeUrl(imageUrl);
+        if (!text(document.get("original_html")).contains(normalized)) {
+            throw new BusinessException(400, "所选图片不在当前网页正文快照中");
+        }
+        jdbc.update("UPDATE source_document SET cover_image_url=?,cover_image_type='ARTICLE_IMAGE',"
+                        + "image_source_name='原网页正文配图',image_source_url=?,image_cached=FALSE,"
+                        + "image_reviewed=FALSE,custom_cover_path=NULL,custom_cover_mime=NULL,"
+                        + "custom_cover_filename=NULL WHERE id=?",
+                normalized, document.get("canonical_url"), documentId);
+        log(user, "SELECT_ARTICLE_COVER", documentId, "SUCCESS");
     }
 
     @Transactional
@@ -192,16 +236,47 @@ public class WebArticleService {
                 documentId);
         if (rows.isEmpty()) throw new BusinessException(404, "网页文章不存在");
         Map<String, Object> current = rows.get(0);
-        if ("PUBLISHED".equals(current.get("processing_status"))) {
-            throw new BusinessException(409, "已发布内容请先撤回，再评估是否重新采集");
-        }
         String originalUrl = text(current.get("original_url"));
         previews.remove(originalUrl);
         Map<String, Object> refreshed = preview(originalUrl);
+        String refreshedHash = text(refreshed.get("content_hash"));
+        if (refreshedHash.equals(text(current.get("content_hash")))) {
+            jdbc.update("UPDATE crawl_job SET status='UNCHANGED',last_success_at=CURRENT_TIMESTAMP,"
+                            + "last_error=NULL,content_changed=FALSE,updated_at=CURRENT_TIMESTAMP WHERE document_id=?",
+                    documentId);
+            jdbc.update("UPDATE source_registry SET last_crawled_at=CURRENT_TIMESTAMP WHERE id=("
+                            + "SELECT source_registry_id FROM crawl_job WHERE document_id=? ORDER BY id DESC LIMIT 1)",
+                    documentId);
+            log(user, "RECRAWL_WEB_ARTICLE", documentId, "UNCHANGED");
+            return Map.of("documentId", documentId, "status", current.get("processing_status"),
+                    "contentKind", text(current.get("content_kind")),
+                    "contentChanged", false, "cacheHit", true);
+        }
+        if ("PUBLISHED".equals(current.get("processing_status"))) {
+            Map<String, Object> created = persistArticle(refreshed, user);
+            long newDocumentId = number(created.get("documentId"));
+            jdbc.update("UPDATE source_document SET previous_version_id=? WHERE id=?",
+                    documentId, newDocumentId);
+            Map<String, Object> processed = documentService.process(newDocumentId, user);
+            jdbc.update("UPDATE crawl_job SET status='WAITING_REVIEW',last_success_at=CURRENT_TIMESTAMP,"
+                            + "last_error=NULL,content_changed=TRUE,updated_at=CURRENT_TIMESTAMP WHERE document_id=?",
+                    newDocumentId);
+            jdbc.update("UPDATE crawl_job SET status='SUCCEEDED',last_error=NULL,"
+                            + "content_changed=TRUE,updated_at=CURRENT_TIMESTAMP WHERE document_id=?",
+                    documentId);
+            log(user, "CREATE_WEB_ARTICLE_VERSION", newDocumentId, "WAITING_REVIEW");
+            return Map.of(
+                    "documentId", newDocumentId,
+                    "previousDocumentId", documentId,
+                    "status", processed.get("status"),
+                    "contentKind", text(refreshed.get("content_kind")),
+                    "contentChanged", true,
+                    "cacheHit", processed.get("cacheHit"));
+        }
         String canonical = text(refreshed.get("canonical_url"));
         Integer duplicate = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM source_document WHERE id<>? AND (canonical_url=? OR content_hash=?)",
-                Integer.class, documentId, canonical, text(refreshed.get("content_hash")));
+                Integer.class, documentId, canonical, refreshedHash);
         if (duplicate != null && duplicate > 0) {
             throw new BusinessException(409, "重新采集结果与其他材料重复");
         }

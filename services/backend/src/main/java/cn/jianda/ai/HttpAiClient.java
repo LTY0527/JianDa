@@ -99,6 +99,7 @@ public class HttpAiClient implements AiClient {
         request.put("processing_job_id", context.get("processing_job_id"));
             request.put("trace_id", context.getOrDefault("trace_id", ""));
             request.put("content_kind", context.get("content_kind"));
+            request.put("prompt_version", context.get("prompt_version"));
         return sendJson(analyzeUri, request, "AI analysis", 60_000);
     }
 

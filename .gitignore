@@ -9,6 +9,7 @@ uploads/
 __pycache__/
 .pytest_cache/
 .venv/
+.claude/
 
 
 services/backend/data/

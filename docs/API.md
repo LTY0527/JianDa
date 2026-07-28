@@ -14,7 +14,7 @@
 - `GET /api/documents`，`GET /api/documents/{id}`
 - `POST /api/documents/{id}/process`
 - `GET /api/documents/{id}/jobs|segments|fields|generated`
-- `GET /api/documents/{id}/original-file`：需要 JWT 和文档所属机构权限；返回原始 PDF/PNG/JPG，支持 `Range`、`ETag` 和 `X-Content-SHA256`。
+- `GET /api/documents/{id}/original-file`：需要 JWT 和文档所属机构权限；返回原始 PDF/PNG/JPG，支持 `Range`、`ETag` 和 `X-Content-SHA256`。默认 `inline` 供阅读器在线读取；传 `download=true` 时返回 `attachment` 和原始文件名。
 
 预识别结果的 `authority_status` 仅表示材料内部证据：`DOCUMENT_EVIDENCE` 为存在明确发布机构证据，`UNCONFIRMED` 为无法确认，`CONFLICT` 为候选冲突；不表示官网或外部数据库已经核验。正式处理结果的 `generated` 可包含 `SESSIONS`，其中日期、时间、地点和原文追溯信息作为同一场次保存。
 
@@ -53,6 +53,12 @@ v1.1 通用结构还包括：
 导入会校验来源启用状态与 URL 主机名，并以来源 URL 和规范化正文 SHA-256 拦截重复内容。
 
 ### 白名单网页文章
+
+- `GET /api/web-articles/sources`：平台管理员查看网页域名白名单、来源等级、图片缓存、自动采集预留配置和最近采集信息。
+- `GET /api/web-articles/jobs`：平台管理员查看采集任务。
+- `POST /api/web-articles/jobs/{jobId}/stop`：停止仍在等待或运行的任务。
+- `POST /api/web-articles/{documentId}/recrawl`：正文 hash 未变化时返回 `contentChanged=false`、`cacheHit=true`，不清理结果且不调用 DeepSeek；已发布网页变化时保留线上版本，创建带 `previous_version_id` 的新材料，完成 AI 处理后进入待人工审核。
+- `GET /api/public/items/{slug}/original-file`：只允许已公开原文件的 PDF/IMAGE；WEB_ARTICLE、物理文件缺失或未授权时返回 404。传 `download=true` 切换为下载。
 
 - `GET /api/web-articles/sources`：仅 `PLATFORM_ADMIN`；查看网页来源注册表、权威级别、速率和图片缓存许可。
 - `POST /api/web-articles/preview`：`PLATFORM_ADMIN`、`ORG_ADMIN`；校验白名单与 robots.txt，提取 canonical URL、标题、来源、发布时间、正文和封面候选；预览不会创建正式材料。

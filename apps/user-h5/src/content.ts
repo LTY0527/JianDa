@@ -9,8 +9,58 @@ export function contentKind(item: PublicItem): "news" | "guide" {
   return newsCategories.includes(item.category) ? "news" : "guide";
 }
 
+export function stripMarkdown(value: string): string {
+  return String(value || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/(^|\s)#{1,6}\s*/g, "$1")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/[*_~`>|]/g, " ");
+}
+
+export function sanitizeDisplayText(value: string): string {
+  let text = String(value || "").trim();
+  if (
+    (text.startsWith("{") && text.endsWith("}")) ||
+    (text.startsWith("[") && text.endsWith("]"))
+  ) {
+    try {
+      const parsed = JSON.parse(text);
+      text = Array.isArray(parsed)
+        ? parsed.join(" ")
+        : typeof parsed === "object" && parsed
+          ? Object.values(parsed).filter((item) => typeof item === "string").join(" ")
+          : String(parsed);
+    } catch {
+      // Keep malformed source text and clean it below.
+    }
+  }
+  const element = document.createElement("textarea");
+  element.innerHTML = text;
+  return stripMarkdown(element.value)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\\[nrt]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function normalizeTitle(title: string): string {
+  return sanitizeDisplayText(title)
+    .replace(/\s+\d{12,}$/, "")
+    .replace(/\s*[-_—|｜]\s*(新华网|人民网|央视网|中国政府网|中新网|光明网)\s*$/i, "")
+    .trim();
+}
+
+export function truncateSummary(summary: string, maxLength = 120): string {
+  const cleaned = sanitizeDisplayText(summary);
+  return cleaned.length > maxLength
+    ? `${cleaned.slice(0, maxLength).replace(/[，、；：\s]+$/, "")}…`
+    : cleaned;
+}
+
 export function cleanDisplayTitle(title: string): string {
-  return title.replace(/\s+\d{12,}$/, "").trim();
+  return normalizeTitle(title);
 }
 
 export function isFavorite(id: number): boolean {

@@ -19,7 +19,7 @@ export interface PublicItem {
   source_url?: string;
   content_kind?: string;
   cover_image_url?: string;
-  cover_image_type?: "ORIGINAL_COVER" | "ARTICLE_IMAGE" | "CATEGORY_DEFAULT" | "AI_ILLUSTRATION";
+  cover_image_type?: "ORIGINAL_COVER" | "ARTICLE_IMAGE" | "CATEGORY_DEFAULT" | "AI_ILLUSTRATION" | "EDITOR_UPLOAD";
   image_source_name?: string;
   image_source_url?: string;
   image_alt_text?: string;
@@ -82,9 +82,9 @@ export async function fetchDetail(slug: string): Promise<Record<string, any>> {
   return response.data.data;
 }
 
-export function publicOriginalFileUrl(slug: string): string {
+export function publicOriginalFileUrl(slug: string, download = false): string {
   const base = String(import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
-  return `${base}/public/items/${encodeURIComponent(slug)}/original-file`;
+  return `${base}/public/items/${encodeURIComponent(slug)}/original-file${download ? "?download=true" : ""}`;
 }
 
 export async function setFavorite(

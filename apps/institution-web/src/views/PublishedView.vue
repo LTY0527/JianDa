@@ -6,6 +6,7 @@ import { documentApi, type DocumentRow } from "../api/documents";
 import { apiMessage } from "../api/http";
 import { buildH5GuideUrl } from "../utils/h5-url";
 import { ExternalLink, RotateCcw, Search } from "lucide-vue-next";
+import { formatDisplayDate } from "../utils/display";
 
 const rows = ref<DocumentRow[]>([]);
 const loading = ref(true);
@@ -14,7 +15,8 @@ const query = ref("");
 const withdrawingId = ref<number | null>(null);
 
 function h5GuideUrl(documentId: number): string {
-  return buildH5GuideUrl(`guide-${documentId}`, {
+  const row = rows.value.find((item) => item.id === documentId);
+  return buildH5GuideUrl(`${row?.source_type === "WEB_ARTICLE" ? "news" : "guide"}-${documentId}`, {
     configuredBaseUrl: import.meta.env.VITE_H5_BASE_URL,
     isDev: import.meta.env.DEV,
     protocol: window.location.protocol,
@@ -90,7 +92,7 @@ onMounted(load);
               <b>{{ row.title }}</b>
             </td>
             <td>{{ row.organization_name }}</td>
-            <td>{{ String(row.updated_at).slice(0, 10) }}</td>
+            <td>{{ formatDisplayDate(row.updated_at) }}</td>
             <td><StatusTag status="PUBLISHED" text="已发布" /></td>
             <td>
               <a

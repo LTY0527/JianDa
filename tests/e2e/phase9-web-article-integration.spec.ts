@@ -73,6 +73,9 @@ test("上传页可预览网页文章并使用真实文档 ID 进入处理页", a
   await page.route("**/api/web-articles/import", (route) =>
     route.fulfill(api({ documentId: 27, imageReviewRequired: true })),
   );
+  await page.route("**/api/documents/27/process", (route) =>
+    route.fulfill(api({ documentId: 27, status: "WAITING_REVIEW" })),
+  );
   await page.route("**/api/documents/27", (route) =>
     route.fulfill(
       api({
@@ -108,8 +111,10 @@ test("上传页可预览网页文章并使用真实文档 ID 进入处理页", a
 
   await expect(page.getByRole("heading", { name: "三伏天老年人健康提示" })).toBeVisible();
   await expect(page.getByText("新华网")).toBeVisible();
+  await page.getByText("技术信息", { exact: true }).click();
   await expect(page.getByText("https://www.news.cn/example/c.html")).toBeVisible();
-  await expect(page.getByText("robots：ALLOWED")).toBeVisible();
+  await expect(page.getByText("抓取规则")).toBeVisible();
+  await expect(page.getByText("ALLOWED")).toBeVisible();
 
   await page.getByRole("button", { name: "导入并开始处理" }).click();
   await expect(page).toHaveURL(
@@ -128,7 +133,7 @@ test("工作台和材料列表将网页文章计入待审核", async ({ page }) 
   await expect(
     page.getByRole("cell", { name: /三伏天老年人健康提示/ }),
   ).toBeVisible();
-  await expect(page.getByText(/新华网.*健康.*2026-07-26/)).toBeVisible();
+  await expect(page.getByText(/新华网.*健康.*2026年7月26日/)).toBeVisible();
 
   await page.goto(`${institutionUrl}/documents`);
   await expect(page.getByText("三伏天老年人健康提示")).toBeVisible();

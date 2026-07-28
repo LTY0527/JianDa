@@ -3,8 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const institutionUrl = "http://127.0.0.1:5173";
-const h5Url = "http://127.0.0.1:5174";
+const institutionUrl =
+  process.env.JIANDA_INSTITUTION_TEST_URL ?? "http://127.0.0.1:5173";
+const h5Url = process.env.JIANDA_H5_TEST_URL ?? "http://127.0.0.1:5174";
 const acceptanceArtifactDir = path.resolve("artifacts/phase7-3");
 fs.mkdirSync(acceptanceArtifactDir, { recursive: true });
 

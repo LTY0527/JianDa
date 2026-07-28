@@ -17,6 +17,7 @@ import {
   RefreshCw,
   TriangleAlert,
 } from "lucide-vue-next";
+import { authorityLevelLabel, contentKindLabel } from "../utils/display";
 const route = useRoute();
 const documentId = Number(route.params.id);
 const fields = ref<any[]>([]);
@@ -175,7 +176,7 @@ onMounted(load);
           ><b>{{ isWebArticle ? "内容类型识别与 AI 适老化处理" : "AI 分析" }}</b
           ><small>{{
             fields.length
-              ? `${isWebArticle ? `${document?.content_kind || "网页文章"} · ` : ""}已生成 ${fields.length} 个可追溯字段`
+              ? `${isWebArticle ? `${contentKindLabel(document?.content_kind)} · ` : ""}已生成 ${fields.length} 个可追溯字段`
               : failed || emptyReviewResult
                 ? "未生成可审核字段"
                 : "正在等待分析结果"
@@ -192,8 +193,8 @@ onMounted(load);
       </div>
     </section>
     <section v-if="isWebArticle && document" class="panel web-process-facts">
-      <div><small>来源等级</small><b>{{ document.source_authority_level || "待确认" }}</b></div>
-      <div><small>内容类型</small><b>{{ document.content_kind || "待确认" }}</b></div>
+      <div><small>来源等级</small><b>{{ authorityLevelLabel(document.source_authority_level) }}</b></div>
+      <div><small>内容类型</small><b>{{ contentKindLabel(document.content_kind) }}</b></div>
       <div><small>正文字符</small><b>{{ textLength }}</b></div>
       <div><small>段落数量</small><b>{{ segmentCount }}</b></div>
       <div><small>正文图片</small><b>{{ imageCount }}</b></div>

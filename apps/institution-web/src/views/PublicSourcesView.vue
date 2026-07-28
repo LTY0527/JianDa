@@ -3,9 +3,21 @@ import { onMounted, reactive, ref } from "vue";
 import { Plus, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import { apiMessage } from "../api/http";
-import { publicSourceApi, type PublicSource } from "../api/publicSources";
+import {
+  publicSourceApi,
+  type CrawlJob,
+  type PublicSource,
+  type WebSourceRegistry,
+} from "../api/publicSources";
+import {
+  authorityLevelLabel,
+  formatDisplayDateTime,
+  statusLabel,
+} from "../utils/display";
 
 const sources = ref<PublicSource[]>([]);
+const registries = ref<WebSourceRegistry[]>([]);
+const jobs = ref<CrawlJob[]>([]);
 const loading = ref(true);
 const saving = ref(false);
 const error = ref("");
@@ -22,7 +34,14 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    sources.value = (await publicSourceApi.sources()).data.data;
+    const [sourceResponse, registryResponse, jobResponse] = await Promise.all([
+      publicSourceApi.sources(),
+      publicSourceApi.webRegistries(),
+      publicSourceApi.crawlJobs(),
+    ]);
+    sources.value = sourceResponse.data.data;
+    registries.value = registryResponse.data.data;
+    jobs.value = jobResponse.data.data;
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -48,6 +67,15 @@ async function createSource() {
 async function toggle(source: PublicSource) {
   try {
     await publicSourceApi.setEnabled(source.id, !source.enabled);
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
+async function stopJob(job: CrawlJob) {
+  try {
+    await publicSourceApi.stopCrawlJob(job.id);
     await load();
   } catch (cause) {
     error.value = apiMessage(cause);
@@ -93,6 +121,36 @@ onMounted(load);
       </table>
       <div v-if="loading" class="empty-state">正在加载权威来源…</div>
       <div v-else-if="sources.length === 0" class="empty-state">暂无权威来源，请先新增。</div>
+    </section>
+    <section class="panel">
+      <div class="panel-title"><div><h2>网页白名单来源</h2><p>图片缓存、自动采集和最近采集情况。</p></div></div>
+      <table class="data-table">
+        <thead><tr><th>来源</th><th>来源等级</th><th>图片缓存</th><th>自动采集</th><th>最后采集</th><th>最近错误</th></tr></thead>
+        <tbody>
+          <tr v-for="source in registries" :key="source.id">
+            <td><b>{{source.source_name}}</b><small>{{source.domain}}</small></td>
+            <td>{{authorityLevelLabel(source.authority_level)}}</td>
+            <td>{{source.allow_image_cache?"允许":"不缓存"}}</td>
+            <td>{{source.allow_auto_crawl?"已启用":"未启用"}}</td>
+            <td>{{formatDisplayDateTime(source.last_crawled_at)}}</td>
+            <td>{{source.last_error||"无"}}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section class="panel">
+      <div class="panel-title"><div><h2>采集任务</h2><p>查看成功、未变化、失败和等待审核状态。</p></div></div>
+      <table class="data-table">
+        <thead><tr><th>来源</th><th>文章地址</th><th>状态</th><th>最后成功</th><th>错误</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-for="job in jobs" :key="job.id">
+            <td>{{job.source_name}}</td><td><a :href="job.original_url" target="_blank" rel="noreferrer">查看官方页面</a></td>
+            <td>{{statusLabel(job.status)}}</td><td>{{formatDisplayDateTime(job.last_success_at)}}</td>
+            <td>{{job.last_error||"无"}}</td>
+            <td><button v-if="['QUEUED','RUNNING'].includes(job.status)" class="text-action danger" @click="stopJob(job)">停止任务</button><RouterLink v-else-if="job.document_id" :to="`/documents/${job.document_id}/process`">查看材料</RouterLink></td>
+          </tr>
+        </tbody>
+      </table>
     </section>
   </div>
 </template>

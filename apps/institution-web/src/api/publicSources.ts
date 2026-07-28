@@ -77,6 +77,31 @@ export interface WebArticlePreview {
   image_license_note?: string;
 }
 
+export interface WebSourceRegistry {
+  id: number;
+  domain: string;
+  source_name: string;
+  authority_level: string;
+  enabled: boolean;
+  allow_image_cache: boolean;
+  allow_auto_crawl: boolean;
+  last_crawled_at?: string;
+  last_error?: string;
+  section_url?: string;
+}
+
+export interface CrawlJob {
+  id: number;
+  document_id?: number;
+  source_name: string;
+  domain: string;
+  original_url: string;
+  status: string;
+  content_changed: boolean;
+  last_success_at?: string;
+  last_error?: string;
+}
+
 export const publicSourceApi = {
   sources: () => http.get<ApiResponse<PublicSource[]>>("/public-sources"),
   createSource: (payload: {
@@ -120,8 +145,18 @@ export const publicSourceApi = {
     http.post<ApiResponse<null>>(`/web-articles/${documentId}/cover/confirm`),
   useCategoryDefaultCover: (documentId: number) =>
     http.post<ApiResponse<null>>(`/web-articles/${documentId}/cover/category-default`),
+  selectArticleCover: (documentId: number, imageUrl: string) =>
+    http.post<ApiResponse<null>>(`/web-articles/${documentId}/cover/article-image`, {
+      imageUrl,
+    }),
   recrawlWebArticle: (documentId: number) =>
     http.post<ApiResponse<{ documentId: number; contentKind: string }>>(
       `/web-articles/${documentId}/recrawl`,
     ),
+  webRegistries: () =>
+    http.get<ApiResponse<WebSourceRegistry[]>>("/web-articles/sources"),
+  crawlJobs: () =>
+    http.get<ApiResponse<CrawlJob[]>>("/web-articles/jobs"),
+  stopCrawlJob: (jobId: number) =>
+    http.post<ApiResponse<null>>(`/web-articles/jobs/${jobId}/stop`),
 };

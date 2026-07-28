@@ -4,7 +4,7 @@ const defaults: Record<string, string> = {
   ANTI_FRAUD: "/images/defaults/fraud.svg",
   COMMUNITY_SERVICE: "/images/defaults/community.svg",
   SERVICE_NOTICE: "/images/defaults/service.svg",
-  GENERAL_NEWS: "/images/defaults/culture.svg",
+  GENERAL_NEWS: "/images/defaults/general.svg",
   健康: "/images/defaults/health.svg",
   养老政策: "/images/defaults/policy.svg",
   防诈: "/images/defaults/fraud.svg",

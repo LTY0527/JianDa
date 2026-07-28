@@ -7,6 +7,13 @@ import {
   publicSourceApi,
   type WebArticlePreview,
 } from "../api/publicSources";
+import { documentApi } from "../api/documents";
+import {
+  authorityLevelLabel,
+  contentKindLabel,
+  coverTypeLabel,
+  formatDisplayDate,
+} from "../utils/display";
 
 const emit = defineEmits<{
   imported: [documentId: number];
@@ -41,6 +48,7 @@ async function importArticle() {
   try {
     const response = await publicSourceApi.importWebArticle(webUrl.value.trim());
     const documentId = response.data.data.documentId;
+    await documentApi.process(documentId);
     emit("imported", documentId);
     await router.push({
       path: `/documents/${documentId}/process`,
@@ -91,20 +99,25 @@ async function importArticle() {
       <div class="web-preview-card__content">
         <div class="web-preview-card__source">
           <b>{{ preview.source_name }}</b>
-          <span>权威级别 {{ preview.authority_level }}</span>
-          <span>robots：{{ preview.robots_status }}</span>
+          <span>{{ authorityLevelLabel(preview.authority_level) }}</span>
         </div>
         <h2>{{ preview.title }}</h2>
         <p>{{ preview.content_preview }}</p>
         <dl>
-          <div><dt>内容分类</dt><dd>{{ preview.content_kind }}</dd></div>
+          <div><dt>内容分类</dt><dd>{{ contentKindLabel(preview.content_kind) }}</dd></div>
           <div>
             <dt>原始发布时间</dt>
-            <dd>{{ preview.published_at?.slice(0, 10) || "待人工确认" }}</dd>
+            <dd>{{ formatDisplayDate(preview.published_at) }}</dd>
           </div>
-          <div><dt>canonical URL</dt><dd>{{ preview.canonical_url }}</dd></div>
-          <div><dt>封面类型</dt><dd>{{ preview.cover_image_type }}</dd></div>
+          <div><dt>封面类型</dt><dd>{{ coverTypeLabel(preview.cover_image_type) }}</dd></div>
         </dl>
+        <details class="technical-info">
+          <summary>技术信息</summary>
+          <dl>
+            <div><dt>规范网址</dt><dd>{{ preview.canonical_url }}</dd></div>
+            <div><dt>抓取规则</dt><dd>{{ preview.robots_status }}</dd></div>
+          </dl>
+        </details>
         <p
           v-for="warning in preview.warnings"
           :key="warning"

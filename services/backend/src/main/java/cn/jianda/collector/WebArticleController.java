@@ -29,6 +29,19 @@ public class WebArticleController {
         return ApiResponse.ok(service.registries());
     }
 
+    @GetMapping("/jobs")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ApiResponse<List<Map<String, Object>>> jobs() {
+        return ApiResponse.ok(service.crawlJobs());
+    }
+
+    @PostMapping("/jobs/{jobId}/stop")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ApiResponse<Void> stopJob(@PathVariable long jobId) {
+        service.stopJob(jobId);
+        return ApiResponse.ok(null);
+    }
+
     @PostMapping("/preview")
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN')")
     public ApiResponse<Map<String, Object>> preview(@Valid @RequestBody UrlRequest request) {
@@ -55,6 +68,14 @@ public class WebArticleController {
         return ApiResponse.ok(null);
     }
 
+    @PostMapping("/{documentId}/cover/article-image")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN','REVIEWER')")
+    public ApiResponse<Void> articleImage(
+            @PathVariable long documentId, @Valid @RequestBody CoverRequest request) {
+        service.selectArticleCover(documentId, request.imageUrl(), UserContext.current());
+        return ApiResponse.ok(null);
+    }
+
     @PostMapping("/{documentId}/recrawl")
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN')")
     public ApiResponse<Map<String, Object>> recrawl(@PathVariable long documentId) {
@@ -62,4 +83,5 @@ public class WebArticleController {
     }
 
     public record UrlRequest(@NotBlank String url) {}
+    public record CoverRequest(@NotBlank String imageUrl) {}
 }

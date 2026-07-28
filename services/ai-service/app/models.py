@@ -61,6 +61,7 @@ class TextRequest(BaseModel):
     processing_job_id: int | None = None
     trace_id: str = ""
     content_kind: ContentKind | None = None
+    prompt_version: str | None = None
 
 
 class ExtractedField(BaseModel):
@@ -185,6 +186,14 @@ class ProcessingMetrics(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    source_char_count: int = 0
+    accessible_char_count: int = 0
+    summary_compression_ratio: float = 0
+    key_fact_count: int = 0
+    action_item_count: int = 0
+    trace_pass_rate: float = 0
+    hallucinated_field_count: int = 0
+    markdown_residue_count: int = 0
 
 
 class StepCard(BaseModel):
@@ -193,6 +202,37 @@ class StepCard(BaseModel):
     order: int = Field(ge=1)
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)
+
+
+class ActionChecklistItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: str = Field(min_length=1)
+    priority: Literal["立即", "近期", "了解即可"]
+    source_quote: str = Field(min_length=1)
+    segment_id: int
+
+
+class KeyFactItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    label: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+    source_quote: str = Field(min_length=1)
+    segment_id: int
+
+
+class FaqItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    question: str = Field(min_length=1)
+    answer: str = Field(min_length=1)
+    source_quote: str = Field(min_length=1)
+    segment_id: int | None = None
+
+
+class ContentScope(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    national_or_local: Literal["全国", "地方", "具体机构", "原文未说明"]
+    applicable_region: str | None = None
+    needs_personal_action: bool | None = None
 
 
 class AnalyzeResult(BaseModel):
@@ -211,6 +251,14 @@ class AnalyzeResult(BaseModel):
     result_delivery: list[ResultDelivery] = Field(default_factory=list)
     deadline_rules: list[DeadlineRule] = Field(default_factory=list)
     amendments: list[Amendment] = Field(default_factory=list)
+    quick_summary: list[str] = Field(default_factory=list)
+    why_it_matters: list[str] = Field(default_factory=list)
+    action_checklist: list[ActionChecklistItem] = Field(default_factory=list)
+    key_facts: list[KeyFactItem] = Field(default_factory=list)
+    common_mistakes: list[str] = Field(default_factory=list)
+    faq: list[FaqItem] = Field(default_factory=list)
+    scope: ContentScope | None = None
+    uncertainties: list[str] = Field(default_factory=list)
     metrics: ProcessingMetrics = Field(default_factory=ProcessingMetrics)
 
 
@@ -260,6 +308,15 @@ class RewriteResponse(BaseModel):
     warnings: list[str]
     term_explanations: dict[str, str]
     audio_script: str = Field(min_length=1)
+    quick_summary: list[str] = Field(default_factory=list)
+    why_it_matters: list[str] = Field(default_factory=list)
+    action_checklist: list[ActionChecklistItem] = Field(default_factory=list)
+    key_facts: list[KeyFactItem] = Field(default_factory=list)
+    common_mistakes: list[str] = Field(default_factory=list)
+    faq: list[FaqItem] = Field(default_factory=list)
+    terms: dict[str, str] = Field(default_factory=dict)
+    scope: ContentScope | None = None
+    uncertainties: list[str] = Field(default_factory=list)
 
     @field_validator("plain_text", "audio_script")
     @classmethod

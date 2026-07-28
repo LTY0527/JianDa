@@ -73,7 +73,7 @@ public class PublicController {
 
     @GetMapping("/items/{slug}")
     public ApiResponse<Map<String, Object>> detail(@PathVariable String slug) {
-        List<Map<String, Object>> rows = jdbc.queryForList("SELECT p.*,d.raw_text,d.page_count,d.allow_public_original,d.mime_type,"
+        List<Map<String, Object>> rows = jdbc.queryForList("SELECT p.*,d.raw_text,d.page_count,d.allow_public_original,d.mime_type,d.storage_path,"
                 + "d.source_type,d.original_url,d.canonical_url,d.original_published_at,d.crawl_time,"
                 + "d.cover_image_type,d.image_source_name,d.image_source_url,d.image_alt_text,d.image_cached,"
                 + "d.image_license_note,d.image_width,d.image_height,d.original_page_available "
@@ -97,7 +97,7 @@ public class PublicController {
                 "SELECT field_type,field_label,field_value,page_no,segment_id,source_quote "
                         + "FROM extracted_field WHERE document_id=? ORDER BY id", documentId);
         result.put("fields", fields);
-        result.put("original_file_available", Boolean.TRUE.equals(result.get("allow_public_original")));
+        result.put("original_file_available", documentService.publicOriginalFileAvailable(result));
         if (!generated.containsKey("SESSIONS")) {
             List<Map<String, Object>> sessions =
                     sessionsFromSource(String.valueOf(result.getOrDefault("raw_text", "")), fields);
@@ -109,8 +109,9 @@ public class PublicController {
     @GetMapping("/items/{slug}/original-file")
     public ResponseEntity<byte[]> originalFile(
             @PathVariable String slug,
-            @RequestHeader(value = "Range", required = false) String range) throws IOException {
-        return OriginalFileHttp.response(documentService.publicOriginalFile(slug), range);
+            @RequestHeader(value = "Range", required = false) String range,
+            @RequestParam(defaultValue = "false") boolean download) throws IOException {
+        return OriginalFileHttp.response(documentService.publicOriginalFile(slug), range, download);
     }
 
     @PostMapping("/items/{id}/favorite")
@@ -118,6 +119,11 @@ public class PublicController {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM favorite WHERE anonymous_user_id=? AND published_item_id=?", Integer.class, user, id);
         if (count == 0) jdbc.update("INSERT INTO favorite(anonymous_user_id,published_item_id) VALUES (?,?)", user, id);
         return ApiResponse.ok(null);
+    }
+
+    @GetMapping("/items/{slug}/cover")
+    public ResponseEntity<byte[]> cover(@PathVariable String slug) throws IOException {
+        return OriginalFileHttp.response(documentService.publicCover(slug), null, false);
     }
 
     @DeleteMapping("/items/{id}/favorite")

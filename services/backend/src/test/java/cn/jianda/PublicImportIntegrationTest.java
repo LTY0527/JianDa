@@ -130,7 +130,8 @@ class PublicImportIntegrationTest {
         mvc.perform(post("/api/web-articles/{id}/recrawl", id).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.contentKind").value("HEALTH_EDUCATION"))
-                .andExpect(jsonPath("$.data.contentChanged").value(true));
+                .andExpect(jsonPath("$.data.contentChanged").value(false))
+                .andExpect(jsonPath("$.data.cacheHit").value(true));
         mvc.perform(get("/api/documents/{id}/segments", id).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1));
@@ -139,7 +140,8 @@ class PublicImportIntegrationTest {
                 .andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
         verify(aiClient).analyze(
                 anyString(), anyString(), anyString(), anyString(), anyList(),
-                argThat(context -> "b".repeat(64).equals(context.get("content_sha256"))));
+                argThat(context -> "b".repeat(64).equals(context.get("content_sha256"))
+                        && "web-v1.1".equals(context.get("prompt_version"))));
 
         mvc.perform(post("/api/web-articles/import").header("Authorization", auth)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -268,7 +270,51 @@ class PublicImportIntegrationTest {
         mvc.perform(get("/api/public/items/{slug}", slug))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.source_url").value(url))
-                .andExpect(jsonPath("$.data.image_source_url").value(url));
+                .andExpect(jsonPath("$.data.image_source_url").value(url))
+                .andExpect(jsonPath("$.data.original_file_available").value(false));
+        mvc.perform(get("/api/public/items/{slug}/original-file", slug))
+                .andExpect(status().isNotFound());
+
+        when(aiClient.previewWebArticle(org.mockito.ArgumentMatchers.eq(url), anyBoolean())).thenReturn(Map.ofEntries(
+                Map.entry("title", "老年人科学减重（更新版）"),
+                Map.entry("source_name", "新华网"),
+                Map.entry("published_at", "2026-07-16T08:52:45+08:00"),
+                Map.entry("author", "新华社记者"),
+                Map.entry("cover_image_url", "https://www.news.cn/image/cover-updated.png"),
+                Map.entry("cover_image_type", "ORIGINAL_COVER"),
+                Map.entry("image_alt_text", "老年人进行适量运动"),
+                Map.entry("image_width", 1200),
+                Map.entry("image_height", 675),
+                Map.entry("image_hash", "f".repeat(64)),
+                Map.entry("canonical_url", url),
+                Map.entry("content_preview", "老年人减重应保持吃动平衡，新增了运动建议。"),
+                Map.entry("extracted_text", "老年人减重应保持吃动平衡，不建议采取极端节食。新增了每日适量运动建议。"),
+                Map.entry("original_html", "<main><p>老年人减重应保持吃动平衡，不建议采取极端节食。新增了每日适量运动建议。</p></main>"),
+                Map.entry("content_hash", "f".repeat(64)),
+                Map.entry("content_kind", "HEALTH_EDUCATION"),
+                Map.entry("classification_confidence", 0.98),
+                Map.entry("robots_allowed", true),
+                Map.entry("robots_status", "ALLOWED"),
+                Map.entry("original_page_available", true),
+                Map.entry("warnings", List.of())));
+        String versioned = mvc.perform(post("/api/web-articles/{id}/recrawl", documentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.previousDocumentId").value(documentId))
+                .andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"))
+                .andExpect(jsonPath("$.data.contentChanged").value(true))
+                .andReturn().getResponse().getContentAsString();
+        long newDocumentId = objectMapper.readTree(versioned).path("data").path("documentId").asLong();
+        org.junit.jupiter.api.Assertions.assertNotEquals(documentId, newDocumentId);
+        org.junit.jupiter.api.Assertions.assertEquals(documentId,
+                jdbc.queryForObject("SELECT previous_version_id FROM source_document WHERE id=?",
+                        Long.class, newDocumentId));
+        org.junit.jupiter.api.Assertions.assertEquals("PUBLISHED",
+                jdbc.queryForObject("SELECT processing_status FROM source_document WHERE id=?",
+                        String.class, documentId));
+        mvc.perform(get("/api/public/items/{slug}", slug))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.document_id").value(documentId));
     }
 
     @Test

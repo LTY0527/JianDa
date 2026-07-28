@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">综合资讯默认插图</title>
+  <desc id="desc">由纸张、对话框和城市线条组成的中性公共资讯插图</desc>
+  <rect width="1200" height="675" fill="#eaf1f4"/>
+  <path d="M0 520c180-80 330-70 480 0s315 80 720-20v175H0z" fill="#d5e4e5"/>
+  <rect x="210" y="150" width="520" height="360" rx="24" fill="#fff" stroke="#78959c" stroke-width="10"/>
+  <rect x="280" y="230" width="260" height="22" rx="11" fill="#2f6f73"/>
+  <rect x="280" y="290" width="360" height="18" rx="9" fill="#a9bec2"/>
+  <rect x="280" y="338" width="300" height="18" rx="9" fill="#a9bec2"/>
+  <rect x="280" y="386" width="340" height="18" rx="9" fill="#a9bec2"/>
+  <path d="M780 220h170c44 0 80 34 80 76v68c0 42-36 76-80 76h-54l-70 58 16-58h-62c-44 0-80-34-80-76v-68c0-42 36-76 80-76z" fill="#d89b53"/>
+  <circle cx="807" cy="330" r="12" fill="#fff"/>
+  <circle cx="866" cy="330" r="12" fill="#fff"/>
+  <circle cx="925" cy="330" r="12" fill="#fff"/>
+</svg>

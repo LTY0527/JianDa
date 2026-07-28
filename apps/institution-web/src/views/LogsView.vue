@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import PageHeader from "../components/PageHeader.vue";
 import { Search } from "lucide-vue-next";
 import { apiMessage, http, type ApiResponse } from "../api/http";
+import { formatDisplayDateTime } from "../utils/display";
 
 interface OperationLog {
   id: number;
@@ -87,7 +88,7 @@ onMounted(load);
             <td>{{ actionText[log.action] || log.action }}</td>
             <td>{{ log.target_type }} #{{ log.target_id }}</td>
             <td><span class="success-text">● {{ log.result }}</span></td>
-            <td>{{ String(log.created_at).replace("T", " ").slice(0, 19) }}</td>
+            <td>{{ formatDisplayDateTime(log.created_at) }}</td>
           </tr>
         </tbody>
       </table>

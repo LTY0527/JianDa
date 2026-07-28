@@ -232,7 +232,7 @@ class ExternalLlmProvider(LlmProvider):
             [
                 content_hash,
                 self.settings.model,
-                self.settings.prompt_version,
+                self._prompt_version(request),
                 SCHEMA_VERSION,
                 request.document_type,
                 request.content_kind or "",
@@ -255,6 +255,7 @@ class ExternalLlmProvider(LlmProvider):
 
     def analyze(self, request: TextRequest) -> AnalyzeResult:
         total_started = time.perf_counter()
+        active_prompt_version = self._prompt_version(request)
         cache_key = self._cache_key(request) if request.content_sha256 else ""
         if cache_key and cache_key in _RESULT_CACHE:
             cached = _RESULT_CACHE[cache_key].model_copy(deep=True)
@@ -308,7 +309,7 @@ class ExternalLlmProvider(LlmProvider):
                 {
                     "role": "user",
                     "content": fact_prompt.build_task_prompt(
-                        request, self.settings.prompt_version
+                        request, active_prompt_version
                     ),
                 },
             ],
@@ -316,7 +317,9 @@ class ExternalLlmProvider(LlmProvider):
             max_tokens=self._dynamic_fact_max_tokens(request),
         )
         trace_started = time.perf_counter()
-        model_facts = self._validate_facts(fact_result.payload, request)
+        model_facts = self._validate_facts(
+            fact_result.payload, request, active_prompt_version
+        )
         facts = self._complete_explicit_temporal_facts(model_facts, request)
         facts = self._split_duplicate_audience_eligibility(facts)
         model_sessions = self._validate_sessions(
@@ -345,7 +348,7 @@ class ExternalLlmProvider(LlmProvider):
         )
         rewrite_user = (
             rewrite_prompt.build_task_prompt(
-                request, facts, structured, self.settings.prompt_version
+                request, facts, structured, active_prompt_version
             )
             if (
                 self.settings.prompt_version == "v1.1"
@@ -353,7 +356,7 @@ class ExternalLlmProvider(LlmProvider):
                 or use_news_prompts
             )
             else rewrite_prompt.build_task_prompt(
-                request, facts, sessions, self.settings.prompt_version
+                request, facts, sessions, active_prompt_version
             )
         )
         rewrite_result = self._completion(
@@ -365,7 +368,9 @@ class ExternalLlmProvider(LlmProvider):
             stage="accessible_rewrite",
             max_tokens=self._dynamic_rewrite_max_tokens(request),
         )
-        rewrite = self._validate_rewrite(rewrite_result.payload)
+        rewrite = self._validate_rewrite(
+            rewrite_result.payload, request, active_prompt_version
+        )
         rewrite = self._rewrite_with_sessions(rewrite, facts, sessions)
         metrics = ProcessingMetrics(
             schema_version=SCHEMA_VERSION,
@@ -378,6 +383,23 @@ class ExternalLlmProvider(LlmProvider):
             completion_tokens=fact_result.completion_tokens
             + rewrite_result.completion_tokens,
             total_tokens=fact_result.total_tokens + rewrite_result.total_tokens,
+            source_char_count=len(request.text),
+            accessible_char_count=len(
+                rewrite.plain_text + "".join(rewrite.quick_summary or rewrite.summary)
+            ),
+            summary_compression_ratio=round(
+                len("".join(rewrite.quick_summary or rewrite.summary))
+                / max(1, len(request.text)),
+                4,
+            ),
+            key_fact_count=len(rewrite.key_facts),
+            action_item_count=len(rewrite.action_checklist),
+            trace_pass_rate=1.0 if (
+                rewrite.key_facts or rewrite.action_checklist or rewrite.faq
+            ) else 0.0,
+            markdown_residue_count=len(
+                re.findall(r"#{1,6}\s|\*\*|```|<[^>]+>", rewrite.plain_text)
+            ),
         )
         result = AnalyzeResult(
             fields=[
@@ -407,11 +429,35 @@ class ExternalLlmProvider(LlmProvider):
             result_delivery=structured.result_delivery,
             deadline_rules=structured.deadline_rules,
             amendments=structured.amendments,
+            quick_summary=rewrite.quick_summary or rewrite.summary,
+            why_it_matters=rewrite.why_it_matters,
+            action_checklist=rewrite.action_checklist,
+            key_facts=rewrite.key_facts,
+            common_mistakes=rewrite.common_mistakes,
+            faq=rewrite.faq,
+            scope=rewrite.scope,
+            uncertainties=rewrite.uncertainties,
             metrics=metrics,
         )
         if cache_key:
             _RESULT_CACHE[cache_key] = result.model_copy(deep=True)
         self._log_business_audit(request, metrics)
+        if request.document_type == "public_news":
+            LOGGER.info(
+                "provider=external model=%s prompt_version=%s content_kind=%s "
+                "http_status=200 schema_valid=true trace_valid=true "
+                "rejected_field_count=0 document_id=%s processing_job_id=%s "
+                "prompt_tokens=%s completion_tokens=%s total_tokens=%s elapsed_ms=%s",
+                self.settings.model,
+                active_prompt_version,
+                request.content_kind or "GENERAL_NEWS",
+                request.document_id or 0,
+                request.processing_job_id or 0,
+                metrics.prompt_tokens,
+                metrics.completion_tokens,
+                metrics.total_tokens,
+                metrics.total_ms,
+            )
         return result
 
     def preview_metadata(
@@ -632,12 +678,17 @@ class ExternalLlmProvider(LlmProvider):
         raise ExternalProviderError(f"外部模型{stage}请求失败")
 
     def _validate_facts(
-        self, payload: dict[str, Any], request: TextRequest
+        self,
+        payload: dict[str, Any],
+        request: TextRequest,
+        prompt_version: str | None = None,
     ) -> list[FactField]:
         raw_fields = payload.get("fields")
         raw_field_count = len(raw_fields) if isinstance(raw_fields, list) else 0
         reasons: dict[str, int] = {}
-        if payload.get("prompt_version") != self.settings.prompt_version:
+        if payload.get("prompt_version") != (
+            prompt_version or self.settings.prompt_version
+        ):
             reasons["prompt_version_mismatch"] = 1
             self._log_fact_audit(raw_field_count, raw_field_count, 0, 0, reasons)
             raise ExternalProviderError(
@@ -719,7 +770,10 @@ class ExternalLlmProvider(LlmProvider):
         return trace_valid
 
     def _validate_rewrite(
-        self, payload: dict[str, Any]
+        self,
+        payload: dict[str, Any],
+        request: TextRequest | None = None,
+        prompt_version: str | None = None,
     ) -> RewriteResponse:
         try:
             response = RewriteResponse.model_validate(payload)
@@ -727,8 +781,18 @@ class ExternalLlmProvider(LlmProvider):
             raise ExternalProviderError(
                 "外部模型适老化结果不符合 JSON Schema"
             ) from exc
-        self._check_prompt_version(response.prompt_version)
-        return response
+        self._check_prompt_version(response.prompt_version, prompt_version)
+        if request is None:
+            return response
+        return response.model_copy(update={
+            "action_checklist": self._validate_rewrite_traces(
+                response.action_checklist, request
+            ),
+            "key_facts": self._validate_rewrite_traces(
+                response.key_facts, request
+            ),
+            "faq": self._validate_rewrite_traces(response.faq, request),
+        })
 
     def _complete_explicit_temporal_facts(
         self, facts: list[FactField], request: TextRequest
@@ -1339,11 +1403,43 @@ class ExternalLlmProvider(LlmProvider):
             for field in fields
         )
 
-    def _check_prompt_version(self, actual: str) -> None:
-        if actual != self.settings.prompt_version:
+    def _check_prompt_version(
+        self, actual: str, expected: str | None = None
+    ) -> None:
+        if actual != (expected or self.settings.prompt_version):
             raise ExternalProviderError(
                 "外部模型返回的 prompt_version 与请求不一致"
             )
+
+    def _prompt_version(self, request: TextRequest) -> str:
+        return request.prompt_version or self.settings.prompt_version
+
+    def _validate_rewrite_traces(
+        self, items: list[Any], request: TextRequest
+    ) -> list[Any]:
+        segments = request.segments or [
+            SourceSegment(segment_id=1, page_no=1, text=request.text)
+        ]
+        by_id = {segment.segment_id: segment for segment in segments}
+        valid: list[Any] = []
+        for item in items:
+            segment_id = getattr(item, "segment_id", None)
+            segment = by_id.get(segment_id) if segment_id is not None else next(
+                (
+                    candidate
+                    for candidate in segments
+                    if self._locate_source_quote(
+                        candidate.text, item.source_quote
+                    ) is not None
+                ),
+                None,
+            )
+            if segment is None:
+                continue
+            quote = self._locate_source_quote(segment.text, item.source_quote)
+            if quote is not None:
+                valid.append(item.model_copy(update={"source_quote": quote}))
+        return valid
 
     def _backoff(self, attempt: int) -> None:
         self.sleep(min(0.2 * (2**attempt), 1.0))

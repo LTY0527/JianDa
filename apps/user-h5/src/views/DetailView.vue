@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
 import { fetchDetail, setFavorite } from "../api";
-import { cleanDisplayTitle } from "../content";
+import { cleanDisplayTitle, sanitizeDisplayText } from "../content";
 import { readerPreferences, recordVisit, saveFavorite } from "../library";
 import SpeechRateSelector from "../components/SpeechRateSelector.vue";
 import { useSpeechPlayer } from "../composables/useSpeechPlayer";
@@ -40,6 +40,7 @@ const isPolicy = computed(() => item.value.content_kind === "POLICY_NEWS");
 const error = ref("");
 const copyFeedback = ref("");
 const accessibleText = ref("");
+const readingMode = ref<"quick" | "complete">("quick");
 const item = ref<any>({
   id: 0,
   slug: String(route.params.slug),
@@ -63,9 +64,18 @@ const detail = ref<{
   deliveries: any[];
   deadlines: any[];
   amendments: any[];
+  whyItMatters: string[];
+  actionChecklist: any[];
+  keyFacts: any[];
+  commonMistakes: string[];
+  faq: any[];
+  scope: Record<string, any>;
+  uncertainties: string[];
 }>({ summary: [], materials: [], steps: [], warnings: [], terms: {}, fields: {}, sessions: [],
   audienceRules: { audience: [], conditions: [] }, serviceSchedule: { service_windows: [], closure_rules: [] },
-  conditionalMaterials: [], fees: [], deliveries: [], deadlines: [], amendments: [] });
+  conditionalMaterials: [], fees: [], deliveries: [], deadlines: [], amendments: [],
+  whyItMatters: [], actionChecklist: [], keyFacts: [], commonMistakes: [], faq: [],
+  scope: {}, uncertainties: [] });
 const targetAudience = computed(() =>
   detail.value.audienceRules.audience?.map((item: any) => item.value).filter(Boolean).join("；")
   || detail.value.fields.TARGET_AUDIENCE || "");
@@ -142,6 +152,19 @@ onMounted(async () => {
       ? generated.DEADLINE_RULES : [];
     detail.value.amendments = Array.isArray(generated.AMENDMENTS)
       ? generated.AMENDMENTS : [];
+    detail.value.whyItMatters = Array.isArray(generated.WHY_IT_MATTERS)
+      ? generated.WHY_IT_MATTERS : [];
+    detail.value.actionChecklist = Array.isArray(generated.ACTION_CHECKLIST)
+      ? generated.ACTION_CHECKLIST : [];
+    detail.value.keyFacts = Array.isArray(generated.KEY_FACTS)
+      ? generated.KEY_FACTS : [];
+    detail.value.commonMistakes = Array.isArray(generated.COMMON_MISTAKES)
+      ? generated.COMMON_MISTAKES : [];
+    detail.value.faq = Array.isArray(generated.FAQ) ? generated.FAQ : [];
+    detail.value.scope = generated.CONTENT_SCOPE && typeof generated.CONTENT_SCOPE === "object"
+      ? generated.CONTENT_SCOPE : {};
+    detail.value.uncertainties = Array.isArray(generated.UNCERTAINTIES)
+      ? generated.UNCERTAINTIES : [];
     if (detail.value.sessions.length) {
       const schedule = detail.value.sessions
         .map((session) => `${session.date}接种时间为${session.time}`)
@@ -167,7 +190,8 @@ onMounted(async () => {
       typeof generated.TERM_EXPLANATION === "object"
         ? generated.TERM_EXPLANATION
         : {};
-    accessibleText.value = typeof generated.ACCESSIBLE_TEXT === "string" ? generated.ACCESSIBLE_TEXT : "";
+    accessibleText.value = typeof generated.ACCESSIBLE_TEXT === "string"
+      ? sanitizeDisplayText(generated.ACCESSIBLE_TEXT) : "";
     if (detail.value.terms["预防接种门诊"]) {
       detail.value.terms["预防接种门诊"] =
         "社区卫生服务机构中负责疫苗登记、接种前询问、健康检查和疫苗接种的服务区域。";
@@ -272,18 +296,30 @@ function openOfficial() {
       </section>
       <p v-if="speech.error.value" class="warm-tip">{{ speech.error.value }}</p>
       <template v-if="!loading && !error">
-      <section class="summary-block">
+      <nav v-if="isNews" class="reading-mode-tabs" aria-label="阅读深度">
+        <button type="button" :class="{ active: readingMode === 'quick' }" @click="readingMode = 'quick'">快速看懂</button>
+        <button type="button" :class="{ active: readingMode === 'complete' }" @click="readingMode = 'complete'">完整解读</button>
+      </nav>
+      <section v-if="!isNews || readingMode === 'quick'" class="summary-block">
         <h2>三句话看懂</h2>
         <ol>
           <li v-for="(s, i) in detail.summary">
             <span>{{ i + 1 }}</span>
-            <p>{{ s }}</p>
+            <p>{{ sanitizeDisplayText(s) }}</p>
           </li>
         </ol>
       </section>
-      <section v-if="isNews && accessibleText" class="reader-section article-readable">
+      <section v-if="isNews && readingMode === 'quick' && (detail.whyItMatters.length || accessibleText)" class="reader-section article-readable">
         <h2>与我有什么关系？</h2>
-        <p v-for="paragraph in accessibleText.split(/\n+/).filter(Boolean)" :key="paragraph">{{paragraph}}</p>
+        <p v-for="paragraph in (detail.whyItMatters.length ? detail.whyItMatters : [accessibleText]).filter(Boolean)" :key="paragraph">{{ sanitizeDisplayText(paragraph) }}</p>
+      </section>
+      <section v-if="isNews && readingMode === 'quick' && (detail.actionChecklist.length || detail.steps.length)" class="reader-section step-section">
+        <h2>今天可以做什么？</h2>
+        <ol>
+          <li v-for="(action, index) in (detail.actionChecklist.length ? detail.actionChecklist : detail.steps.map((step) => ({ action: step.join('：'), priority: '了解即可' })))" :key="`${action.action}-${index}`">
+            <span>{{ index + 1 }}</span><div><h3>{{ action.priority || "了解即可" }}</h3><p>{{ sanitizeDisplayText(action.action) }}</p></div>
+          </li>
+        </ol>
       </section>
       <section v-if="isHealth" class="reader-section safety-note">
         <h2><Stethoscope/>健康内容提醒</h2>
@@ -293,7 +329,7 @@ function openOfficial() {
         <h2><Landmark/>政策信息说明</h2>
         <p>{{ detail.fields.ELIGIBILITY || "这是政策资讯，不等同于个人已经取得申请资格。是否需要个人办理，请以官方原文和属地部门通知为准。" }}</p>
       </section>
-      <section v-if="targetAudience || eligibility" class="reader-section">
+      <section v-if="(!isNews || readingMode === 'complete') && (targetAudience || eligibility)" class="reader-section">
         <h2>我是否符合条件？</h2>
         <div class="answer yes">
           <CheckCircle2 />
@@ -303,13 +339,13 @@ function openOfficial() {
           </div>
         </div>
       </section>
-      <section v-if="detail.materials.length" class="reader-section">
+      <section v-if="(!isNews || readingMode === 'complete') && detail.materials.length" class="reader-section">
         <h2>需要准备什么？</h2>
         <ul class="material-list">
           <li v-for="m in detail.materials"><CheckCircle2 />{{ m }}</li>
         </ul>
       </section>
-      <section v-if="detail.serviceSchedule.service_windows?.length || detail.serviceSchedule.closure_rules?.length" class="reader-section structured-section">
+      <section v-if="(!isNews || readingMode === 'complete') && (detail.serviceSchedule.service_windows?.length || detail.serviceSchedule.closure_rules?.length)" class="reader-section structured-section">
         <h2>什么时候能办？</h2>
         <div class="service-window-list">
           <article v-for="(window, index) in detail.serviceSchedule.service_windows" :key="index">
@@ -326,7 +362,7 @@ function openOfficial() {
           <TriangleAlert />{{ rule.value }}
         </p>
       </section>
-      <section v-if="detail.conditionalMaterials.length" class="reader-section structured-section">
+      <section v-if="(!isNews || readingMode === 'complete') && detail.conditionalMaterials.length" class="reader-section structured-section">
         <h2>不同人群带什么？</h2>
         <article v-for="group in detail.conditionalMaterials" :key="group.applicable_to" class="conditional-material-card">
           <h3>{{ group.applicable_to }}</h3>
@@ -334,7 +370,7 @@ function openOfficial() {
           <p v-if="group.optional?.length" class="optional-material"><b>可自愿携带</b>{{ group.optional.join("、") }}</p>
         </article>
       </section>
-      <section v-if="detail.sessions.length" class="reader-section session-section">
+      <section v-if="(!isNews || readingMode === 'complete') && detail.sessions.length" class="reader-section session-section">
         <h2>服务场次</h2>
         <div class="session-list">
           <article v-for="session in detail.sessions" :key="`${session.date}-${session.time}`">
@@ -344,14 +380,14 @@ function openOfficial() {
           </article>
         </div>
       </section>
-      <section v-if="detail.fees.length" class="reader-section structured-section">
+      <section v-if="(!isNews || readingMode === 'complete') && detail.fees.length" class="reader-section structured-section">
         <h2>需要多少钱？</h2>
         <article v-for="feeItem in detail.fees" :key="feeItem.fee_type" class="structured-row">
           <div><b>{{ feeItem.fee_type }}</b><p>{{ feeItem.amount || feeItem.rule }}</p></div>
           <small v-if="feeItem.payment_methods?.length">支付方式：{{ feeItem.payment_methods.join("、") }}</small>
         </article>
       </section>
-      <section v-if="detail.deliveries.length" class="reader-section structured-section">
+      <section v-if="(!isNews || readingMode === 'complete') && detail.deliveries.length" class="reader-section structured-section">
         <h2>怎么办理领取？</h2>
         <article v-for="delivery in detail.deliveries" :key="delivery.method" class="structured-row">
           <div><b>{{ delivery.method }}<em v-if="delivery.optional">（自愿选择）</em></b>
@@ -359,13 +395,13 @@ function openOfficial() {
           </div>
         </article>
       </section>
-      <section v-if="detail.deadlines.length" class="reader-section structured-section">
+      <section v-if="(!isNews || readingMode === 'complete') && detail.deadlines.length" class="reader-section structured-section">
         <h2>什么时候前办理？</h2>
         <article v-for="deadline in detail.deadlines" :key="`${deadline.channel}-${deadline.value}`" class="structured-row">
           <div><b>{{ deadline.channel || "期限规则" }}</b><p>{{ deadline.value }}</p></div>
         </article>
       </section>
-      <section v-if="detail.amendments.length" class="reader-section amendment-section">
+      <section v-if="(!isNews || readingMode === 'complete') && detail.amendments.length" class="reader-section amendment-section">
         <h2>更正信息</h2>
         <article v-for="amendment in detail.amendments" :key="amendment.corrected_information">
           <p><del>{{ amendment.original_information }}</del></p>
@@ -374,7 +410,7 @@ function openOfficial() {
         </article>
       </section>
       <section
-        v-if="registrationDate || location || contact || fee"
+        v-if="(!isNews || readingMode === 'complete') && (registrationDate || location || contact || fee)"
         class="quick-info"
       >
         <article v-if="registrationDate">
@@ -402,7 +438,7 @@ function openOfficial() {
           <CheckCircle2 /><span><small>费用</small><b>{{ fee }}</b></span>
         </article>
       </section>
-      <section v-if="detail.steps.length" class="reader-section step-section">
+      <section v-if="(!isNews || readingMode === 'complete') && detail.steps.length" class="reader-section step-section">
         <h2>办理步骤</h2>
         <ol>
           <li v-for="(s, i) in detail.steps">
@@ -414,13 +450,30 @@ function openOfficial() {
           </li>
         </ol>
       </section>
-      <section v-if="detail.warnings.length" class="reader-section">
+      <section v-if="detail.warnings.length && (!isNews || readingMode === 'quick')" class="reader-section">
         <h2>重要提醒</h2>
         <p v-for="warning in detail.warnings" :key="warning" class="warm-tip">
           <TriangleAlert />{{ warning }}
         </p>
       </section>
-      <section v-if="Object.keys(detail.terms).length" class="reader-section">
+      <template v-if="isNews && readingMode === 'complete'">
+        <section v-if="accessibleText" class="reader-section article-readable">
+          <h2>背景</h2><p>{{ accessibleText }}</p>
+        </section>
+        <section v-if="detail.keyFacts.length" class="reader-section">
+          <h2>关键事实</h2>
+          <dl v-for="fact in detail.keyFacts" :key="`${fact.label}-${fact.value}`"><dt>{{ fact.label }}</dt><dd>{{ fact.value }}</dd></dl>
+        </section>
+        <section v-if="detail.actionChecklist.length" class="reader-section step-section">
+          <h2>行动清单</h2><ol><li v-for="(action, index) in detail.actionChecklist" :key="`${action.action}-${index}`"><span>{{index+1}}</span><div><h3>{{action.priority}}</h3><p>{{action.action}}</p><small v-if="action.source_quote">原文依据：{{action.source_quote}}</small></div></li></ol>
+        </section>
+        <section v-if="detail.commonMistakes.length" class="reader-section"><h2>常见误区</h2><ul class="material-list"><li v-for="mistake in detail.commonMistakes" :key="mistake"><TriangleAlert/>{{mistake}}</li></ul></section>
+        <section v-if="detail.faq.length" class="reader-section"><h2>常见问题</h2><dl v-for="entry in detail.faq" :key="entry.question"><dt>{{entry.question}}</dt><dd>{{entry.answer}}</dd></dl></section>
+        <section v-if="Object.keys(detail.scope).length" class="reader-section"><h2>适用范围</h2><p>{{ [detail.scope.national_or_local, detail.scope.applicable_region].filter(Boolean).join("；") }}</p><p v-if="detail.scope.needs_personal_action === false">当前无需个人办理。</p></section>
+        <section v-if="detail.uncertainties.length" class="reader-section"><h2>尚待确认</h2><p v-for="value in detail.uncertainties" :key="value" class="warm-tip"><TriangleAlert/>{{value}}</p></section>
+        <section v-if="detail.warnings.length" class="reader-section"><h2>重要提醒</h2><p v-for="warning in detail.warnings" :key="warning" class="warm-tip"><TriangleAlert/>{{warning}}</p></section>
+      </template>
+      <section v-if="(!isNews || readingMode === 'complete') && Object.keys(detail.terms).length" class="reader-section">
         <h2>专业术语解释</h2>
         <dl v-for="(explanation, term) in detail.terms" :key="term">
           <dt>{{ term }}</dt>

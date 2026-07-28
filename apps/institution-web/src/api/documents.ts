@@ -149,6 +149,22 @@ export const documentApi = {
     http.get<ApiResponse<DocumentSegment[]>>(`/documents/${id}/segments`),
   originalFile: (id: number) =>
     http.get<Blob>(`/documents/${id}/original-file`, { responseType: "blob" }),
+  originalFileUrl: (id: number, download = false) => {
+    const base = String(import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
+    return `${base}/documents/${id}/original-file${download ? "?download=true" : ""}`;
+  },
+  originalFileHeaders: (): Record<string, string> => {
+    const token = localStorage.getItem("jianda_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  },
+  uploadCover: (id: number, file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    return http.post<ApiResponse<{ filename: string }>>(
+      `/documents/${id}/cover`,
+      body,
+    );
+  },
   jobs: (id: number) =>
     http.get<ApiResponse<ProcessingJob[]>>(`/documents/${id}/jobs`),
   updateField: (
