@@ -81,13 +81,42 @@ export interface WebSourceRegistry {
   id: number;
   domain: string;
   source_name: string;
+  source_type: string;
   authority_level: string;
   enabled: boolean;
-  allow_image_cache: boolean;
-  allow_auto_crawl: boolean;
-  last_crawled_at?: string;
-  last_error?: string;
+  discovery_mode: string;
+  homepage_url: string;
+  rss_url?: string;
+  sitemap_url?: string;
   section_url?: string;
+  daily_crawl_time: string;
+  max_articles_per_run: number;
+  allow_image_candidates: boolean;
+  allow_auto_ai: boolean;
+  daily_article_budget: number;
+  daily_token_budget: number;
+  last_crawled_at?: string;
+  last_status: string;
+  next_run_at?: string;
+  last_error?: string;
+}
+
+export interface SourceRegistryPayload {
+  name: string;
+  domain: string;
+  type: string;
+  authorityLevel: string;
+  homepageUrl: string;
+  rssUrl: string;
+  sitemapUrl: string;
+  sectionUrl: string;
+  discoveryMode: string;
+  dailyCrawlTime: string;
+  maxArticlesPerRun: number;
+  allowImageCandidates: boolean;
+  allowAutoAi: boolean;
+  dailyArticleBudget: number;
+  dailyTokenBudget: number;
 }
 
 export interface CrawlJob {
@@ -154,7 +183,13 @@ export const publicSourceApi = {
       `/web-articles/${documentId}/recrawl`,
     ),
   webRegistries: () =>
-    http.get<ApiResponse<WebSourceRegistry[]>>("/web-articles/sources"),
+    http.get<ApiResponse<WebSourceRegistry[]>>("/source-registries"),
+  createWebRegistry: (payload: SourceRegistryPayload) =>
+    http.post<ApiResponse<WebSourceRegistry>>("/source-registries", payload),
+  updateWebRegistry: (id: number, payload: SourceRegistryPayload) =>
+    http.put<ApiResponse<WebSourceRegistry>>(`/source-registries/${id}`, payload),
+  setWebRegistryEnabled: (id: number, enabled: boolean) =>
+    http.put<ApiResponse<WebSourceRegistry>>(`/source-registries/${id}/enabled`, { enabled }),
   crawlJobs: () =>
     http.get<ApiResponse<CrawlJob[]>>("/web-articles/jobs"),
   stopCrawlJob: (jobId: number) =>

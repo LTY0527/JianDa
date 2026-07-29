@@ -7,10 +7,10 @@ import {
   publicSourceApi,
   type CrawlJob,
   type PublicSource,
+  type SourceRegistryPayload,
   type WebSourceRegistry,
 } from "../api/publicSources";
 import {
-  authorityLevelLabel,
   formatDisplayDateTime,
   statusLabel,
 } from "../utils/display";
@@ -22,7 +22,14 @@ const loading = ref(true);
 const saving = ref(false);
 const error = ref("");
 const showForm = ref(false);
+const editingRegistryId = ref<number | null>(null);
 const form = reactive({ name: "", type: "GOVERNMENT", url: "https://", publisher: "", notes: "" });
+const registryForm = reactive<SourceRegistryPayload>({
+  name: "", domain: "", type: "PUBLIC_INSTITUTION", authorityLevel: "B",
+  homepageUrl: "https://", rssUrl: "", sitemapUrl: "", sectionUrl: "",
+  discoveryMode: "MANUAL", dailyCrawlTime: "03:30", maxArticlesPerRun: 5,
+  allowImageCandidates: false, allowAutoAi: false, dailyArticleBudget: 0, dailyTokenBudget: 0,
+});
 const typeText: Record<string, string> = {
   GOVERNMENT: "政府",
   HOSPITAL: "医院",
@@ -67,6 +74,49 @@ async function createSource() {
 async function toggle(source: PublicSource) {
   try {
     await publicSourceApi.setEnabled(source.id, !source.enabled);
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
+async function saveRegistry() {
+  saving.value = true;
+  error.value = "";
+  try {
+    if (editingRegistryId.value) await publicSourceApi.updateWebRegistry(editingRegistryId.value, registryForm);
+    else await publicSourceApi.createWebRegistry(registryForm);
+    editingRegistryId.value = null;
+    Object.assign(registryForm, {
+      name: "", domain: "", type: "PUBLIC_INSTITUTION", authorityLevel: "B", homepageUrl: "https://",
+      rssUrl: "", sitemapUrl: "", sectionUrl: "", discoveryMode: "MANUAL", dailyCrawlTime: "03:30",
+      maxArticlesPerRun: 5, allowImageCandidates: false, dailyArticleBudget: 0, dailyTokenBudget: 0,
+    });
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    saving.value = false;
+  }
+}
+
+function editRegistry(source: WebSourceRegistry) {
+  editingRegistryId.value = source.id;
+  Object.assign(registryForm, {
+    name: source.source_name, domain: source.domain, type: source.source_type,
+    authorityLevel: source.authority_level, homepageUrl: source.homepage_url,
+    rssUrl: source.rss_url || "", sitemapUrl: source.sitemap_url || "", sectionUrl: source.section_url || "",
+    discoveryMode: source.discovery_mode, dailyCrawlTime: source.daily_crawl_time,
+    maxArticlesPerRun: source.max_articles_per_run, allowImageCandidates: source.allow_image_candidates,
+    allowAutoAi: source.allow_auto_ai, dailyArticleBudget: source.daily_article_budget, dailyTokenBudget: source.daily_token_budget,
+  });
+}
+
+async function toggleRegistry(source: WebSourceRegistry) {
+  const action = source.enabled ? "停用" : "启用";
+  if (!window.confirm(`确认${action}“${source.source_name}”吗？`)) return;
+  try {
+    await publicSourceApi.setWebRegistryEnabled(source.id, !source.enabled);
     await load();
   } catch (cause) {
     error.value = apiMessage(cause);
@@ -123,20 +173,40 @@ onMounted(load);
       <div v-else-if="sources.length === 0" class="empty-state">暂无权威来源，请先新增。</div>
     </section>
     <section class="panel">
-      <div class="panel-title"><div><h2>网页白名单来源</h2><p>图片缓存、自动采集和最近采集情况。</p></div></div>
+      <div class="panel-title"><div><h2>网页白名单来源</h2><p>维护调度入口、文章上限和自动处理预算；新来源默认停用。</p></div></div>
+      <form class="source-create" @submit.prevent="saveRegistry">
+        <div class="form-row">
+          <label class="field">来源名称<input v-model="registryForm.name" required /></label>
+          <label class="field">完整域名<input v-model="registryForm.domain" required placeholder="www.example.gov.cn" /></label>
+        </div>
+        <div class="form-row">
+          <label class="field">来源类型<select v-model="registryForm.type"><option v-for="(label, value) in typeText" :key="value" :value="value">{{ label }}</option></select></label>
+          <label class="field">发现方式<select v-model="registryForm.discoveryMode"><option value="MANUAL">手动</option><option value="RSS">RSS</option><option value="ATOM">Atom</option><option value="SITEMAP">Sitemap</option><option value="SECTION">栏目页</option><option value="MIXED">混合</option></select></label>
+        </div>
+        <label class="field">主页地址<input v-model="registryForm.homepageUrl" type="url" required /></label>
+        <div class="form-row"><label class="field">RSS / Atom 地址<input v-model="registryForm.rssUrl" type="url" /></label><label class="field">Sitemap 地址<input v-model="registryForm.sitemapUrl" type="url" /></label></div>
+        <label class="field">栏目页地址<input v-model="registryForm.sectionUrl" type="url" /></label>
+        <div class="form-row"><label class="field">每日采集时间<input v-model="registryForm.dailyCrawlTime" type="time" required /></label><label class="field">每轮文章上限<input v-model.number="registryForm.maxArticlesPerRun" type="number" min="1" max="100" /></label></div>
+        <div class="form-row"><label class="field">每日文章预算<input v-model.number="registryForm.dailyArticleBudget" type="number" min="0" /></label><label class="field">每日 Token 预算<input v-model.number="registryForm.dailyTokenBudget" type="number" min="0" /></label></div>
+        <label class="field"><input v-model="registryForm.allowImageCandidates" type="checkbox" /> 允许生成图片候选（仍需人工确认版权）</label>
+        <label class="field"><input v-model="registryForm.allowAutoAi" type="checkbox" /> 允许自动 AI（仅在全局开关和预算同时允许时生效）</label>
+        <div class="form-actions"><button v-if="editingRegistryId" type="button" class="btn secondary" @click="editingRegistryId = null">取消编辑</button><button class="btn primary" :disabled="saving">{{ saving ? "正在保存…" : editingRegistryId ? "保存修改" : "新增运营来源" }}</button></div>
+      </form>
       <table class="data-table">
-        <thead><tr><th>来源</th><th>来源等级</th><th>图片缓存</th><th>自动采集</th><th>最后采集</th><th>最近错误</th></tr></thead>
-        <tbody>
+        <thead><tr><th>来源</th><th>调度</th><th>预算</th><th>最近状态</th><th>错误摘要</th><th>操作</th></tr></thead>
+        <tbody v-if="!loading">
           <tr v-for="source in registries" :key="source.id">
-            <td><b>{{source.source_name}}</b><small>{{source.domain}}</small></td>
-            <td>{{authorityLevelLabel(source.authority_level)}}</td>
-            <td>{{source.allow_image_cache?"允许":"不缓存"}}</td>
-            <td>{{source.allow_auto_crawl?"已启用":"未启用"}}</td>
-            <td>{{formatDisplayDateTime(source.last_crawled_at)}}</td>
+            <td><b>{{source.source_name}}</b><small>{{source.domain}} · {{typeText[source.source_type] || source.source_type}}</small></td>
+            <td>{{source.enabled ? "已启用" : "已停用"}} · {{source.discovery_mode}}<small>{{source.daily_crawl_time}} / 每轮 {{source.max_articles_per_run}} 篇</small></td>
+            <td>每日 {{source.daily_article_budget}} 篇<small>{{source.daily_token_budget.toLocaleString()}} Token · 自动 AI {{source.allow_auto_ai ? "开启" : "关闭"}}</small></td>
+            <td>{{statusLabel(source.last_status)}}<small>最近 {{formatDisplayDateTime(source.last_crawled_at)}} · 下次 {{formatDisplayDateTime(source.next_run_at)}}</small></td>
             <td>{{source.last_error||"无"}}</td>
+            <td><button class="text-action" @click="editRegistry(source)">编辑</button><button class="text-action" @click="toggleRegistry(source)">{{source.enabled ? "停用" : "启用"}}</button></td>
           </tr>
         </tbody>
       </table>
+      <div v-if="loading" class="empty-state">正在加载运营来源…</div>
+      <div v-else-if="registries.length === 0" class="empty-state">暂无运营来源，请先新增。</div>
     </section>
     <section class="panel">
       <div class="panel-title"><div><h2>采集任务</h2><p>查看成功、未变化、失败和等待审核状态。</p></div></div>
