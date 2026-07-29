@@ -18,10 +18,12 @@ public class ArticleDiscoveryService {
     private static final Set<String> METHODS = Set.of("RSS", "ATOM", "SITEMAP", "JSON_LD", "SECTION", "MIXED");
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
+    private final CrawlTaskService taskService;
 
-    public ArticleDiscoveryService(JdbcTemplate jdbc, AiClient aiClient) {
+    public ArticleDiscoveryService(JdbcTemplate jdbc, AiClient aiClient, CrawlTaskService taskService) {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
+        this.taskService = taskService;
     }
 
     @Transactional
@@ -42,11 +44,16 @@ public class ArticleDiscoveryService {
         Object rawCandidates = response.get("candidates");
         List<Map<String, Object>> candidates = rawCandidates instanceof List<?> list
                 ? sanitizeCandidates(sourceId, list) : List.of();
+        int duplicates = 0;
+        for (Map<String, Object> candidate : candidates) {
+            if (taskService.hasCanonical(sourceId, String.valueOf(candidate.get("canonical_url")))) duplicates++;
+        }
         List<?> errors = response.get("errors") instanceof List<?> list ? list : List.of();
         jdbc.update("UPDATE source_registry SET last_status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 errors.isEmpty() ? "SUCCESS" : candidates.isEmpty() ? "FAILED" : "PARTIAL_SUCCESS",
                 errors.isEmpty() ? null : safeError(errors), sourceId);
         return Map.of("sourceId", sourceId, "method", selectedMethod, "candidates", candidates,
+                "duplicateCount", duplicates,
                 "errors", errors.stream().limit(100).map(String::valueOf).toList());
     }
 

@@ -119,16 +119,47 @@ export interface SourceRegistryPayload {
   dailyTokenBudget: number;
 }
 
+export interface CrawlJobError {
+  id: number;
+  crawl_job_id: number;
+  source_registry_id: number;
+  failed_url?: string;
+  processing_stage: string;
+  error_code: string;
+  error_summary: string;
+  retryable: boolean;
+  retry_count: number;
+  next_retry_at?: string;
+  resolved_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CrawlJob {
   id: number;
+  source_registry_id: number;
   document_id?: number;
   source_name: string;
   domain: string;
   original_url: string;
-  status: string;
-  content_changed: boolean;
-  last_success_at?: string;
+  canonical_url?: string;
+  status: "PENDING" | "RUNNING" | "SUCCESS" | "PARTIAL_SUCCESS" | "FAILED" | "CANCELLED" | "DISABLED";
+  trigger_type: string;
+  processing_stage: string;
+  discovered_at?: string;
+  started_at?: string;
+  finished_at?: string;
+  discovered_count: number;
+  added_count: number;
+  duplicate_count: number;
+  skipped_count: number;
+  failed_count: number;
+  retry_count: number;
   last_error?: string;
+  lock_owner?: string;
+  created_by?: number;
+  scheduler_identity?: string;
+  errors?: CrawlJobError[];
 }
 
 export const publicSourceApi = {
@@ -190,8 +221,14 @@ export const publicSourceApi = {
     http.put<ApiResponse<WebSourceRegistry>>(`/source-registries/${id}`, payload),
   setWebRegistryEnabled: (id: number, enabled: boolean) =>
     http.put<ApiResponse<WebSourceRegistry>>(`/source-registries/${id}/enabled`, { enabled }),
-  crawlJobs: () =>
-    http.get<ApiResponse<CrawlJob[]>>("/web-articles/jobs"),
+  crawlJobs: (params?: { status?: string; sourceId?: number }) =>
+    http.get<ApiResponse<CrawlJob[]>>("/crawl-tasks", { params }),
+  crawlJob: (jobId: number) =>
+    http.get<ApiResponse<CrawlJob>>(`/crawl-tasks/${jobId}`),
   stopCrawlJob: (jobId: number) =>
-    http.post<ApiResponse<null>>(`/web-articles/jobs/${jobId}/stop`),
+    http.post<ApiResponse<null>>(`/crawl-tasks/${jobId}/cancel`),
+  retryCrawlError: (errorId: number) =>
+    http.post<ApiResponse<{ jobId: number }>>(`/crawl-tasks/errors/${errorId}/retry`),
+  retryCrawlFailures: (jobId: number) =>
+    http.post<ApiResponse<{ jobIds: number[]; count: number }>>(`/crawl-tasks/${jobId}/retry-failures`),
 };

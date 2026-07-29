@@ -182,9 +182,11 @@ public class WebArticleService {
         long documentId = keys.getKey().longValue();
         jdbc.update("INSERT INTO document_segment(document_id,page_no,segment_no,text,start_offset,end_offset) VALUES (?,1,1,?,0,?)",
                 documentId, body, body.length());
-        jdbc.update("INSERT INTO crawl_job(source_registry_id,document_id,original_url,status,last_success_at) "
-                        + "VALUES (?,?,?,'SUCCEEDED',CURRENT_TIMESTAMP)",
-                registryId, documentId, text(preview.get("original_url")));
+        jdbc.update("INSERT INTO crawl_job(source_registry_id,document_id,original_url,canonical_url,status,trigger_type,"
+                        + "processing_stage,discovered_at,started_at,finished_at,last_success_at,discovered_count,added_count,created_by) "
+                        + "VALUES (?,?,?,?,'SUCCESS','MANUAL','IMPORT',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,"
+                        + "CURRENT_TIMESTAMP,1,1,?)",
+                registryId, documentId, text(preview.get("original_url")), text(preview.get("canonical_url")), user.id());
         jdbc.update("UPDATE source_registry SET last_crawled_at=CURRENT_TIMESTAMP WHERE id=?", registryId);
         jdbc.update("UPDATE content_source SET last_imported_at=CURRENT_TIMESTAMP WHERE id=?", sourceId);
         log(user, "IMPORT_WEB_ARTICLE", documentId, "SUCCESS");

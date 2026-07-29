@@ -20,7 +20,7 @@
 - [x] 数据库与配置基础
 - [x] 来源管理和调度锁
 - [x] 通用文章发现与 Fixture
-- [ ] 任务中心与错误队列
+- [x] 任务中心与错误队列
 - [ ] 图片候选审核
 - [ ] 内容变化版本
 - [x] 连续阅读与设置
@@ -47,6 +47,8 @@ Phase 9.3-A 连续阅读收尾（2026-07-29）：
 - institution-web 来源运营页面 typecheck 与生产构建通过，新增编辑、启停确认、调度和预算摘要、加载/空状态与错误摘要。
 - Phase 9.3-C 离线文章发现测试 14 项通过：覆盖 RSS 2.0、Atom、Sitemap、Sitemap index、JSON-LD Article/NewsArticle、栏目页链接、相对地址、canonical 去 fragment/default port、重复过滤、非法协议、外域链接、空栏目、XML 错误/深度限制、响应体上限、手动重定向上限、robots、SSRF/DNS 与单域限速复用。
 - 后端发现接入与来源回归测试 5 项通过：仅启用白名单来源可发现、同源入口校验、候选二次去重、部分失败状态、平台管理员权限边界，并确认发现过程不创建 published_item、不审核、不发布且不调用 AI 分析。
+- Phase 9.3-D 任务中心及来源/发现回归测试 9 项通过：覆盖 SUCCESS、PARTIAL_SUCCESS、FAILED、CANCELLED、DISABLED/PENDING/RUNNING 状态基础，任务计数、单条和批量重试、不可重试、最大 3 次、有界退避、同 URL 幂等、同来源租约竞争、取消释放、403 权限和 Authorization/Cookie/API Key/堆栈/URL 用户信息脱敏；V14 迁移成功。
+- institution-web 任务中心 typecheck 与生产构建通过，提供状态/来源筛选、任务详情、计数摘要、错误队列、单条/整批重试、取消确认和空状态。自动 AI 执行及图片审核未纳入本阶段。
 - 本阶段未调用真实 DeepSeek，未读取真实 .env。
 - 数据库与配置基础、来源管理和调度锁、通用文章发现与 Fixture、任务中心与错误队列、图片候选审核、内容变化版本、首页小幅优化及全量 Docker 验收仍待后续里程碑完成。
 

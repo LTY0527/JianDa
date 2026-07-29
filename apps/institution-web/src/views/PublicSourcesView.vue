@@ -18,6 +18,10 @@ import {
 const sources = ref<PublicSource[]>([]);
 const registries = ref<WebSourceRegistry[]>([]);
 const jobs = ref<CrawlJob[]>([]);
+const selectedJob = ref<CrawlJob | null>(null);
+const taskStatus = ref("");
+const taskSourceId = ref<number | undefined>();
+const retrying = ref<number | null>(null);
 const loading = ref(true);
 const saving = ref(false);
 const error = ref("");
@@ -44,7 +48,7 @@ async function load() {
     const [sourceResponse, registryResponse, jobResponse] = await Promise.all([
       publicSourceApi.sources(),
       publicSourceApi.webRegistries(),
-      publicSourceApi.crawlJobs(),
+      publicSourceApi.crawlJobs({ status: taskStatus.value || undefined, sourceId: taskSourceId.value }),
     ]);
     sources.value = sourceResponse.data.data;
     registries.value = registryResponse.data.data;
@@ -124,11 +128,47 @@ async function toggleRegistry(source: WebSourceRegistry) {
 }
 
 async function stopJob(job: CrawlJob) {
+  if (!window.confirm(`确认取消任务 #${job.id} 吗？`)) return;
   try {
     await publicSourceApi.stopCrawlJob(job.id);
     await load();
   } catch (cause) {
     error.value = apiMessage(cause);
+  }
+}
+
+async function openJob(job: CrawlJob) {
+  try {
+    selectedJob.value = (await publicSourceApi.crawlJob(job.id)).data.data;
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
+async function retryError(errorId: number) {
+  retrying.value = errorId;
+  try {
+    await publicSourceApi.retryCrawlError(errorId);
+    if (selectedJob.value) await openJob(selectedJob.value);
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    retrying.value = null;
+  }
+}
+
+async function retryFailures(job: CrawlJob) {
+  if (!window.confirm(`确认重试任务 #${job.id} 的全部可重试失败项吗？`)) return;
+  retrying.value = 0;
+  try {
+    await publicSourceApi.retryCrawlFailures(job.id);
+    await openJob(job);
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    retrying.value = null;
   }
 }
 
@@ -209,18 +249,31 @@ onMounted(load);
       <div v-else-if="registries.length === 0" class="empty-state">暂无运营来源，请先新增。</div>
     </section>
     <section class="panel">
-      <div class="panel-title"><div><h2>采集任务</h2><p>查看成功、未变化、失败和等待审核状态。</p></div></div>
+      <div class="panel-title"><div><h2>采集任务中心</h2><p>统一查看任务计数、错误队列和重试状态。</p></div></div>
+      <div class="form-row">
+        <label class="field">状态筛选<select v-model="taskStatus" @change="load"><option value="">全部状态</option><option v-for="status in ['PENDING','RUNNING','SUCCESS','PARTIAL_SUCCESS','FAILED','CANCELLED','DISABLED']" :key="status" :value="status">{{statusLabel(status)}}</option></select></label>
+        <label class="field">来源筛选<select v-model="taskSourceId" @change="load"><option :value="undefined">全部来源</option><option v-for="source in registries" :key="source.id" :value="source.id">{{source.source_name}}</option></select></label>
+      </div>
       <table class="data-table">
-        <thead><tr><th>来源</th><th>文章地址</th><th>状态</th><th>最后成功</th><th>错误</th><th>操作</th></tr></thead>
+        <thead><tr><th>来源 / 触发</th><th>状态</th><th>计数摘要</th><th>开始 / 结束</th><th>错误</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="job in jobs" :key="job.id">
-            <td>{{job.source_name}}</td><td><a :href="job.original_url" target="_blank" rel="noreferrer">查看官方页面</a></td>
-            <td>{{statusLabel(job.status)}}</td><td>{{formatDisplayDateTime(job.last_success_at)}}</td>
+            <td><b>{{job.source_name}}</b><small>#{{job.id}} · {{job.trigger_type}} · {{job.original_url || '来源批次'}}</small></td>
+            <td>{{statusLabel(job.status)}}<small>{{job.processing_stage}}</small></td>
+            <td>发现 {{job.discovered_count}} · 新增 {{job.added_count}}<small>重复 {{job.duplicate_count}} · 跳过 {{job.skipped_count}} · 失败 {{job.failed_count}}</small></td>
+            <td>{{formatDisplayDateTime(job.started_at)}}<small>结束 {{formatDisplayDateTime(job.finished_at)}}</small></td>
             <td>{{job.last_error||"无"}}</td>
-            <td><button v-if="['QUEUED','RUNNING'].includes(job.status)" class="text-action danger" @click="stopJob(job)">停止任务</button><RouterLink v-else-if="job.document_id" :to="`/documents/${job.document_id}/process`">查看材料</RouterLink></td>
+            <td><button class="text-action" @click="openJob(job)">详情</button><button v-if="['PENDING','RUNNING'].includes(job.status)" class="text-action danger" @click="stopJob(job)">取消</button><RouterLink v-else-if="job.document_id" :to="`/documents/${job.document_id}/process`">查看材料</RouterLink></td>
           </tr>
         </tbody>
       </table>
+      <div v-if="!loading && jobs.length === 0" class="empty-state">当前筛选条件下暂无采集任务。</div>
+      <div v-if="selectedJob" class="source-create">
+        <div class="panel-title"><div><h2>任务 #{{selectedJob.id}} 详情</h2><p>{{selectedJob.source_name}} · {{statusLabel(selectedJob.status)}}</p></div><button class="btn secondary" @click="selectedJob=null">关闭</button></div>
+        <div class="form-actions"><button v-if="selectedJob.errors?.some(item => item.retryable && !item.resolved_at)" class="btn primary" :disabled="retrying !== null" @click="retryFailures(selectedJob)">整批重试可重试项</button></div>
+        <table class="data-table"><thead><tr><th>URL / 阶段</th><th>错误</th><th>重试状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in selectedJob.errors || []" :key="item.id"><td>{{item.failed_url || '无地址'}}<small>{{item.processing_stage}} · {{item.error_code}}</small></td><td>{{item.error_summary}}</td><td>{{item.retryable ? `可重试 ${item.retry_count}/3` : '不可重试'}}<small>{{item.next_retry_at ? formatDisplayDateTime(item.next_retry_at) : ''}}</small></td><td><button v-if="item.retryable && !item.resolved_at && item.retry_count < 3" class="text-action" :disabled="retrying !== null" @click="retryError(item.id)">单条重试</button><span v-else>无需操作</span></td></tr></tbody></table>
+        <div v-if="!selectedJob.errors?.length" class="empty-state">此任务没有单条错误记录。</div>
+      </div>
     </section>
   </div>
 </template>

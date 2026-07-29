@@ -18,9 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/web-articles")
 public class WebArticleController {
     private final WebArticleService service;
+    private final CrawlTaskService taskService;
 
-    public WebArticleController(WebArticleService service) {
+    public WebArticleController(WebArticleService service, CrawlTaskService taskService) {
         this.service = service;
+        this.taskService = taskService;
     }
 
     @GetMapping("/sources")
@@ -32,13 +34,13 @@ public class WebArticleController {
     @GetMapping("/jobs")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ApiResponse<List<Map<String, Object>>> jobs() {
-        return ApiResponse.ok(service.crawlJobs());
+        return ApiResponse.ok(taskService.jobs(null, null));
     }
 
     @PostMapping("/jobs/{jobId}/stop")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ApiResponse<Void> stopJob(@PathVariable long jobId) {
-        service.stopJob(jobId);
+        taskService.cancel(jobId);
         return ApiResponse.ok(null);
     }
 
