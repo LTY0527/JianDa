@@ -8,7 +8,7 @@ import {
   type ProcessingJob,
 } from "../api/documents";
 import { apiMessage } from "../api/http";
-import { publicSourceApi } from "../api/publicSources";
+import { publicSourceApi, type ImageCandidate } from "../api/publicSources";
 import {
   Save,
   CheckCircle2,
@@ -55,6 +55,10 @@ const resourceWarnings = ref<string[]>([]);
 const customCoverPreview = ref("");
 const coverPosition = ref(50);
 const coverUploading = ref(false);
+const imageCandidates = ref<ImageCandidate[]>([]);
+const candidateSourceName = ref("");
+const candidateUsageBasis = ref("");
+const candidateRejectionReason = ref("");
 const isImage = computed(() => document.value?.mime_type?.startsWith("image/"));
 const isWebArticle = computed(() => document.value?.source_type === "WEB_ARTICLE");
 const officialPageAvailable = computed(
@@ -81,17 +85,6 @@ const reviewCoverUrl = computed(() =>
     ? document.value.cover_image_url
     : defaultCoverUrl.value),
 );
-const articleImages = computed(() => {
-  if (!document.value?.original_html) return [];
-  const parsed = new DOMParser().parseFromString(
-    document.value.original_html,
-    "text/html",
-  );
-  return [...parsed.querySelectorAll("article img, main img")].map((image) => ({
-    src: image.getAttribute("src") || "",
-    alt: image.getAttribute("alt") || "网页正文图片",
-  })).filter((image) => /^https?:\/\//.test(image.src));
-});
 const canFinish = computed(() => fields.value.length > 0 || (isWebArticle.value && summaryItems.value.length > 0));
 const canSubmitReview = computed(
   () => canFinish.value && document.value?.processing_status === "WAITING_REVIEW",
@@ -184,6 +177,10 @@ async function load() {
     summaryItems.value = parsed("SUMMARY", []);
     plainText.value = generated.find((item) => item.content_type === "PLAIN_TEXT")?.plain_text || "";
     coverReviewed.value = Boolean(document.value.image_reviewed);
+    if (isWebArticle.value) {
+      const candidateResponse = await publicSourceApi.imageCandidates(documentId);
+      imageCandidates.value = candidateResponse.data.data;
+    }
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -314,22 +311,34 @@ async function uploadCustomCover(event: Event) {
   }
 }
 
-async function selectArticleImage(url: string) {
+async function approveCandidate(candidate: ImageCandidate) {
+  error.value = "";
   try {
-    await publicSourceApi.selectArticleCover(documentId, url);
+    await publicSourceApi.approveImageCandidate(candidate.id, candidateSourceName.value, candidateUsageBasis.value);
     if (document.value) {
-      document.value.cover_image_url = url;
-      document.value.cover_image_type = "ARTICLE_IMAGE";
-      document.value.image_source_name = "原网页正文配图";
-      document.value.image_reviewed = false;
+      document.value.cover_image_url = candidate.candidate_url;
+      document.value.cover_image_type = candidate.discovery_method === "ARTICLE_IMAGE" ? "ARTICLE_IMAGE" : "ORIGINAL_COVER";
+      document.value.image_source_name = candidateSourceName.value;
+      document.value.image_license_note = candidateUsageBasis.value;
+      document.value.image_reviewed = true;
     }
-    customCoverPreview.value = "";
-    coverFailed.value = false;
-    coverReviewed.value = false;
+    coverReviewed.value = true;
+    await load();
   } catch (cause) {
     error.value = apiMessage(cause);
   }
 }
+
+async function rejectCandidate(candidate: ImageCandidate) {
+  error.value = "";
+  try {
+    await publicSourceApi.rejectImageCandidate(candidate.id, candidateRejectionReason.value);
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
 </script>
 
 <template>
@@ -390,11 +399,14 @@ async function selectArticleImage(url: string) {
         <div class="web-source-review__actions"><a v-if="officialPageAvailable && document?.canonical_url" class="btn secondary" :href="document.canonical_url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="17"/>查看官方原文</a><span v-else class="source-unavailable"><TriangleAlert :size="16"/>原网页暂时不可访问，不影响内部审核</span><button v-if="document?.cover_image_url" class="btn secondary" :disabled="coverReviewed" @click="confirmCover">{{coverReviewed?"封面已确认":"确认使用当前封面"}}</button><label class="btn secondary cover-upload-button">{{coverUploading?"上传中…":"上传自定义封面"}}<input type="file" accept="image/png,image/jpeg,image/webp" :disabled="coverUploading" @change="uploadCustomCover"/></label><button class="btn secondary" @click="useCategoryDefaultCover">使用分类默认图 / 删除封面</button></div>
       </div>
     </section>
-    <section v-if="isWebArticle && articleImages.length" class="panel web-article-images">
-      <h2>正文图片</h2>
-      <p>按网页正文中的原有顺序展示，仅供内部来源核对。</p>
-      <div><figure v-for="image in articleImages" :key="image.src"><img :src="image.src" :alt="image.alt" referrerpolicy="no-referrer"/><figcaption>{{ image.alt }}</figcaption><button class="btn secondary" type="button" @click="selectArticleImage(image.src)">选为封面</button></figure></div>
+    <section v-if="isWebArticle && imageCandidates.length" class="panel web-article-images">
+      <h2>图片候选人工审核</h2>
+      <p>候选仅供内部核对，未经来源和许可确认不会成为公开封面。</p>
+      <div class="form-row"><label class="field">图片来源<input v-model="candidateSourceName" placeholder="例如：新华网原网页" /></label><label class="field">许可说明<input v-model="candidateUsageBasis" placeholder="填写授权、公开使用依据或人工核对说明" /></label></div>
+      <label class="field">拒绝原因<input v-model="candidateRejectionReason" placeholder="例如：版权不明确、尺寸不适合或与正文无关" /></label>
+      <div><figure v-for="candidate in imageCandidates" :key="candidate.id"><img :src="candidate.candidate_url" :alt="candidate.alt_text || '网页图片候选'" referrerpolicy="no-referrer"/><figcaption>{{candidate.discovery_method}} · {{candidate.width}}×{{candidate.height}} · {{candidate.mime_type || '图片'}}<br/>{{candidate.alt_text || '无替代文本'}}<br/>状态：{{candidate.review_status}} / {{candidate.rights_status}}</figcaption><div class="form-actions"><button v-if="candidate.review_status === 'PENDING'" class="btn primary" type="button" @click="approveCandidate(candidate)">确认可用</button><button v-if="candidate.review_status === 'PENDING'" class="btn secondary" type="button" @click="rejectCandidate(candidate)">拒绝</button></div></figure></div>
     </section>
+    <section v-if="isWebArticle && !imageCandidates.length" class="panel"><h2>图片候选</h2><p>没有通过安全、尺寸和比例过滤的第三方图片，将使用分类默认图。</p></section>
 
     <section
       v-if="emptyReviewResult"

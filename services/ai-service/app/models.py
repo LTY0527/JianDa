@@ -404,6 +404,14 @@ class WebArticleRequest(BaseModel):
 class WebArticleImage(BaseModel):
     url: str
     caption: str = ""
+    discovery_method: Literal["OPEN_GRAPH", "JSON_LD", "ARTICLE_IMAGE"] = "ARTICLE_IMAGE"
+    mime_type: str = ""
+    width: int | None = None
+    height: int | None = None
+    image_hash: str = ""
+    image_cached: bool = False
+    candidate_status: Literal["VALID", "REJECTED"] = "VALID"
+    rejection_reason: str = ""
 
 
 class WebArticlePreview(BaseModel):

@@ -56,6 +56,32 @@ class PublicImportIntegrationTest {
                     Map.entry("image_width", 1200),
                     Map.entry("image_height", 675),
                     Map.entry("image_hash", "a".repeat(64)),
+                    Map.entry("image_validated", true),
+                    Map.entry("images", List.of(
+                            Map.ofEntries(
+                                    Map.entry("url", "https://www.news.cn/image/cover.png"),
+                                    Map.entry("caption", "老年人进行适量运动"),
+                                    Map.entry("discovery_method", "OPEN_GRAPH"),
+                                    Map.entry("mime_type", "image/png"),
+                                    Map.entry("width", 1200), Map.entry("height", 675),
+                                    Map.entry("image_hash", "a".repeat(64)),
+                                    Map.entry("image_cached", false), Map.entry("candidate_status", "VALID")),
+                            Map.ofEntries(
+                                    Map.entry("url", "https://www.news.cn/image/article.png"),
+                                    Map.entry("caption", "正文运动示意"),
+                                    Map.entry("discovery_method", "ARTICLE_IMAGE"),
+                                    Map.entry("mime_type", "image/png"),
+                                    Map.entry("width", 900), Map.entry("height", 600),
+                                    Map.entry("image_hash", "e".repeat(64)),
+                                    Map.entry("image_cached", false), Map.entry("candidate_status", "VALID")),
+                            Map.ofEntries(
+                                    Map.entry("url", "https://www.news.cn/image/logo.png"),
+                                    Map.entry("caption", "网站 logo"),
+                                    Map.entry("discovery_method", "ARTICLE_IMAGE"),
+                                    Map.entry("mime_type", "image/png"),
+                                    Map.entry("width", 120), Map.entry("height", 40),
+                                    Map.entry("image_hash", "d".repeat(64)),
+                                    Map.entry("image_cached", false), Map.entry("candidate_status", "VALID")))),
                     Map.entry("canonical_url", url),
                     Map.entry("content_preview", "老年人减重应保持吃动平衡。"),
                     Map.entry("extracted_text", "老年人减重应保持吃动平衡，不建议采取极端节食。出现持续不适时，应及时咨询医疗机构。"),
@@ -259,6 +285,28 @@ class PublicImportIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("第三方文章封面尚未人工确认，请确认图片来源或改用分类默认图"));
 
+        mvc.perform(get("/api/web-articles/{id}/image-candidates", documentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].discovery_method").value("OPEN_GRAPH"))
+                .andExpect(jsonPath("$.data[1].discovery_method").value("ARTICLE_IMAGE"));
+        String candidatesBody = mvc.perform(get("/api/web-articles/{id}/image-candidates", documentId)
+                        .header("Authorization", auth))
+                .andReturn().getResponse().getContentAsString();
+        long approvedCandidateId = objectMapper.readTree(candidatesBody).path("data").get(0).path("id").asLong();
+        long rejectedCandidateId = objectMapper.readTree(candidatesBody).path("data").get(1).path("id").asLong();
+        mvc.perform(post("/api/web-articles/image-candidates/{id}/reject", rejectedCandidateId)
+                        .header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"版权范围不明确\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/web-articles/{id}/cover/confirm", documentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/web-articles/image-candidates/{id}/approve", approvedCandidateId)
+                        .header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sourceName\":\"新华网原网页\",\"usageBasis\":\"经人工核对可作为本条资讯封面\"}"))
+                .andExpect(status().isOk());
         mvc.perform(post("/api/web-articles/{id}/cover/confirm", documentId)
                         .header("Authorization", auth))
                 .andExpect(status().isOk());
@@ -286,6 +334,14 @@ class PublicImportIntegrationTest {
                 Map.entry("image_width", 1200),
                 Map.entry("image_height", 675),
                 Map.entry("image_hash", "f".repeat(64)),
+                Map.entry("image_validated", true),
+                Map.entry("images", List.of(Map.ofEntries(
+                        Map.entry("url", "https://www.news.cn/image/cover-updated.png"),
+                        Map.entry("caption", "更新版运动配图"),
+                        Map.entry("discovery_method", "OPEN_GRAPH"), Map.entry("mime_type", "image/png"),
+                        Map.entry("width", 1200), Map.entry("height", 675),
+                        Map.entry("image_hash", "f".repeat(64)), Map.entry("image_cached", false),
+                        Map.entry("candidate_status", "VALID")))),
                 Map.entry("canonical_url", url),
                 Map.entry("content_preview", "老年人减重应保持吃动平衡，新增了运动建议。"),
                 Map.entry("extracted_text", "老年人减重应保持吃动平衡，不建议采取极端节食。新增了每日适量运动建议。"),
@@ -303,12 +359,31 @@ class PublicImportIntegrationTest {
                 .andExpect(jsonPath("$.data.previousDocumentId").value(documentId))
                 .andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"))
                 .andExpect(jsonPath("$.data.contentChanged").value(true))
+                .andExpect(jsonPath("$.data.versionNo").value(2))
+                .andExpect(jsonPath("$.data.oldHash").value("c".repeat(64)))
+                .andExpect(jsonPath("$.data.newHash").value("f".repeat(64)))
+                .andExpect(jsonPath("$.data.changeSummary").isNotEmpty())
                 .andReturn().getResponse().getContentAsString();
         long newDocumentId = objectMapper.readTree(versioned).path("data").path("documentId").asLong();
         org.junit.jupiter.api.Assertions.assertNotEquals(documentId, newDocumentId);
+        mvc.perform(post("/api/web-articles/{id}/recrawl", newDocumentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.contentChanged").value(false));
+        org.junit.jupiter.api.Assertions.assertEquals(2,
+                jdbc.queryForObject("SELECT COUNT(*) FROM source_document WHERE version_root_id=?",
+                        Integer.class, documentId));
         org.junit.jupiter.api.Assertions.assertEquals(documentId,
                 jdbc.queryForObject("SELECT previous_version_id FROM source_document WHERE id=?",
                         Long.class, newDocumentId));
+        org.junit.jupiter.api.Assertions.assertEquals(2,
+                jdbc.queryForObject("SELECT version_no FROM source_document WHERE id=?", Integer.class, newDocumentId));
+        org.junit.jupiter.api.Assertions.assertEquals(documentId,
+                jdbc.queryForObject("SELECT version_root_id FROM source_document WHERE id=?", Long.class, newDocumentId));
+        org.junit.jupiter.api.Assertions.assertEquals("c".repeat(64),
+                jdbc.queryForObject("SELECT old_content_hash FROM source_document WHERE id=?", String.class, newDocumentId));
+        org.junit.jupiter.api.Assertions.assertEquals("f".repeat(64),
+                jdbc.queryForObject("SELECT new_content_hash FROM source_document WHERE id=?", String.class, newDocumentId));
         org.junit.jupiter.api.Assertions.assertEquals("PUBLISHED",
                 jdbc.queryForObject("SELECT processing_status FROM source_document WHERE id=?",
                         String.class, documentId));

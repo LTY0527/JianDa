@@ -141,8 +141,13 @@ class _ArticleParser(HTMLParser):
         elif tag == "img":
             source = attr.get("src") or attr.get("data-src") or attr.get("data-original")
             if source:
+                width = int(attr.get("width", "0")) if attr.get("width", "").isdigit() else None
+                height = int(attr.get("height", "0")) if attr.get("height", "").isdigit() else None
                 self.page.images.append(
-                    WebArticleImage(url=urljoin(self.base_url, source), caption=attr.get("alt", "").strip())
+                    WebArticleImage(
+                        url=urljoin(self.base_url, source), caption=attr.get("alt", "").strip(),
+                        discovery_method="ARTICLE_IMAGE", width=width, height=height,
+                    )
                 )
         if tag in self.BLOCK_TAGS and not self._skip_depth:
             self._block_tag = tag
@@ -330,17 +335,19 @@ async def _validated_cover(
     # clients use JianDa's local category artwork.
     if not allow_image_download:
         return "", "CATEGORY_DEFAULT", page.title, None, None, "", False
-    candidates: list[tuple[str, str, str]] = []
+    candidates: list[tuple[str, str, str, str]] = []
     if page.cover_image_url:
-        candidates.append((page.cover_image_url, page.cover_image_type, page.title))
+        candidates.append((page.cover_image_url, page.cover_image_type, page.title, "OPEN_GRAPH"))
     if page.json_ld_image_url and page.json_ld_image_url != page.cover_image_url:
-        candidates.append((page.json_ld_image_url, "ORIGINAL_COVER", page.title))
-    candidates.extend((image.url, "ARTICLE_IMAGE", image.caption) for image in page.images)
+        candidates.append((page.json_ld_image_url, "ORIGINAL_COVER", page.title, "JSON_LD"))
+    candidates.extend((image.url, "ARTICLE_IMAGE", image.caption, "ARTICLE_IMAGE") for image in page.images)
     rejected_words = (
-        "logo", "icon", "avatar", "qrcode", "qr_code", "qr-code",
-        "banner-ad", "advert", "广告", "二维码", "头像", "图标",
+        "logo", "icon", "avatar", "qrcode", "qr_code", "qr-code", "tracking", "pixel",
+        "banner-ad", "advert", "广告", "二维码", "头像", "图标", "统计",
     )
-    for url, image_type, alt in candidates[:8]:
+    validated_images: list[WebArticleImage] = []
+    selected: tuple[str, str, str, int, int, str, bool] | None = None
+    for rank, (url, image_type, alt, discovery_method) in enumerate(candidates[:8]):
         fingerprint = f"{url} {alt}".lower()
         if any(word in fingerprint for word in rejected_words):
             continue
@@ -357,23 +364,27 @@ async def _validated_cover(
             width, height = _image_dimensions(data, content_type)
             if width is None or height is None:
                 continue
-            if width <= 8 or height <= 8 or width < 600:
+            if width <= 8 or height <= 8 or width < 600 or height < 250:
                 continue
             ratio = width / height
             if ratio < 0.75 or ratio > 2.4:
                 continue
-            return (
-                str(response.url),
-                image_type,
-                _clean(alt) or page.title,
-                width,
-                height,
-                hashlib.sha256(data).hexdigest(),
-                True,
-            )
+            image_hash = hashlib.sha256(data).hexdigest()
+            validated_images.append(WebArticleImage(
+                url=str(response.url), caption=_clean(alt) or page.title,
+                discovery_method=discovery_method, mime_type=content_type,
+                width=width, height=height, image_hash=image_hash,
+                image_cached=False, candidate_status="VALID",
+            ))
+            if selected is None:
+                selected = (
+                    str(response.url), image_type, _clean(alt) or page.title,
+                    width, height, image_hash, True,
+                )
         except (httpx.HTTPError, OSError, ValueError):
             continue
-    return "", "CATEGORY_DEFAULT", page.title, None, None, "", False
+    page.images = validated_images
+    return selected or ("", "CATEGORY_DEFAULT", page.title, None, None, "", False)
 
 
 async def preview_web_article(

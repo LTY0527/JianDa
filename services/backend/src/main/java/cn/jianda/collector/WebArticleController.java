@@ -19,10 +19,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class WebArticleController {
     private final WebArticleService service;
     private final CrawlTaskService taskService;
+    private final ImageCandidateService imageCandidateService;
 
-    public WebArticleController(WebArticleService service, CrawlTaskService taskService) {
+    public WebArticleController(WebArticleService service, CrawlTaskService taskService,
+                                ImageCandidateService imageCandidateService) {
         this.service = service;
         this.taskService = taskService;
+        this.imageCandidateService = imageCandidateService;
     }
 
     @GetMapping("/sources")
@@ -84,6 +87,30 @@ public class WebArticleController {
         return ApiResponse.ok(service.recrawl(documentId, UserContext.current()));
     }
 
+    @GetMapping("/{documentId}/image-candidates")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN','REVIEWER')")
+    public ApiResponse<List<Map<String, Object>>> imageCandidates(@PathVariable long documentId) {
+        return ApiResponse.ok(imageCandidateService.list(documentId, UserContext.current()));
+    }
+
+    @PostMapping("/image-candidates/{candidateId}/approve")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN','REVIEWER')")
+    public ApiResponse<Void> approveCandidate(@PathVariable long candidateId,
+            @Valid @RequestBody CandidateApprovalRequest request) {
+        imageCandidateService.approve(candidateId, request.sourceName(), request.usageBasis(), UserContext.current());
+        return ApiResponse.ok(null);
+    }
+
+    @PostMapping("/image-candidates/{candidateId}/reject")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN','REVIEWER')")
+    public ApiResponse<Void> rejectCandidate(@PathVariable long candidateId,
+            @Valid @RequestBody CandidateRejectionRequest request) {
+        imageCandidateService.reject(candidateId, request.reason(), UserContext.current());
+        return ApiResponse.ok(null);
+    }
+
     public record UrlRequest(@NotBlank String url) {}
     public record CoverRequest(@NotBlank String imageUrl) {}
+    public record CandidateApprovalRequest(@NotBlank String sourceName, @NotBlank String usageBasis) {}
+    public record CandidateRejectionRequest(@NotBlank String reason) {}
 }

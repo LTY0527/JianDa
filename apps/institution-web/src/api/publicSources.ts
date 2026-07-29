@@ -77,6 +77,26 @@ export interface WebArticlePreview {
   image_license_note?: string;
 }
 
+export interface ImageCandidate {
+  id: number;
+  document_id: number;
+  candidate_url: string;
+  source_page_url: string;
+  source_name?: string;
+  alt_text?: string;
+  width?: number;
+  height?: number;
+  mime_type?: string;
+  image_hash?: string;
+  image_cached: boolean;
+  discovery_method: "OPEN_GRAPH" | "JSON_LD" | "ARTICLE_IMAGE";
+  priority_rank: number;
+  rights_status: string;
+  review_status: string;
+  rejection_reason?: string;
+  usage_basis?: string;
+}
+
 export interface WebSourceRegistry {
   id: number;
   domain: string;
@@ -209,6 +229,12 @@ export const publicSourceApi = {
     http.post<ApiResponse<null>>(`/web-articles/${documentId}/cover/article-image`, {
       imageUrl,
     }),
+  imageCandidates: (documentId: number) =>
+    http.get<ApiResponse<ImageCandidate[]>>(`/web-articles/${documentId}/image-candidates`),
+  approveImageCandidate: (candidateId: number, sourceName: string, usageBasis: string) =>
+    http.post<ApiResponse<null>>(`/web-articles/image-candidates/${candidateId}/approve`, { sourceName, usageBasis }),
+  rejectImageCandidate: (candidateId: number, reason: string) =>
+    http.post<ApiResponse<null>>(`/web-articles/image-candidates/${candidateId}/reject`, { reason }),
   recrawlWebArticle: (documentId: number) =>
     http.post<ApiResponse<{ documentId: number; contentKind: string }>>(
       `/web-articles/${documentId}/recrawl`,

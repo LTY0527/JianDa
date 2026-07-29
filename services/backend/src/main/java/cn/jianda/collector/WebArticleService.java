@@ -4,8 +4,6 @@ import cn.jianda.ai.AiClient;
 import cn.jianda.common.BusinessException;
 import cn.jianda.document.DocumentService;
 import cn.jianda.security.AuthUser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
@@ -27,16 +25,16 @@ public class WebArticleService {
     private static final long PREVIEW_TTL_SECONDS = 15 * 60;
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
-    private final ObjectMapper objectMapper;
     private final DocumentService documentService;
+    private final ImageCandidateService imageCandidateService;
     private final Map<String, CachedPreview> previews = new ConcurrentHashMap<>();
 
-    public WebArticleService(JdbcTemplate jdbc, AiClient aiClient, ObjectMapper objectMapper,
-                             DocumentService documentService) {
+    public WebArticleService(JdbcTemplate jdbc, AiClient aiClient,
+                             DocumentService documentService, ImageCandidateService imageCandidateService) {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
-        this.objectMapper = objectMapper;
         this.documentService = documentService;
+        this.imageCandidateService = imageCandidateService;
     }
 
     public List<Map<String, Object>> registries() {
@@ -179,14 +177,23 @@ public class WebArticleService {
             statement.setString(index, contentKind);
             return statement;
         }, keys);
-        long documentId = keys.getKey().longValue();
+        Number generatedDocumentId = keys.getKey();
+        if (generatedDocumentId == null) throw new IllegalStateException("未取得网页文章编号");
+        long documentId = generatedDocumentId.longValue();
+        jdbc.update("UPDATE source_document SET version_root_id=id,new_content_hash=content_hash WHERE id=?", documentId);
+        imageCandidateService.persist(documentId, canonical, preview.get("images"));
         jdbc.update("INSERT INTO document_segment(document_id,page_no,segment_no,text,start_offset,end_offset) VALUES (?,1,1,?,0,?)",
                 documentId, body, body.length());
+        Integer canonicalJobCount = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM crawl_job WHERE source_registry_id=? AND canonical_url=?",
+                Integer.class, registryId, text(preview.get("canonical_url")));
+        String jobCanonical = canonicalJobCount != null && canonicalJobCount > 0
+                ? null : text(preview.get("canonical_url"));
         jdbc.update("INSERT INTO crawl_job(source_registry_id,document_id,original_url,canonical_url,status,trigger_type,"
                         + "processing_stage,discovered_at,started_at,finished_at,last_success_at,discovered_count,added_count,created_by) "
                         + "VALUES (?,?,?,?,'SUCCESS','MANUAL','IMPORT',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,"
                         + "CURRENT_TIMESTAMP,1,1,?)",
-                registryId, documentId, text(preview.get("original_url")), text(preview.get("canonical_url")), user.id());
+                registryId, documentId, text(preview.get("original_url")), jobCanonical, user.id());
         jdbc.update("UPDATE source_registry SET last_crawled_at=CURRENT_TIMESTAMP WHERE id=?", registryId);
         jdbc.update("UPDATE content_source SET last_imported_at=CURRENT_TIMESTAMP WHERE id=?", sourceId);
         log(user, "IMPORT_WEB_ARTICLE", documentId, "SUCCESS");
@@ -201,29 +208,39 @@ public class WebArticleService {
                 + "image_cached=FALSE,image_reviewed=TRUE,custom_cover_path=NULL,custom_cover_mime=NULL,"
                 + "custom_cover_filename=NULL WHERE id=? AND source_type='WEB_ARTICLE'", documentId);
         if (changed == 0) throw new BusinessException(404, "网页文章不存在");
+        jdbc.update("UPDATE image_candidate SET review_status='IGNORED',updated_at=CURRENT_TIMESTAMP "
+                + "WHERE document_id=? AND review_status='PENDING'", documentId);
         log(user, "USE_CATEGORY_DEFAULT_COVER", documentId, "SUCCESS");
     }
 
     @Transactional
     public void selectArticleCover(long documentId, String imageUrl, AuthUser user) {
         assertAccess(documentId, user);
-        Map<String, Object> document = jdbc.queryForMap(
-                "SELECT original_html,canonical_url FROM source_document WHERE id=?", documentId);
         String normalized = normalizeUrl(imageUrl);
-        if (!text(document.get("original_html")).contains(normalized)) {
-            throw new BusinessException(400, "所选图片不在当前网页正文快照中");
-        }
+        List<Map<String, Object>> candidates = jdbc.queryForList(
+                "SELECT id FROM image_candidate WHERE document_id=? AND candidate_url=? AND candidate_status='VALID'",
+                documentId, normalized);
+        if (candidates.isEmpty()) throw new BusinessException(400, "所选图片不在已验证候选列表中");
         jdbc.update("UPDATE source_document SET cover_image_url=?,cover_image_type='ARTICLE_IMAGE',"
-                        + "image_source_name='原网页正文配图',image_source_url=?,image_cached=FALSE,"
+                        + "image_source_name='待人工确认',image_source_url=canonical_url,image_cached=FALSE,"
+                        + "image_license_note='候选图片尚未确认来源和许可，不得发布',"
                         + "image_reviewed=FALSE,custom_cover_path=NULL,custom_cover_mime=NULL,"
                         + "custom_cover_filename=NULL WHERE id=?",
-                normalized, document.get("canonical_url"), documentId);
+                normalized, documentId);
         log(user, "SELECT_ARTICLE_COVER", documentId, "SUCCESS");
     }
 
     @Transactional
     public void confirmCover(long documentId, AuthUser user) {
         assertAccess(documentId, user);
+        Integer approved = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM image_candidate WHERE document_id=? AND candidate_url=("
+                        + "SELECT cover_image_url FROM source_document WHERE id=?) AND review_status='APPROVED' "
+                        + "AND rights_status='CONFIRMED' AND usage_basis IS NOT NULL",
+                Integer.class, documentId, documentId);
+        if (approved == null || approved == 0) {
+            throw new BusinessException(400, "请先在图片候选中填写来源和许可说明并确认可用");
+        }
         int changed = jdbc.update("UPDATE source_document SET image_reviewed=TRUE WHERE id=? "
                 + "AND source_type='WEB_ARTICLE' AND cover_image_url IS NOT NULL", documentId);
         if (changed == 0) throw new BusinessException(400, "没有可确认的原文封面");
@@ -241,6 +258,10 @@ public class WebArticleService {
         String originalUrl = text(current.get("original_url"));
         previews.remove(originalUrl);
         Map<String, Object> refreshed = preview(originalUrl);
+        String refreshedCanonical = text(refreshed.get("canonical_url"));
+        if (!refreshedCanonical.equals(text(current.get("canonical_url")))) {
+            throw new BusinessException(409, "重新采集返回了不同 canonical URL，请人工核对来源");
+        }
         String refreshedHash = text(refreshed.get("content_hash"));
         if (refreshedHash.equals(text(current.get("content_hash")))) {
             jdbc.update("UPDATE crawl_job SET status='UNCHANGED',last_success_at=CURRENT_TIMESTAMP,"
@@ -255,10 +276,21 @@ public class WebArticleService {
                     "contentChanged", false, "cacheHit", true);
         }
         if ("PUBLISHED".equals(current.get("processing_status"))) {
+            long rootId = current.get("version_root_id") instanceof Number root
+                    ? root.longValue() : documentId;
+            Integer nextVersionValue = jdbc.queryForObject(
+                    "SELECT COALESCE(MAX(version_no),0)+1 FROM source_document WHERE version_root_id=?",
+                    Integer.class, rootId);
+            int nextVersion = nextVersionValue == null ? 2 : nextVersionValue;
             Map<String, Object> created = persistArticle(refreshed, user);
             long newDocumentId = number(created.get("documentId"));
-            jdbc.update("UPDATE source_document SET previous_version_id=? WHERE id=?",
-                    documentId, newDocumentId);
+            String oldHash = text(current.get("content_hash"));
+            jdbc.update("UPDATE source_document SET previous_version_id=?,version_root_id=?,version_no=?,"
+                            + "old_content_hash=?,new_content_hash=?,content_change_summary=?,version_created_at=CURRENT_TIMESTAMP,"
+                            + "processing_status='UPLOADED' WHERE id=?",
+                    documentId, rootId, nextVersion, oldHash, refreshedHash,
+                    changeSummary(text(current.get("raw_text")), text(refreshed.get("extracted_text")), oldHash, refreshedHash),
+                    newDocumentId);
             Map<String, Object> processed = documentService.process(newDocumentId, user);
             jdbc.update("UPDATE crawl_job SET status='WAITING_REVIEW',last_success_at=CURRENT_TIMESTAMP,"
                             + "last_error=NULL,content_changed=TRUE,updated_at=CURRENT_TIMESTAMP WHERE document_id=?",
@@ -270,6 +302,10 @@ public class WebArticleService {
             return Map.of(
                     "documentId", newDocumentId,
                     "previousDocumentId", documentId,
+                    "versionNo", nextVersion,
+                    "oldHash", oldHash,
+                    "newHash", refreshedHash,
+                    "changeSummary", changeSummary(text(current.get("raw_text")), text(refreshed.get("extracted_text")), oldHash, refreshedHash),
                     "status", processed.get("status"),
                     "contentKind", text(refreshed.get("content_kind")),
                     "contentChanged", true,
@@ -286,6 +322,7 @@ public class WebArticleService {
         String contentKind = text(refreshed.get("content_kind"));
         boolean categoryDefault = "CATEGORY_DEFAULT".equals(refreshed.get("cover_image_type"));
 
+        jdbc.update("DELETE FROM image_candidate WHERE document_id=?", documentId);
         jdbc.update("DELETE FROM review_record WHERE document_id=?", documentId);
         jdbc.update("DELETE FROM extracted_field WHERE document_id=?", documentId);
         jdbc.update("DELETE FROM generated_content WHERE document_id=?", documentId);
@@ -310,6 +347,7 @@ public class WebArticleService {
                 refreshed.get("image_height"), nullable(refreshed.get("image_hash")),
                 categoryDefault, text(refreshed.get("original_html")), body,
                 text(refreshed.get("robots_status")), contentKind, documentId);
+        imageCandidateService.persist(documentId, canonical, refreshed.get("images"));
         jdbc.update("INSERT INTO document_segment(document_id,page_no,segment_no,text,start_offset,end_offset) "
                         + "VALUES (?,1,1,?,0,?)", documentId, body, body.length());
         jdbc.update("UPDATE crawl_job SET status='SUCCEEDED',last_success_at=CURRENT_TIMESTAMP,"
@@ -356,7 +394,9 @@ public class WebArticleService {
             statement.setString(4, "由 source_registry 白名单同步");
             return statement;
         }, keys);
-        return keys.getKey().longValue();
+        Number generatedSourceId = keys.getKey();
+        if (generatedSourceId == null) throw new IllegalStateException("未取得内容来源编号");
+        return generatedSourceId.longValue();
     }
 
     private static String normalizeUrl(String value) {
@@ -401,6 +441,19 @@ public class WebArticleService {
             throws java.sql.SQLException {
         if (value instanceof Number number) statement.setInt(index, number.intValue());
         else statement.setNull(index, java.sql.Types.INTEGER);
+    }
+
+    private static String changeSummary(String oldText, String newText, String oldHash, String newHash) {
+        int oldLength = oldText.length();
+        int newLength = newText.length();
+        int delta = newLength - oldLength;
+        return "正文 SHA-256 由 " + shortHash(oldHash) + " 变为 " + shortHash(newHash)
+                + "；正文长度由 " + oldLength + " 变为 " + newLength
+                + "（" + (delta >= 0 ? "+" : "") + delta + " 字）";
+    }
+
+    private static String shortHash(String value) {
+        return value.length() <= 12 ? value : value.substring(0, 12);
     }
 
     private static String text(Object value) {
