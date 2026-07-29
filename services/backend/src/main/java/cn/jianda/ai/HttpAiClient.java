@@ -26,6 +26,7 @@ public class HttpAiClient implements AiClient {
     private final URI extractUri;
     private final URI metadataUri;
     private final URI webPreviewUri;
+    private final URI articleDiscoveryUri;
 
     public HttpAiClient(ObjectMapper objectMapper, @Value("${jianda.ai-service-url}") String baseUrl) {
         this.objectMapper = objectMapper;
@@ -34,6 +35,7 @@ public class HttpAiClient implements AiClient {
         this.extractUri = URI.create(baseUrl + "/internal/extract-text");
         this.metadataUri = URI.create(baseUrl + "/internal/metadata-preview");
         this.webPreviewUri = URI.create(baseUrl + "/internal/web-ingest/preview");
+        this.articleDiscoveryUri = URI.create(baseUrl + "/internal/article-discovery");
     }
 
     @Override
@@ -52,6 +54,18 @@ public class HttpAiClient implements AiClient {
                 "url", url,
                 "allow_image_download", allowImageDownload
         ), "web article preview", 90_000);
+    }
+
+    @Override
+    public Map<String, Object> discoverArticles(long sourceId, String sourceUrl, String entryUrl,
+                                                String method, int rateLimitSeconds) {
+        return sendJson(articleDiscoveryUri, Map.of(
+                "source_id", sourceId,
+                "source_url", sourceUrl,
+                "entry_url", entryUrl,
+                "method", method,
+                "rate_limit_seconds", rateLimitSeconds
+        ), "article discovery", 30_000);
     }
 
     private Map<String, Object> sendFile(URI uri, Path file, String fileName,

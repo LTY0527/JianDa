@@ -9,6 +9,8 @@ from app.extraction import ALLOWED_SUFFIXES, extract_file
 from app.metadata import detect_metadata
 from app.models import (
     AnalyzeResult,
+    ArticleDiscoveryRequest,
+    ArticleDiscoveryResponse,
     ExtractTextResult,
     MetadataPreview,
     RewriteOnlyRequest,
@@ -18,6 +20,7 @@ from app.models import (
 )
 from app.providers import ExternalLlmProvider, LlmProvider, MockProvider
 from app.providers.external import ExternalProviderError
+from app.article_discovery import DiscoverySource, discover_articles
 from app.web_ingest import preview_web_article
 
 app = FastAPI(title="简达 AI 服务", version="0.1.0")
@@ -136,6 +139,29 @@ def generate_steps(request: TextRequest) -> dict[str, object]:
 @app.post("/internal/trace-fields")
 def trace_fields(request: TextRequest) -> dict[str, object]:
     return {"fields": analyze(request).fields}
+
+
+@app.post("/internal/article-discovery", response_model=ArticleDiscoveryResponse)
+async def article_discovery(request: ArticleDiscoveryRequest) -> ArticleDiscoveryResponse:
+    try:
+        result = await discover_articles(
+            DiscoverySource(request.source_id, request.source_url, request.rate_limit_seconds),
+            request.entry_url,
+            request.method,
+        )
+        return ArticleDiscoveryResponse(
+            candidates=[candidate.__dict__ for candidate in result.candidates],
+            errors=result.errors,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logging.getLogger("uvicorn.error").warning(
+            "article_discovery_failed type=%s", type(exc).__name__
+        )
+        raise HTTPException(status_code=502, detail="文章发现入口暂时无法访问或解析") from exc
 
 
 @app.post("/internal/web-ingest/preview", response_model=WebArticlePreview)

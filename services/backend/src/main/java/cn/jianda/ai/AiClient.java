@@ -11,6 +11,9 @@ public interface AiClient {
 
     Map<String, Object> previewWebArticle(String url, boolean allowImageDownload);
 
+    Map<String, Object> discoverArticles(long sourceId, String sourceUrl, String entryUrl,
+                                         String method, int rateLimitSeconds);
+
     Map<String, Object> analyze(String title, String text, String documentType,
                                 String sourceName, List<Map<String, Object>> segments,
                                 Map<String, Object> context);

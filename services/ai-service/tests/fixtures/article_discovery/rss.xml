@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>权威资讯</title>
+<item><title>养老服务新通知</title><link>https://fixture.example/articles/pension</link><pubDate>Wed, 29 Jul 2026 08:00:00 GMT</pubDate></item>
+<item><title>重复通知</title><link>https://fixture.example/articles/pension#share</link></item>
+<item><title>非法协议</title><link>javascript:alert(1)</link></item>
+<item><title>外域资讯</title><link>https://outside.example/article</link></item>
+</channel></rss>

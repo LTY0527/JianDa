@@ -19,9 +19,11 @@ import org.springframework.web.bind.annotation.RestController;
 @PreAuthorize("hasRole('PLATFORM_ADMIN')")
 public class SourceRegistryController {
     private final SourceRegistryService service;
+    private final ArticleDiscoveryService discoveryService;
 
-    public SourceRegistryController(SourceRegistryService service) {
+    public SourceRegistryController(SourceRegistryService service, ArticleDiscoveryService discoveryService) {
         this.service = service;
+        this.discoveryService = discoveryService;
     }
 
     @GetMapping
@@ -51,5 +53,11 @@ public class SourceRegistryController {
         return ApiResponse.ok(service.setEnabled(id, request.enabled(), UserContext.current()));
     }
 
+    @PostMapping("/{id}/discover")
+    public ApiResponse<Map<String, Object>> discover(@PathVariable long id, @RequestBody DiscoveryRequest request) {
+        return ApiResponse.ok(discoveryService.discover(id, request.method(), request.entryUrl()));
+    }
+
     public record EnabledRequest(boolean enabled) {}
+    public record DiscoveryRequest(String method, String entryUrl) {}
 }

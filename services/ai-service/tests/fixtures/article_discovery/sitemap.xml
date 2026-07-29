@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://fixture.example/news/one</loc><lastmod>2026-07-27</lastmod></url>
+<url><loc>https://fixture.example/news/two</loc></url>
+<url><loc>https://outside.example/news/three</loc></url>
+</urlset>

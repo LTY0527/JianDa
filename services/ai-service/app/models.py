@@ -370,6 +370,32 @@ class MetadataPreview(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ArticleDiscoveryRequest(BaseModel):
+    source_id: int = Field(gt=0)
+    source_url: str = Field(min_length=8, max_length=1500)
+    entry_url: str = Field(min_length=8, max_length=1500)
+    method: Literal["RSS", "ATOM", "SITEMAP", "JSON_LD", "SECTION", "MIXED"]
+    rate_limit_seconds: int = Field(default=3, ge=0, le=60)
+
+
+class ArticleDiscoveryCandidate(BaseModel):
+    source_id: int
+    discovered_url: str
+    canonical_url: str
+    title: str = ""
+    published_time: str | None = None
+    discovery_method: str
+    discovery_page: str
+    content_kind_candidate: str
+    discovered_at: str
+    dedup_key: str
+
+
+class ArticleDiscoveryResponse(BaseModel):
+    candidates: list[ArticleDiscoveryCandidate] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
 class WebArticleRequest(BaseModel):
     url: str = Field(min_length=8, max_length=1500)
     allow_image_download: bool = False
