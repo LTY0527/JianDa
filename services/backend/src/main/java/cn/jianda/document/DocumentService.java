@@ -43,6 +43,10 @@ public class DocumentService {
     private static final String EMPTY_AI_FIELDS_MESSAGE =
             "AI未生成可追溯的关键字段，请检查模型输出后重新处理";
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of("pdf", "png", "jpg", "jpeg");
+    private static final Set<String> DOCUMENT_KINDS = Set.of(
+            "SERVICE_GUIDE", "ACTIVITY_NOTICE", "POLICY_DOCUMENT",
+            "STANDARD_SPECIFICATION", "HEALTH_EDUCATION", "ANTI_FRAUD",
+            "ELDERLY_SERVICE", "NEWS_ARTICLE", "GENERAL_PUBLIC_SERVICE");
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
     private final AiQueueService aiQueueService;
@@ -319,9 +323,16 @@ public class DocumentService {
             saveStructuredIfPresent(id, result, "faq", "FAQ", "常见问题");
             saveStructuredIfPresent(id, result, "scope", "CONTENT_SCOPE", "适用范围");
             saveStructuredIfPresent(id, result, "uncertainties", "UNCERTAINTIES", "尚待确认");
+            saveStructuredIfPresent(id, result, "document_outline", "DOCUMENT_OUTLINE", "文档目录");
+            saveStructuredIfPresent(id, result, "section_summaries", "SECTION_SUMMARIES", "章节摘要");
             saveStructuredIfPresent(id, result, "standard_sections", "STANDARD_SECTIONS", "标准规范结构");
             saveStructuredIfPresent(id, result, "policy_sections", "POLICY_SECTIONS", "政策要点");
             saveStructuredIfPresent(id, result, "health_guidance", "HEALTH_GUIDANCE", "健康指导");
+            String documentKind = nullableString(result.get("document_kind"));
+            if (!"WEB_ARTICLE".equals(document.get("source_type"))
+                    && DOCUMENT_KINDS.contains(documentKind)) {
+                jdbc.update("UPDATE source_document SET content_kind=? WHERE id=?", documentKind, id);
+            }
             if (result.get("warnings") != null) {
                 saveGenerated(id, "RISK_WARNING", "风险提示", result.get("warnings"),
                         String.valueOf(result.get("warnings")));

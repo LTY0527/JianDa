@@ -19,6 +19,13 @@ const contentKinds: Record<string, string> = {
   ANTI_FRAUD: "防诈提醒",
   COMMUNITY_SERVICE: "社区服务",
   GENERAL_NEWS: "综合资讯",
+  SERVICE_GUIDE: "办事指南",
+  ACTIVITY_NOTICE: "活动通知",
+  POLICY_DOCUMENT: "政策文件",
+  STANDARD_SPECIFICATION: "标准规范",
+  ELDERLY_SERVICE: "养老服务",
+  NEWS_ARTICLE: "新闻资讯",
+  GENERAL_PUBLIC_SERVICE: "其他公共服务材料",
 };
 
 const statuses: Record<string, string> = {

@@ -49,6 +49,12 @@ const structuredFees = ref<any[]>([]);
 const resultDelivery = ref<any[]>([]);
 const summaryItems = ref<string[]>([]);
 const plainText = ref("");
+const reviewModules = ref<Array<{
+  type: string;
+  title: string;
+  items: Array<Record<string, any>>;
+}>>([]);
+const confirmedModules = ref<string[]>([]);
 const coverReviewed = ref(false);
 const coverFailed = ref(false);
 const resourceWarnings = ref<string[]>([]);
@@ -85,9 +91,24 @@ const reviewCoverUrl = computed(() =>
     ? document.value.cover_image_url
     : defaultCoverUrl.value),
 );
-const canFinish = computed(() => fields.value.length > 0 || (isWebArticle.value && summaryItems.value.length > 0));
+const canFinish = computed(
+  () =>
+    fields.value.length > 0 ||
+    reviewModules.value.length > 0 ||
+    (isWebArticle.value && summaryItems.value.length > 0),
+);
+const modulesConfirmed = computed(
+  () =>
+    reviewModules.value.length === 0 ||
+    reviewModules.value.every((module) =>
+      confirmedModules.value.includes(module.type),
+    ),
+);
 const canSubmitReview = computed(
-  () => canFinish.value && document.value?.processing_status === "WAITING_REVIEW",
+  () =>
+    canFinish.value &&
+    modulesConfirmed.value &&
+    document.value?.processing_status === "WAITING_REVIEW",
 );
 const reviewActionLabel = computed(() => {
   if (document.value?.processing_status === "PUBLISHED") return "内容已发布";
@@ -176,6 +197,19 @@ async function load() {
     resultDelivery.value = parsed("RESULT_DELIVERY", []);
     summaryItems.value = parsed("SUMMARY", []);
     plainText.value = generated.find((item) => item.content_type === "PLAIN_TEXT")?.plain_text || "";
+    reviewModules.value = [
+      ["STANDARD_SECTIONS", "标准规范结构"],
+      ["POLICY_SECTIONS", "政策要点"],
+      ["HEALTH_GUIDANCE", "健康指导"],
+      ["DOCUMENT_OUTLINE", "文档目录"],
+      ["SECTION_SUMMARIES", "章节摘要"],
+    ].flatMap(([type, title]) => {
+      const value = parsed(type, []);
+      const items = Array.isArray(value)
+        ? value.filter((item) => item && typeof item === "object")
+        : [];
+      return items.length ? [{ type, title, items }] : [];
+    });
     coverReviewed.value = Boolean(document.value.image_reviewed);
     if (isWebArticle.value) {
       const candidateResponse = await publicSourceApi.imageCandidates(documentId);
@@ -222,6 +256,12 @@ async function confirm(index: number) {
     if (!confirmed.value.includes(index)) confirmed.value.push(index);
   } catch (cause) {
     error.value = apiMessage(cause);
+  }
+}
+
+function confirmModule(type: string) {
+  if (!confirmedModules.value.includes(type)) {
+    confirmedModules.value.push(type);
   }
 }
 
@@ -489,6 +529,33 @@ async function rejectCandidate(candidate: ImageCandidate) {
           <ol><li v-for="item in summaryItems" :key="item">{{item}}</li></ol>
           <h3>适老化正文</h3>
           <p class="web-ai-review__plain">{{ plainText }}</p>
+        </section>
+        <section
+          v-for="module in reviewModules"
+          :key="module.type"
+          class="structured-review type-specific-review"
+        >
+          <h3>{{ module.title }}</h3>
+          <article v-for="(item, index) in module.items" :key="index">
+            <b>{{ item.label || item.title || `第 ${index + 1} 项` }}</b>
+            <p>{{ item.value || item.summary || item.description }}</p>
+            <div v-if="item.source_quote" class="trace">
+              <span>原文依据 · 第 {{ item.page_no || 1 }} 页</span>
+              <p>“{{ item.source_quote }}”</p>
+            </div>
+          </article>
+          <button
+            type="button"
+            class="confirm-btn"
+            :disabled="confirmedModules.includes(module.type)"
+            @click="confirmModule(module.type)"
+          >
+            <CheckCircle2 :size="17" />{{
+              confirmedModules.includes(module.type)
+                ? "此模块已确认"
+                : "确认此模块"
+            }}
+          </button>
         </section>
         <section v-if="serviceSchedule.service_windows?.length || conditionalMaterials.length || structuredFees.length || resultDelivery.length" class="structured-review">
           <h3>通用结构化结果</h3>

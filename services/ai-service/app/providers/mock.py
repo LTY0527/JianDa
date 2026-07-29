@@ -1,6 +1,18 @@
 import re
 
-from app.models import AnalyzeResult, ExtractedField, StepCard, TextRequest
+from app.document_structure import (
+    build_document_outline,
+    build_type_specific_facts,
+    detect_document_kind,
+    split_document_sections,
+)
+from app.models import (
+    AnalyzeResult,
+    ExtractedField,
+    SourceSegment,
+    StepCard,
+    TextRequest,
+)
 from app.providers.base import LlmProvider
 
 
@@ -120,6 +132,15 @@ class MockProvider(LlmProvider):
         audio_parts = summary + [
             f"第{step.order}步，{step.title}，{step.description}" for step in steps
         ]
+        document_kind = detect_document_kind(
+            request.title, request.text, request.source_name, request.content_kind
+        )
+        sections = split_document_sections(
+            request.segments
+            or [SourceSegment(segment_id=1, page_no=1, text=request.text)]
+        )
+        outline = build_document_outline(sections)
+        type_facts = build_type_specific_facts(document_kind, sections)
         return AnalyzeResult(
             fields=fields,
             summary=summary,
@@ -128,6 +149,18 @@ class MockProvider(LlmProvider):
             term_explanations={},
             warnings=warnings,
             audio_script="。".join(audio_parts),
+            document_kind=document_kind,
+            document_outline=outline,
+            section_summaries=outline,
+            standard_sections=(
+                type_facts if document_kind == "STANDARD_SPECIFICATION" else []
+            ),
+            policy_sections=(
+                type_facts if document_kind == "POLICY_DOCUMENT" else []
+            ),
+            health_guidance=(
+                type_facts if document_kind == "HEALTH_EDUCATION" else []
+            ),
         )
 
     def _material(self, text: str) -> tuple[str, str] | None:

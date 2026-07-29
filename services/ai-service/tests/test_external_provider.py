@@ -179,6 +179,40 @@ def test_normal_two_stage_request_and_endpoint_contract():
         assert sent["json"]["stream"] is False
 
 
+def test_standard_document_can_succeed_without_flat_fields():
+    source = """养老服务标准
+1 范围
+本标准规定了社区养老服务的基本要求。
+2 服务内容
+服务包括助餐、探访和健康宣传。
+3 质量评价
+机构应当定期开展服务质量评价。"""
+    fact_payload = facts([])
+    fact_payload["prompt_version"] = "v1.1"
+    rewrite_payload = rewrite("这份标准说明社区养老服务的范围、内容和质量要求。")
+    rewrite_payload["prompt_version"] = "v1.1"
+    with QueueServer(
+        [
+            response(200, json_completion(fact_payload)),
+            response(200, json_completion(rewrite_payload)),
+        ]
+    ) as server:
+        provider = ExternalLlmProvider(
+            settings(f"{server.url}/", prompt_version="v1.1"),
+            sleep=lambda _: None,
+        )
+        result = provider.analyze(request(source))
+
+    assert result.fields == []
+    assert result.document_kind == "STANDARD_SPECIFICATION"
+    assert {item.label for item in result.standard_sections} >= {
+        "范围",
+        "服务内容",
+        "质量",
+    }
+    assert all(item.source_quote in source for item in result.standard_sections)
+
+
 def test_assistant_rag_uses_only_numbered_evidence_and_returns_metrics():
     payload = {
         "answer": "不要提供短信验证码。[1]",

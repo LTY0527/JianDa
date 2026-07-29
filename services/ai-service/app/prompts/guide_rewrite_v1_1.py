@@ -27,6 +27,19 @@ def build_task_prompt(
         "result_delivery": [item.model_dump() for item in structured.result_delivery],
         "deadline_rules": [item.model_dump() for item in structured.deadline_rules],
         "amendments": [item.model_dump() for item in structured.amendments],
+        "document_kind": structured.document_kind,
+        "document_outline": [
+            item.model_dump() for item in structured.document_outline
+        ],
+        "standard_sections": [
+            item.model_dump() for item in structured.standard_sections
+        ],
+        "policy_sections": [
+            item.model_dump() for item in structured.policy_sections
+        ],
+        "health_guidance": [
+            item.model_dump() for item in structured.health_guidance
+        ],
     }
     output = {
         "prompt_version": prompt_version,

@@ -39,6 +39,25 @@ ContentKind = Literal[
     "ANTI_FRAUD",
     "COMMUNITY_SERVICE",
     "GENERAL_NEWS",
+    "SERVICE_GUIDE",
+    "ACTIVITY_NOTICE",
+    "POLICY_DOCUMENT",
+    "STANDARD_SPECIFICATION",
+    "ANTI_FRAUD",
+    "ELDERLY_SERVICE",
+    "NEWS_ARTICLE",
+    "GENERAL_PUBLIC_SERVICE",
+]
+DocumentKind = Literal[
+    "SERVICE_GUIDE",
+    "ACTIVITY_NOTICE",
+    "POLICY_DOCUMENT",
+    "STANDARD_SPECIFICATION",
+    "HEALTH_EDUCATION",
+    "ANTI_FRAUD",
+    "ELDERLY_SERVICE",
+    "NEWS_ARTICLE",
+    "GENERAL_PUBLIC_SERVICE",
 ]
 
 
@@ -239,6 +258,20 @@ class ContentScope(BaseModel):
     needs_personal_action: bool | None = None
 
 
+class DocumentOutlineItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    title: str = Field(min_length=1)
+    page_no: int = Field(ge=1)
+    segment_ids: list[int] = Field(default_factory=list)
+    summary: str = ""
+
+
+class TypeSpecificFact(TraceableItem):
+    label: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+    confidence: float = Field(ge=0, le=1)
+
+
 class AnalyzeResult(BaseModel):
     fields: list[ExtractedField]
     sessions: list[ServiceSession] = Field(default_factory=list)
@@ -263,6 +296,12 @@ class AnalyzeResult(BaseModel):
     faq: list[FaqItem] = Field(default_factory=list)
     scope: ContentScope | None = None
     uncertainties: list[str] = Field(default_factory=list)
+    document_kind: DocumentKind = "GENERAL_PUBLIC_SERVICE"
+    document_outline: list[DocumentOutlineItem] = Field(default_factory=list)
+    section_summaries: list[DocumentOutlineItem] = Field(default_factory=list)
+    standard_sections: list[TypeSpecificFact] = Field(default_factory=list)
+    policy_sections: list[TypeSpecificFact] = Field(default_factory=list)
+    health_guidance: list[TypeSpecificFact] = Field(default_factory=list)
     metrics: ProcessingMetrics = Field(default_factory=ProcessingMetrics)
 
 
@@ -301,6 +340,12 @@ class FactExtractionResponse(BaseModel):
     deadline_rules: list[DeadlineRule] = Field(default_factory=list)
     amendments: list[Amendment] = Field(default_factory=list)
     uncertain_fields: list[str] = Field(default_factory=list)
+    document_kind: DocumentKind = "GENERAL_PUBLIC_SERVICE"
+    document_outline: list[DocumentOutlineItem] = Field(default_factory=list)
+    section_summaries: list[DocumentOutlineItem] = Field(default_factory=list)
+    standard_sections: list[TypeSpecificFact] = Field(default_factory=list)
+    policy_sections: list[TypeSpecificFact] = Field(default_factory=list)
+    health_guidance: list[TypeSpecificFact] = Field(default_factory=list)
 
 
 class RewriteResponse(BaseModel):

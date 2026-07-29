@@ -51,9 +51,16 @@ async function mockProcessing(
                 id: 91,
                 content_type: "STANDARD_SECTIONS",
                 title: "标准规范结构",
-                content_json: JSON.stringify({
-                  scope: "适用于社区养老服务",
-                }),
+                content_json: JSON.stringify([
+                  {
+                    label: "适用范围",
+                    value: "适用于社区养老服务",
+                    source_quote: "本标准适用于社区养老服务",
+                    page_no: 1,
+                    segment_id: 81,
+                    confidence: 0.96,
+                  },
+                ]),
                 content_text: "适用于社区养老服务",
               },
             ]
@@ -110,6 +117,8 @@ test("处理页每两秒轮询并在只有类型模块时开放审核入口", as
   ).toBeVisible({ timeout: 7_000 });
   expect(detailRequests).toBeGreaterThanOrEqual(3);
   await expect(page.getByText("处理完成，可进入原文对照审核")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "标准规范结构" })).toBeVisible();
+  await expect(page.getByText("适用范围：适用于社区养老服务")).toBeVisible();
 });
 
 test("刷新页面后从后端恢复已有任务终态", async ({ page }) => {
@@ -129,4 +138,18 @@ test("刷新页面后从后端恢复已有任务终态", async ({ page }) => {
   await expect(
     page.getByText("已生成 0 个可追溯字段和 1 个内容模块"),
   ).toBeVisible();
+});
+
+test("无扁平字段时可逐模块确认标准规范结果", async ({ page }) => {
+  await mockProcessing(page, () => "WAITING_REVIEW");
+  await page.goto(`${institutionUrl}/documents/108/review`);
+
+  await expect(page.getByRole("heading", { name: "标准规范结构" })).toBeVisible();
+  const finish = page.getByRole("button", { name: "完成字段审核" });
+  await expect(finish).toBeDisabled();
+  await page.getByRole("button", { name: "确认此模块" }).click();
+  await expect(
+    page.getByRole("button", { name: "此模块已确认" }),
+  ).toBeDisabled();
+  await expect(finish).toBeEnabled();
 });

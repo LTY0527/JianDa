@@ -52,6 +52,25 @@ const terminal = computed(
 const hasReviewContent = computed(
   () => fields.value.length > 0 || generated.value.length > 0,
 );
+const structuredModuleTypes = new Set([
+  "DOCUMENT_OUTLINE",
+  "SECTION_SUMMARIES",
+  "STANDARD_SECTIONS",
+  "POLICY_SECTIONS",
+  "HEALTH_GUIDANCE",
+  "ACTION_CHECKLIST",
+  "KEY_FACTS",
+  "RISK_WARNING",
+]);
+const structuredModules = computed(() =>
+  generated.value
+    .filter((item) => structuredModuleTypes.has(item.content_type))
+    .map((item) => ({
+      ...item,
+      items: moduleItems(item.content_json, item.plain_text),
+    }))
+    .filter((item) => item.items.length),
+);
 const completed = computed(
   () =>
     document.value?.processing_status === "WAITING_REVIEW" &&
@@ -107,6 +126,32 @@ function parseJsonArray(value?: string): unknown[] {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+function moduleItems(contentJson?: string, plainText?: string): string[] {
+  if (!contentJson) return plainText ? [plainText] : [];
+  try {
+    const parsed = JSON.parse(contentJson);
+    const values = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === "object"
+        ? Object.entries(parsed).map(([label, value]) => ({ label, value }))
+        : [parsed];
+    return values
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (!item || typeof item !== "object") return String(item ?? "");
+        const record = item as Record<string, unknown>;
+        const label = String(record.label || record.title || "");
+        const value = String(
+          record.value || record.summary || record.description || "",
+        );
+        return [label, value].filter(Boolean).join("：");
+      })
+      .filter(Boolean);
+  } catch {
+    return plainText ? [plainText] : [];
   }
 }
 
@@ -272,7 +317,7 @@ onUnmounted(() => {
           ><b>{{ isWebArticle ? "内容类型识别与 AI 适老化处理" : "AI 分析" }}</b
           ><small>{{
             hasReviewContent
-              ? `${isWebArticle ? `${contentKindLabel(document?.content_kind)} · ` : ""}已生成 ${fields.length} 个可追溯字段和 ${generated.length} 个内容模块`
+              ? `${contentKindLabel(document?.content_kind)} · 已生成 ${fields.length} 个可追溯字段和 ${generated.length} 个内容模块`
               : failed || emptyReviewResult
                 ? "未生成可审核字段"
                 : "正在等待分析结果"
@@ -322,6 +367,20 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
+    </section>
+    <section v-if="structuredModules.length" class="panel structured-modules">
+      <div class="panel-title">
+        <div>
+          <h2>材料类型专属结果</h2>
+          <p>{{ contentKindLabel(document?.content_kind) }} · 请在审核页逐项核对原文</p>
+        </div>
+      </div>
+      <article v-for="module in structuredModules" :key="module.id">
+        <h3>{{ module.title }}</h3>
+        <ul>
+          <li v-for="item in module.items" :key="item">{{ item }}</li>
+        </ul>
+      </article>
     </section>
     <div v-if="hasReviewContent" class="result-grid">
       <section class="panel">
@@ -385,5 +444,20 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 12px;
   margin: 14px 0;
+}
+.structured-modules {
+  margin-bottom: 16px;
+}
+.structured-modules article + article {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+.structured-modules h3 {
+  margin: 0 0 8px;
+}
+.structured-modules ul {
+  margin: 0;
+  padding-left: 1.25rem;
 }
 </style>

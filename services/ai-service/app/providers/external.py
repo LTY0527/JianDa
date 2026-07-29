@@ -8,12 +8,19 @@ import time
 import threading
 from collections import Counter
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 from pydantic import ValidationError
 
+from app.document_structure import (
+    build_document_outline,
+    build_type_specific_facts,
+    detect_document_kind,
+    split_document_sections,
+)
 from app.models import (
     AnalyzeResult,
     Amendment,
@@ -441,6 +448,182 @@ class ExternalLlmProvider(LlmProvider):
     def _dynamic_rewrite_max_tokens(self, request: TextRequest) -> int:
         return min(self.settings.max_tokens, max(1400, len(request.text) * 2))
 
+    def _complete_fact_extraction(
+        self,
+        client: Any,
+        fact_prompt: Any,
+        request: TextRequest,
+        prompt_version: str,
+    ) -> CompletionResult:
+        chunk_requests = self._fact_chunk_requests(request)
+
+        def complete(chunk_request: TextRequest) -> CompletionResult:
+            return self._completion(
+                client,
+                [
+                    {"role": "system", "content": fact_prompt.SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": fact_prompt.build_task_prompt(
+                            chunk_request, prompt_version
+                        ),
+                    },
+                ],
+                stage="fact_extract",
+                max_tokens=self._dynamic_fact_max_tokens(chunk_request),
+            )
+
+        if len(chunk_requests) == 1:
+            return complete(chunk_requests[0])
+        LOGGER.info(
+            "external_llm stage=fact_extract mode=section_chunks "
+            "section_request_count=%s max_parallel=2",
+            len(chunk_requests),
+        )
+        with ThreadPoolExecutor(
+            max_workers=min(2, len(chunk_requests)),
+            thread_name_prefix="llm-section",
+        ) as executor:
+            results = list(executor.map(complete, chunk_requests))
+        return self._merge_fact_results(results, prompt_version)
+
+    def _fact_chunk_requests(self, request: TextRequest) -> list[TextRequest]:
+        threshold = max(
+            4000, int(os.getenv("LLM_LONG_DOCUMENT_THRESHOLD_CHARS", "12000"))
+        )
+        if len(request.text) <= threshold:
+            return [request]
+        chunk_chars = max(
+            3000, int(os.getenv("LLM_SECTION_CHUNK_CHARS", "7000"))
+        )
+        max_chunks = max(2, int(os.getenv("LLM_MAX_SECTION_CHUNKS", "8")))
+        source_segments = request.segments or [
+            SourceSegment(segment_id=1, page_no=1, text=request.text)
+        ]
+        by_id = {segment.segment_id: segment for segment in source_segments}
+        sections = split_document_sections(source_segments, max_chars=chunk_chars)
+        groups: list[list[int]] = []
+        group_ids: list[int] = []
+        group_chars = 0
+        for section in sections:
+            section_ids = [
+                segment_id
+                for segment_id in section.segment_ids
+                if segment_id in by_id
+            ]
+            section_chars = sum(
+                len(by_id[segment_id].text)
+                for segment_id in dict.fromkeys(section_ids)
+                if segment_id not in group_ids
+            )
+            if group_ids and group_chars + section_chars > chunk_chars:
+                groups.append(group_ids)
+                group_ids = []
+                group_chars = 0
+            for segment_id in section_ids:
+                if segment_id not in group_ids:
+                    group_ids.append(segment_id)
+                    group_chars += len(by_id[segment_id].text)
+        if group_ids:
+            groups.append(group_ids)
+        if not groups:
+            return [request]
+        if len(groups) > max_chunks:
+            groups = groups[: max_chunks - 1] + [
+                list(dict.fromkeys(
+                    segment_id
+                    for group in groups[max_chunks - 1 :]
+                    for segment_id in group
+                ))
+            ]
+        requests: list[TextRequest] = []
+        for group in groups:
+            segments = [by_id[segment_id] for segment_id in group]
+            requests.append(
+                request.model_copy(
+                    update={
+                        "text": "\n\n".join(segment.text for segment in segments),
+                        "segments": segments,
+                    }
+                )
+            )
+        return requests or [request]
+
+    @staticmethod
+    def _merge_fact_results(
+        results: list[CompletionResult],
+        prompt_version: str,
+    ) -> CompletionResult:
+        merged: dict[str, Any] = {"prompt_version": prompt_version}
+        list_keys = (
+            "fields",
+            "sessions",
+            "conditional_materials",
+            "fees",
+            "result_delivery",
+            "deadline_rules",
+            "amendments",
+            "uncertain_fields",
+        )
+        for key in list_keys:
+            values = [
+                item
+                for result in results
+                for item in (
+                    result.payload.get(key)
+                    if isinstance(result.payload.get(key), list)
+                    else []
+                )
+            ]
+            merged[key] = list({
+                json.dumps(item, ensure_ascii=False, sort_keys=True): item
+                for item in values
+            }.values())
+        for parent, children in {
+            "audience_rules": ("audience", "conditions"),
+            "service_schedule": ("service_windows", "closure_rules"),
+        }.items():
+            merged[parent] = {}
+            for child in children:
+                values = [
+                    item
+                    for result in results
+                    for item in (
+                        result.payload.get(parent, {}).get(child, [])
+                        if isinstance(result.payload.get(parent), dict)
+                        and isinstance(result.payload.get(parent, {}).get(child), list)
+                        else []
+                    )
+                ]
+                merged[parent][child] = list({
+                    json.dumps(item, ensure_ascii=False, sort_keys=True): item
+                    for item in values
+                }.values())
+        digest = hashlib.sha256(
+            "".join(result.response_sha256 for result in results).encode()
+        ).hexdigest()
+        return CompletionResult(
+            payload=merged,
+            request_id=",".join(
+                result.request_id for result in results if result.request_id
+            )[:240],
+            finish_reason="section_chunks",
+            prompt_tokens=sum(result.prompt_tokens for result in results),
+            completion_tokens=sum(result.completion_tokens for result in results),
+            total_tokens=sum(result.total_tokens for result in results),
+            elapsed_ms=max((result.elapsed_ms for result in results), default=0),
+            retry_count=sum(result.retry_count for result in results),
+            response_length=sum(result.response_length for result in results),
+            response_sha256=digest,
+            json_parse_success=all(result.json_parse_success for result in results),
+            normalization_applied=any(
+                result.normalization_applied for result in results
+            ),
+            repaired_paths=tuple(
+                path for result in results for path in result.repaired_paths
+            ),
+        )
+
     def analyze(self, request: TextRequest) -> AnalyzeResult:
         total_started = time.perf_counter()
         active_prompt_version = self._prompt_version(request)
@@ -490,19 +673,11 @@ class ExternalLlmProvider(LlmProvider):
             "external_llm stage=fact_extract prompt_version=%s",
             self.settings.prompt_version,
         )
-        fact_result = self._completion(
+        fact_result = self._complete_fact_extraction(
             active_client,
-            [
-                {"role": "system", "content": fact_prompt.SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": fact_prompt.build_task_prompt(
-                        request, active_prompt_version
-                    ),
-                },
-            ],
-            stage="fact_extract",
-            max_tokens=self._dynamic_fact_max_tokens(request),
+            fact_prompt,
+            request,
+            active_prompt_version,
         )
         trace_started = time.perf_counter()
         model_facts = self._validate_facts(
@@ -518,6 +693,8 @@ class ExternalLlmProvider(LlmProvider):
             fact_result.payload, model_facts, sessions, request, active_prompt_version
         )
         structured = self._complete_common_structures(structured, request)
+        if not facts and not self._has_traceable_structured_content(structured):
+            raise ExternalProviderError("模型未生成可追溯的关键字段或类型专属结构")
         trace_validation_ms = self._elapsed_ms(trace_started)
         LOGGER.info(
             "provider=external model=%s prompt_version=%s "
@@ -577,6 +754,12 @@ class ExternalLlmProvider(LlmProvider):
                     deadline_rules=structured.deadline_rules,
                     amendments=structured.amendments,
                     uncertain_fields=structured.uncertain_fields,
+                    document_kind=structured.document_kind,
+                    document_outline=structured.document_outline,
+                    section_summaries=structured.section_summaries,
+                    standard_sections=structured.standard_sections,
+                    policy_sections=structured.policy_sections,
+                    health_guidance=structured.health_guidance,
                 )
                 exc.fact_checkpoint = {
                     "prompt_version": active_prompt_version,
@@ -659,6 +842,12 @@ class ExternalLlmProvider(LlmProvider):
             uncertainties=list(dict.fromkeys(
                 structured.uncertain_fields + rewrite.uncertainties
             )),
+            document_kind=structured.document_kind,
+            document_outline=structured.document_outline,
+            section_summaries=structured.section_summaries,
+            standard_sections=structured.standard_sections,
+            policy_sections=structured.policy_sections,
+            health_guidance=structured.health_guidance,
             metrics=metrics,
         )
         if cache_key:
@@ -681,6 +870,26 @@ class ExternalLlmProvider(LlmProvider):
                 metrics.total_ms,
             )
         return result
+
+    @staticmethod
+    def _has_traceable_structured_content(
+        structured: FactExtractionResponse,
+    ) -> bool:
+        return any((
+            structured.sessions,
+            structured.audience_rules.audience,
+            structured.audience_rules.conditions,
+            structured.service_schedule.service_windows,
+            structured.service_schedule.closure_rules,
+            structured.conditional_materials,
+            structured.fees,
+            structured.result_delivery,
+            structured.deadline_rules,
+            structured.amendments,
+            structured.standard_sections,
+            structured.policy_sections,
+            structured.health_guidance,
+        ))
 
     def rewrite_from_checkpoint(
         self, request: TextRequest, checkpoint_payload: dict[str, Any]
@@ -742,6 +951,12 @@ class ExternalLlmProvider(LlmProvider):
             uncertainties=list(dict.fromkeys(
                 checkpoint.uncertain_fields + rewrite.uncertainties
             )),
+            document_kind=checkpoint.document_kind,
+            document_outline=checkpoint.document_outline,
+            section_summaries=checkpoint.section_summaries,
+            standard_sections=checkpoint.standard_sections,
+            policy_sections=checkpoint.policy_sections,
+            health_guidance=checkpoint.health_guidance,
             metrics=metrics,
         )
 
@@ -1468,7 +1683,7 @@ class ExternalLlmProvider(LlmProvider):
             len(trace_valid),
             reasons,
         )
-        if not trace_valid:
+        if not trace_valid and raw_field_count:
             safe_reasons = ",".join(
                 f"{name}={count}" for name, count in sorted(reasons.items())
             ) or "unknown=1"
@@ -1608,9 +1823,35 @@ class ExternalLlmProvider(LlmProvider):
         request: TextRequest,
         prompt_version: str,
     ) -> FactExtractionResponse:
+        document_kind = detect_document_kind(
+            request.title, request.text, request.source_name, request.content_kind
+        )
+        sections = split_document_sections(
+            request.segments
+            or [SourceSegment(segment_id=1, page_no=1, text=request.text)]
+        )
+        outline = build_document_outline(sections)
+        type_facts = build_type_specific_facts(document_kind, sections)
+        type_specific = {
+            "document_kind": document_kind,
+            "document_outline": outline,
+            "section_summaries": outline,
+            "standard_sections": (
+                type_facts if document_kind == "STANDARD_SPECIFICATION" else []
+            ),
+            "policy_sections": (
+                type_facts if document_kind == "POLICY_DOCUMENT" else []
+            ),
+            "health_guidance": (
+                type_facts if document_kind == "HEALTH_EDUCATION" else []
+            ),
+        }
         if prompt_version == "v1":
             return FactExtractionResponse(
-                prompt_version="v1", fields=facts, sessions=sessions
+                prompt_version="v1",
+                fields=facts,
+                sessions=sessions,
+                **type_specific,
             )
 
         audience_payload = payload.get("audience_rules")
@@ -1681,6 +1922,7 @@ class ExternalLlmProvider(LlmProvider):
             deadline_rules=deadline_rules,
             amendments=amendments,
             uncertain_fields=self._string_list(payload.get("uncertain_fields")),
+            **type_specific,
         )
 
     def _validate_structured_items(

@@ -96,7 +96,15 @@ class DocumentProcessingAsyncIntegrationTest {
         awaitJob(jobId, "SUCCEEDED");
         mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.processing_status").value("WAITING_REVIEW"));
+                .andExpect(jsonPath("$.data.processing_status").value("WAITING_REVIEW"))
+                .andExpect(jsonPath("$.data.content_kind").value("STANDARD_SPECIFICATION"));
+        Integer moduleCount = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM generated_content WHERE document_id=? "
+                        + "AND content_type='STANDARD_SECTIONS'",
+                Integer.class, documentId);
+        if (moduleCount == null || moduleCount != 1) {
+            throw new AssertionError("expected one persisted STANDARD_SECTIONS module");
+        }
     }
 
     @Test
@@ -150,6 +158,7 @@ class DocumentProcessingAsyncIntegrationTest {
     private Map<String, Object> reviewableResult() {
         return Map.of(
                 "fields", List.of(),
+                "document_kind", "STANDARD_SPECIFICATION",
                 "standard_sections", Map.of("scope", "适用于社区养老服务"),
                 "summary", List.of("本标准适用于社区养老服务。"),
                 "plain_text", "这份标准说明了社区养老服务的基本要求。",
