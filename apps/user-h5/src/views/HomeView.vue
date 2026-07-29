@@ -29,7 +29,9 @@ const healthReminders = computed(() => items.value.filter((item) => !usedAllIds.
 const fraudReminders = computed(() => items.value.filter((item) => !usedAllIds.value.has(item.id) && item.category === "反诈").slice(0,3));
 function fallbackCover(event: Event, item: PublicItem) {
   const image = event.currentTarget as HTMLImageElement;
-  const fallback = categoryDefaultCover(item);
+  const attempt = Number(image.dataset.fallbackAttempt || "0") + 1;
+  image.dataset.fallbackAttempt = String(attempt);
+  const fallback = categoryDefaultCover(item, attempt);
   if (!image.src.endsWith(fallback)) image.src = fallback;
 }
 async function load() { loading.value = true; error.value = ""; try { items.value = await fetchItems(); } catch { error.value = "暂时无法读取权威内容，请稍后再试"; } finally { loading.value = false; } }

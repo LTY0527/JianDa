@@ -307,7 +307,10 @@ function grow() {
   localStorage.setItem("jianda_font", String(font.value));
 }
 function fallbackCover(event: Event) {
-  (event.currentTarget as HTMLImageElement).src = categoryDefaultCover(item.value);
+  const image = event.currentTarget as HTMLImageElement;
+  const attempt = Number(image.dataset.fallbackAttempt || "0") + 1;
+  image.dataset.fallbackAttempt = String(attempt);
+  image.src = categoryDefaultCover(item.value, attempt);
 }
 function openOfficial() {
   const url = item.value.canonical_url || item.value.source_url;

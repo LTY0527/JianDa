@@ -18,7 +18,9 @@ async function toggleFavorite() {
 }
 function fallbackCover(event: Event) {
   const image = event.currentTarget as HTMLImageElement;
-  const fallback = categoryDefaultCover(props.item);
+  const attempt = Number(image.dataset.fallbackAttempt || "0") + 1;
+  image.dataset.fallbackAttempt = String(attempt);
+  const fallback = categoryDefaultCover(props.item, attempt);
   if (!image.src.endsWith(fallback)) image.src = fallback;
 }
 function listen() {

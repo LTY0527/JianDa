@@ -36,6 +36,21 @@ const items = [
     image_source_name: "简达本地分类默认图",
     importance: 90,
   },
+  {
+    id: 903,
+    slug: "news-health-default",
+    title: "老年人科学运动提示",
+    summary: "结合身体情况选择适合自己的活动强度。",
+    category: "健康",
+    source_name: "权威健康来源",
+    source_url: "https://official.example/health-2",
+    published_at: "2026-07-24T08:00:00+08:00",
+    content_kind: "HEALTH_EDUCATION",
+    cover_image_type: "CATEGORY_DEFAULT",
+    image_alt_text: "健康科普分类插图",
+    image_source_name: "简达本地分类默认图",
+    importance: 80,
+  },
 ];
 
 test.beforeEach(async ({ page }) => {
@@ -68,16 +83,26 @@ test("broken and missing covers use responsive category defaults", async ({
 
   const featured = page.locator(".featured-story > img");
   await expect(featured).toHaveAttribute("alt", "高温天气健康提示");
-  await expect(featured).toHaveAttribute("src", /\/images\/defaults\/health\.svg$/);
+  await expect(featured).toHaveAttribute("src", /\/images\/defaults\/health-\d\.svg$/);
   await expect(featured).toHaveCSS("object-fit", "cover");
   const featuredBox = await featured.boundingBox();
   expect(featuredBox).not.toBeNull();
   expect(featuredBox!.width / featuredBox!.height).toBeCloseTo(16 / 9, 1);
 
-  const listCover = page.locator(".editorial-card__image img");
-  await expect(listCover).toHaveAttribute("loading", "lazy");
-  await expect(listCover).toHaveAttribute("src", /\/images\/defaults\/policy\.svg$/);
-  await expect(listCover).toHaveCSS("object-fit", "cover");
+  const listCovers = page.locator(".editorial-card__image img");
+  await expect(listCovers.first()).toHaveAttribute("loading", "lazy");
+  await expect(listCovers.first()).toHaveAttribute("src", /\/images\/defaults\/policy-\d\.svg$/);
+  await expect(listCovers.first()).toHaveCSS("object-fit", "cover");
+  const beforeReload = await listCovers.evaluateAll((images) =>
+    images.map((image) => (image as HTMLImageElement).getAttribute("src")),
+  );
+  expect(new Set(beforeReload).size).toBe(beforeReload.length);
+  await page.reload();
+  await expect(page.locator(".editorial-card__image img")).toHaveCount(beforeReload.length);
+  const afterReload = await page.locator(".editorial-card__image img").evaluateAll((images) =>
+    images.map((image) => (image as HTMLImageElement).getAttribute("src")),
+  );
+  expect(afterReload).toEqual(beforeReload);
   await expect
     .poll(() =>
       page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -88,9 +113,12 @@ test("broken and missing covers use responsive category defaults", async ({
     path: path.join(os.tmpdir(), "jianda-phase9-cover-mobile.png"),
     fullPage: true,
   });
-  expect(consoleErrors).toEqual([
-    "Failed to load resource: the server responded with a status of 404 (Not Found)",
-  ]);
+  expect(consoleErrors).toHaveLength(2);
+  expect(new Set(consoleErrors)).toEqual(
+    new Set([
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    ]),
+  );
   expect(pageErrors).toEqual([]);
 });
 
