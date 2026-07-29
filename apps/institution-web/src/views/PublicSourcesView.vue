@@ -5,6 +5,7 @@ import PageHeader from "../components/PageHeader.vue";
 import { apiMessage } from "../api/http";
 import {
   publicSourceApi,
+  type AiQueueItem,
   type CrawlJob,
   type PublicSource,
   type SourceRegistryPayload,
@@ -18,6 +19,7 @@ import {
 const sources = ref<PublicSource[]>([]);
 const registries = ref<WebSourceRegistry[]>([]);
 const jobs = ref<CrawlJob[]>([]);
+const aiQueue = ref<AiQueueItem[]>([]);
 const selectedJob = ref<CrawlJob | null>(null);
 const taskStatus = ref("");
 const taskSourceId = ref<number | undefined>();
@@ -45,14 +47,16 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [sourceResponse, registryResponse, jobResponse] = await Promise.all([
+    const [sourceResponse, registryResponse, jobResponse, aiQueueResponse] = await Promise.all([
       publicSourceApi.sources(),
       publicSourceApi.webRegistries(),
       publicSourceApi.crawlJobs({ status: taskStatus.value || undefined, sourceId: taskSourceId.value }),
+      publicSourceApi.aiQueue(),
     ]);
     sources.value = sourceResponse.data.data;
     registries.value = registryResponse.data.data;
     jobs.value = jobResponse.data.data;
+    aiQueue.value = aiQueueResponse.data.data;
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -172,6 +176,16 @@ async function retryFailures(job: CrawlJob) {
   }
 }
 
+async function approveQueue(item: AiQueueItem) {
+  if (!window.confirm(`确认批准材料 #${item.document_id} 进入 AI 处理队列吗？`)) return;
+  try {
+    await publicSourceApi.approveAiQueue(item.id);
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -215,6 +229,7 @@ onMounted(load);
     <section class="panel">
       <div class="panel-title"><div><h2>网页白名单来源</h2><p>维护调度入口、文章上限和自动处理预算；新来源默认停用。</p></div></div>
       <form class="source-create" @submit.prevent="saveRegistry">
+        <p class="safe-note">默认安全策略：新来源保持停用，原图缓存和自动 AI 均关闭，所有候选内容必须人工审核后才能发布。</p>
         <div class="form-row">
           <label class="field">来源名称<input v-model="registryForm.name" required /></label>
           <label class="field">完整域名<input v-model="registryForm.domain" required placeholder="www.example.gov.cn" /></label>
@@ -247,6 +262,26 @@ onMounted(load);
       </table>
       <div v-if="loading" class="empty-state">正在加载运营来源…</div>
       <div v-else-if="registries.length === 0" class="empty-state">暂无运营来源，请先新增。</div>
+    </section>
+    <section class="panel">
+      <div class="panel-title"><div><h2>AI 处理队列与预算</h2><p>自动 AI 默认关闭；等待预算的任务不会自动执行，也不会被标记为已自动处理。</p></div></div>
+      <table class="data-table">
+        <thead><tr><th>材料 / 来源</th><th>状态</th><th>预算说明</th><th>预计恢复</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-for="item in aiQueue" :key="item.id">
+            <td><b>材料 #{{ item.document_id }}</b><small>{{ item.source_name || "人工导入" }} · 队列 #{{ item.id }}</small></td>
+            <td>{{ statusLabel(item.status) }}</td>
+            <td>{{ item.reason_summary || (item.status === "WAITING_APPROVAL" ? "自动 AI 未开启，等待人工批准。" : "预算正常") }}<small>预计 {{ (item.estimated_tokens || 0).toLocaleString() }} Token</small></td>
+            <td>{{ formatDisplayDateTime(item.estimated_recovery_at || item.available_at) }}</td>
+            <td>
+              <button v-if="item.status === 'WAITING_APPROVAL'" class="text-action strong" @click="approveQueue(item)">人工批准</button>
+              <button v-else-if="item.status === 'WAITING_BUDGET'" class="text-action" disabled>等待预算恢复</button>
+              <span v-else>无需操作</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="!loading && aiQueue.length === 0" class="empty-state">当前没有待处理的 AI 队列任务。</div>
     </section>
     <section class="panel">
       <div class="panel-title"><div><h2>采集任务中心</h2><p>统一查看任务计数、错误队列和重试状态。</p></div></div>

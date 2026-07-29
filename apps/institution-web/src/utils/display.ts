@@ -32,6 +32,8 @@ const statuses: Record<string, string> = {
   CANCELLED: "已取消",
   NEVER_RUN: "尚未运行",
   WAITING_REVIEW: "等待人工审核",
+  WAITING_APPROVAL: "等待人工批准",
+  WAITING_BUDGET: "等待预算恢复",
   REVIEWED: "已审核",
   PUBLISHED: "已发布",
   SUCCEEDED: "处理成功",
@@ -41,6 +43,7 @@ const statuses: Record<string, string> = {
   WITHDRAWN: "已撤回",
   ACTIVE: "启用",
   DISABLED: "停用",
+  DUPLICATE: "重复内容",
 };
 
 export function coverTypeLabel(value?: string | null): string {

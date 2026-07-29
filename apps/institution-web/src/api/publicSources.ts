@@ -111,14 +111,38 @@ export interface WebSourceRegistry {
   section_url?: string;
   daily_crawl_time: string;
   max_articles_per_run: number;
+  allow_image_cache?: boolean;
   allow_image_candidates: boolean;
+  allow_auto_crawl?: boolean;
   allow_auto_ai: boolean;
+  requires_manual_review?: boolean;
   daily_article_budget: number;
   daily_token_budget: number;
   last_crawled_at?: string;
   last_status: string;
   next_run_at?: string;
   last_error?: string;
+}
+
+export interface AiQueueItem {
+  id: number;
+  source_registry_id?: number;
+  source_name?: string;
+  document_id: number;
+  status:
+    | "QUEUED"
+    | "WAITING_APPROVAL"
+    | "WAITING_BUDGET"
+    | "PROCESSING"
+    | "SUCCEEDED"
+    | "FAILED"
+    | "DUPLICATE";
+  reason_code?: string;
+  reason_summary?: string;
+  estimated_tokens?: number;
+  available_at?: string;
+  estimated_recovery_at?: string;
+  created_at?: string;
 }
 
 export interface SourceRegistryPayload {
@@ -257,4 +281,10 @@ export const publicSourceApi = {
     http.post<ApiResponse<{ jobId: number }>>(`/crawl-tasks/errors/${errorId}/retry`),
   retryCrawlFailures: (jobId: number) =>
     http.post<ApiResponse<{ jobIds: number[]; count: number }>>(`/crawl-tasks/${jobId}/retry-failures`),
+  aiQueue: (status?: string) =>
+    http.get<ApiResponse<AiQueueItem[]>>("/ai-queue", {
+      params: status ? { status } : undefined,
+    }),
+  approveAiQueue: (queueId: number) =>
+    http.post<ApiResponse<Record<string, unknown>>>(`/ai-queue/${queueId}/approve`),
 };
