@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
-import { fetchDetail, fetchNeighbors, setFavorite, type PublicItemNeighbor, type PublicItemNeighbors } from "../api";
+import { fetchDetail, fetchNeighbors, recordContentView, setFavorite, type PublicItemNeighbor, type PublicItemNeighbors } from "../api";
 import { cleanDisplayTitle, sanitizeDisplayText } from "../content";
 import { readerPreferences, recordVisit, saveFavorite } from "../library";
 import SpeechRateSelector from "../components/SpeechRateSelector.vue";
@@ -127,6 +127,7 @@ async function loadDetail(slug: string) {
   try {
     item.value = await fetchDetail(slug);
     if (version !== loadVersion) return;
+    void recordContentView(item.value.id).catch(() => undefined);
     fetchNeighbors(slug, preferences.preferSameCategory)
       .then((value) => { if (version === loadVersion) neighbors.value = value; })
       .catch(() => undefined);
@@ -230,9 +231,6 @@ async function loadDetail(slug: string) {
       : [];
     favorite.value = localStorage.getItem(`favorite_${item.value.id}`) === "1";
     recordVisit(item.value as any);
-    if (readerPreferences().autoRead) {
-      window.setTimeout(() => speech.play(speechText.value), 250);
-    }
   } catch {
     error.value = "内容暂时无法读取，可能已撤回";
   } finally {
@@ -352,7 +350,7 @@ function openOfficial() {
           }}</span></button
         ><button v-if="speech.isActive.value" @click="speech.stop">
           <Square /><span>停止</span></button
-        ><SpeechRateSelector :model-value="speech.rate.value" @select="speech.setRate" /><button @click="grow">
+        ><SpeechRateSelector :model-value="speech.rate.value" @select="speech.setRate" /><span v-if="speech.isActive.value" class="speech-progress" role="status">第 {{ speech.progress.value.current }} / {{ speech.progress.value.total }} 段</span><button @click="grow">
           <Type /><span>{{ font }}px</span></button
         ><button @click="toggleFav" :class="{ active: favorite }">
           <Heart :fill="favorite ? 'currentColor' : 'none'" /><span>{{
@@ -570,6 +568,9 @@ function openOfficial() {
         <button type="button" :disabled="!neighbors.next" @click="navigateTo(neighbors.next)"><small>下一篇</small><b>{{ neighbors.next ? cleanDisplayTitle(neighbors.next.title) : "已经是最后一篇" }}</b><span>{{ neighbors.next?.category || "" }}</span></button>
       </nav>
       <p class="disclaimer">内容由简达整理并经人工审核，具体要求以权威来源最新规定为准。</p>
+      <p v-if="speech.isActive.value" class="speech-progress detail-speech-progress" role="status">
+        正在朗读第 {{ speech.progress.value.current }} / {{ speech.progress.value.total }} 段
+      </p>
       <nav class="detail-action-bar" aria-label="详情操作">
         <button type="button" @click="speech.toggle(speechText)"><Volume2 /><span>{{ speech.status.value === "playing" ? "暂停" : speech.status.value === "paused" ? "继续" : "听全文" }}</span></button>
         <button type="button" @click="grow"><Type /><span>{{ font }}px</span></button>

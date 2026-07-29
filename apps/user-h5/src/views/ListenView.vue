@@ -153,6 +153,7 @@ onMounted(load);
           <button type="button" aria-label="下一条" :disabled="currentIndex >= queue.length - 1" @click="move(1)"><SkipForward /></button>
         </div>
         <SpeechRateSelector :model-value="speech.rate.value" @select="speech.setRate" />
+        <p v-if="speech.isActive.value" class="speech-progress" role="status">正在朗读第 {{ speech.progress.value.current }} / {{ speech.progress.value.total }} 段</p>
         <p v-if="speech.error.value" class="listen-error">{{ speech.error.value }}</p>
       </section>
 
