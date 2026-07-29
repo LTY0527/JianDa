@@ -6,9 +6,12 @@ import { apiMessage } from "../api/http";
 import {
   publicSourceApi,
   type AiQueueItem,
+  type ArticleDiscoveryCandidate,
+  type ArticleDiscoveryResult,
   type CrawlJob,
   type PublicSource,
   type SourceRegistryPayload,
+  type WebArticlePreview,
   type WebSourceRegistry,
 } from "../api/publicSources";
 import {
@@ -24,6 +27,14 @@ const selectedJob = ref<CrawlJob | null>(null);
 const taskStatus = ref("");
 const taskSourceId = ref<number | undefined>();
 const retrying = ref<number | null>(null);
+const operatingSourceId = ref<number | null>(null);
+const discoveryResult = ref<{ source: WebSourceRegistry; data: ArticleDiscoveryResult } | null>(null);
+const shadowPreview = ref<{
+  source: WebSourceRegistry;
+  article: ArticleDiscoveryCandidate;
+  preview: WebArticlePreview;
+} | null>(null);
+const operationMessage = ref("");
 const loading = ref(true);
 const saving = ref(false);
 const error = ref("");
@@ -186,6 +197,69 @@ async function approveQueue(item: AiQueueItem) {
   }
 }
 
+function discoveryEntry(source: WebSourceRegistry) {
+  const method = source.discovery_mode === "MANUAL" ? "SECTION" : source.discovery_mode;
+  const entry = method === "RSS" || method === "ATOM"
+    ? source.rss_url
+    : method === "SITEMAP"
+      ? source.sitemap_url
+      : source.section_url || source.homepage_url;
+  return { method, entryUrl: entry || source.homepage_url };
+}
+
+async function discoverArticles(source: WebSourceRegistry) {
+  operatingSourceId.value = source.id;
+  error.value = "";
+  operationMessage.value = "";
+  shadowPreview.value = null;
+  try {
+    const entry = discoveryEntry(source);
+    const response = await publicSourceApi.discoverRegistryArticles(
+      source.id,
+      entry.method,
+      entry.entryUrl,
+    );
+    discoveryResult.value = { source, data: response.data.data };
+    operationMessage.value = `发现完成：${response.data.data.candidates.length} 个 URL，未创建材料、未调用 AI。`;
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    operatingSourceId.value = null;
+  }
+}
+
+async function shadowArticle(source: WebSourceRegistry, article: ArticleDiscoveryCandidate) {
+  operatingSourceId.value = source.id;
+  error.value = "";
+  operationMessage.value = "";
+  try {
+    const response = await publicSourceApi.shadowRegistryArticle(source.id, article.canonical_url);
+    shadowPreview.value = { source, article, preview: response.data.data };
+    operationMessage.value = "影子采集完成：已抓取正文和图片候选预览，未创建材料、未调用 AI、未发布。";
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    operatingSourceId.value = null;
+  }
+}
+
+async function collectArticle(source: WebSourceRegistry, article: ArticleDiscoveryCandidate) {
+  if (!window.confirm(`确认采集“${article.title || article.canonical_url}”并创建待审核材料吗？不会自动发布。`)) return;
+  operatingSourceId.value = source.id;
+  error.value = "";
+  operationMessage.value = "";
+  try {
+    const response = await publicSourceApi.collectRegistryArticle(source.id, article.canonical_url);
+    const result = response.data.data;
+    operationMessage.value = `材料 #${result.documentId} 已创建，AI 队列状态：${statusLabel(result.aiQueueStatus)}。`;
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    operatingSourceId.value = null;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -256,12 +330,53 @@ onMounted(load);
             <td>每日 {{source.daily_article_budget}} 篇<small>{{source.daily_token_budget.toLocaleString()}} Token · 自动 AI {{source.allow_auto_ai ? "开启" : "关闭"}}</small></td>
             <td>{{statusLabel(source.last_status)}}<small>最近 {{formatDisplayDateTime(source.last_crawled_at)}} · 下次 {{formatDisplayDateTime(source.next_run_at)}}</small></td>
             <td>{{source.last_error||"无"}}</td>
-            <td><button class="text-action" @click="editRegistry(source)">编辑</button><button class="text-action" @click="toggleRegistry(source)">{{source.enabled ? "停用" : "启用"}}</button></td>
+            <td>
+              <button class="text-action" @click="editRegistry(source)">编辑</button>
+              <button class="text-action" @click="toggleRegistry(source)">{{source.enabled ? "停用" : "启用"}}</button>
+              <button v-if="source.enabled" class="text-action strong" :disabled="operatingSourceId === source.id" @click="discoverArticles(source)">发现文章</button>
+            </td>
           </tr>
         </tbody>
       </table>
       <div v-if="loading" class="empty-state">正在加载运营来源…</div>
       <div v-else-if="registries.length === 0" class="empty-state">暂无运营来源，请先新增。</div>
+      <div v-if="operationMessage" class="safe-note" role="status">{{ operationMessage }}</div>
+      <section v-if="discoveryResult" class="source-create controlled-crawl">
+        <div class="panel-title">
+          <div>
+            <h2>{{ discoveryResult.source.source_name }} · 受控采集验收</h2>
+            <p>发现文章只列出 URL；影子采集只生成预览；立即采集才创建材料并进入 AI 等待审批队列。</p>
+          </div>
+          <button class="btn secondary" type="button" @click="discoveryResult = null; shadowPreview = null">关闭</button>
+        </div>
+        <div v-if="discoveryResult.data.errors.length" class="inline-error">
+          {{ discoveryResult.data.errors.join("；") }}
+        </div>
+        <table class="data-table">
+          <thead><tr><th>发现文章</th><th>方式</th><th>状态</th><th>受控操作</th></tr></thead>
+          <tbody>
+            <tr v-for="article in discoveryResult.data.candidates" :key="article.dedup_key">
+              <td><b>{{ article.title || "标题待抓取" }}</b><small>{{ article.canonical_url }}</small></td>
+              <td>{{ article.discovery_method }}</td>
+              <td>{{ article.published_time || "发布时间待核对" }}</td>
+              <td>
+                <button class="text-action" :disabled="operatingSourceId !== null" @click="shadowArticle(discoveryResult.source, article)">影子采集</button>
+                <button class="text-action strong" :disabled="operatingSourceId !== null" @click="collectArticle(discoveryResult.source, article)">立即采集</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="!discoveryResult.data.candidates.length" class="empty-state">没有发现可验收的文章 URL，请检查入口配置和错误摘要。</div>
+        <article v-if="shadowPreview" class="shadow-preview">
+          <span class="verified">影子预览 · 未落库</span>
+          <h3>{{ shadowPreview.preview.title }}</h3>
+          <p>{{ shadowPreview.preview.content_preview }}</p>
+          <small>
+            {{ shadowPreview.preview.source_name }} · {{ shadowPreview.preview.content_kind }} ·
+            图片策略 {{ shadowPreview.preview.cover_image_type }}
+          </small>
+        </article>
+      </section>
     </section>
     <section class="panel">
       <div class="panel-title"><div><h2>AI 处理队列与预算</h2><p>自动 AI 默认关闭；等待预算的任务不会自动执行，也不会被标记为已自动处理。</p></div></div>

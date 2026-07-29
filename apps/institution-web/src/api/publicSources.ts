@@ -163,6 +163,25 @@ export interface SourceRegistryPayload {
   dailyTokenBudget: number;
 }
 
+export interface ArticleDiscoveryCandidate {
+  discovered_url: string;
+  canonical_url: string;
+  title?: string;
+  published_time?: string;
+  discovery_method: string;
+  discovery_page?: string;
+  content_kind_candidate?: string;
+  dedup_key: string;
+}
+
+export interface ArticleDiscoveryResult {
+  sourceId: number;
+  method: string;
+  candidates: ArticleDiscoveryCandidate[];
+  duplicateCount: number;
+  errors: string[];
+}
+
 export interface CrawlJobError {
   id: number;
   crawl_job_id: number;
@@ -271,6 +290,19 @@ export const publicSourceApi = {
     http.put<ApiResponse<WebSourceRegistry>>(`/source-registries/${id}`, payload),
   setWebRegistryEnabled: (id: number, enabled: boolean) =>
     http.put<ApiResponse<WebSourceRegistry>>(`/source-registries/${id}/enabled`, { enabled }),
+  discoverRegistryArticles: (id: number, method: string, entryUrl: string) =>
+    http.post<ApiResponse<ArticleDiscoveryResult>>(`/source-registries/${id}/discover`, {
+      method,
+      entryUrl,
+    }),
+  shadowRegistryArticle: (id: number, url: string) =>
+    http.post<ApiResponse<WebArticlePreview>>(`/source-registries/${id}/shadow`, { url }),
+  collectRegistryArticle: (id: number, url: string) =>
+    http.post<ApiResponse<{
+      documentId: number;
+      imageReviewRequired: boolean;
+      aiQueueStatus: string;
+    }>>(`/source-registries/${id}/collect`, { url }),
   crawlJobs: (params?: { status?: string; sourceId?: number }) =>
     http.get<ApiResponse<CrawlJob[]>>("/crawl-tasks", { params }),
   crawlJob: (jobId: number) =>

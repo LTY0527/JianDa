@@ -20,10 +20,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class SourceRegistryController {
     private final SourceRegistryService service;
     private final ArticleDiscoveryService discoveryService;
+    private final WebArticleService webArticleService;
 
-    public SourceRegistryController(SourceRegistryService service, ArticleDiscoveryService discoveryService) {
+    public SourceRegistryController(SourceRegistryService service, ArticleDiscoveryService discoveryService,
+                                    WebArticleService webArticleService) {
         this.service = service;
         this.discoveryService = discoveryService;
+        this.webArticleService = webArticleService;
     }
 
     @GetMapping
@@ -58,6 +61,26 @@ public class SourceRegistryController {
         return ApiResponse.ok(discoveryService.discover(id, request.method(), request.entryUrl()));
     }
 
+    @PostMapping("/{id}/shadow")
+    public ApiResponse<Map<String, Object>> shadow(
+            @PathVariable long id, @Valid @RequestBody ControlledUrlRequest request) {
+        Map<String, Object> preview = webArticleService.preview(request.url());
+        service.assertPreviewBelongsTo(id, preview);
+        return ApiResponse.ok(preview);
+    }
+
+    @PostMapping("/{id}/collect")
+    public ApiResponse<Map<String, Object>> collect(
+            @PathVariable long id, @Valid @RequestBody ControlledUrlRequest request) {
+        Map<String, Object> preview = webArticleService.preview(request.url());
+        service.assertPreviewBelongsTo(id, preview);
+        return ApiResponse.ok(webArticleService.importArticle(request.url(), UserContext.current()));
+    }
+
     public record EnabledRequest(boolean enabled) {}
     public record DiscoveryRequest(String method, String entryUrl) {}
+    public record ControlledUrlRequest(
+            @jakarta.validation.constraints.NotBlank
+            @jakarta.validation.constraints.Size(max = 1500)
+            String url) {}
 }

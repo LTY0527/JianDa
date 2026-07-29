@@ -44,6 +44,17 @@ public class SourceRegistryService {
         return rows.get(0);
     }
 
+    public void assertPreviewBelongsTo(long sourceId, Map<String, Object> preview) {
+        Map<String, Object> source = get(sourceId);
+        if (!Boolean.TRUE.equals(source.get("enabled"))) {
+            throw new BusinessException(403, "来源尚未启用，不能执行受控采集");
+        }
+        Object previewSourceId = preview.get("source_registry_id");
+        if (!(previewSourceId instanceof Number number) || number.longValue() != sourceId) {
+            throw new BusinessException(400, "文章 URL 不属于当前选择的权威来源");
+        }
+    }
+
     @Transactional
     public Map<String, Object> create(SourceConfiguration request, AuthUser user) {
         ValidatedSource value = validate(request);

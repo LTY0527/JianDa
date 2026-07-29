@@ -4,16 +4,23 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.hasKey;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import cn.jianda.ai.AiClient;
 import cn.jianda.collector.SourceRegistryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +29,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = {
@@ -35,6 +43,7 @@ class SourceRegistryOperationsIntegrationTest {
     @Autowired ObjectMapper objectMapper;
     @Autowired JdbcTemplate jdbc;
     @Autowired SourceRegistryService service;
+    @MockitoBean AiClient aiClient;
 
     private String platformAuth;
 
@@ -42,6 +51,40 @@ class SourceRegistryOperationsIntegrationTest {
     void prepare() throws Exception {
         jdbc.update("DELETE FROM source_registry WHERE domain LIKE 'phase93b-%'");
         platformAuth = "Bearer " + login("platform_admin");
+        when(aiClient.discoverArticles(anyLong(), anyString(), anyString(), anyString(), anyInt()))
+                .thenReturn(Map.of(
+                        "candidates", List.of(Map.of(
+                                "discovered_url", "https://www.news.cn/controlled-article.html",
+                                "canonical_url", "https://www.news.cn/controlled-article.html",
+                                "title", "受控采集测试文章",
+                                "published_time", "2026-07-29T10:00:00+08:00",
+                                "discovery_method", "SECTION",
+                                "discovery_page", "https://www.news.cn/",
+                                "content_kind_candidate", "GENERAL_NEWS",
+                                "discovered_at", "2026-07-29T10:01:00+08:00",
+                                "dedup_key", "controlled-article")),
+                        "errors", List.of()));
+        when(aiClient.previewWebArticle(anyString(), anyBoolean())).thenReturn(Map.ofEntries(
+                Map.entry("title", "受控采集测试文章"),
+                Map.entry("source_name", "新华网"),
+                Map.entry("published_at", "2026-07-29T10:00:00+08:00"),
+                Map.entry("author", "测试记者"),
+                Map.entry("cover_image_url", ""),
+                Map.entry("cover_image_type", "CATEGORY_DEFAULT"),
+                Map.entry("image_alt_text", "受控采集测试文章"),
+                Map.entry("image_validated", false),
+                Map.entry("images", List.of()),
+                Map.entry("canonical_url", "https://www.news.cn/controlled-article.html"),
+                Map.entry("content_preview", "这是一篇用于验证受控采集三段式入口的公开文章。"),
+                Map.entry("extracted_text", "这是一篇用于验证受控采集三段式入口的公开文章。影子采集不会创建材料，立即采集会进入等待人工批准的 AI 队列。"),
+                Map.entry("original_html", "<main><p>受控采集测试文章</p></main>"),
+                Map.entry("content_hash", "8".repeat(64)),
+                Map.entry("content_kind", "GENERAL_NEWS"),
+                Map.entry("classification_confidence", 0.9),
+                Map.entry("robots_allowed", true),
+                Map.entry("robots_status", "ALLOWED"),
+                Map.entry("original_page_available", true),
+                Map.entry("warnings", List.of())));
     }
 
     @Test
@@ -104,6 +147,53 @@ class SourceRegistryOperationsIntegrationTest {
         assertTrue(service.acquireLease(id, "worker-c", Duration.ofMinutes(5)));
         assertFalse(service.releaseLease(id, "worker-b", "FAILED", "旧持有者不能释放新租约"));
         assertTrue(service.releaseLease(id, "worker-c", "FAILED", "安全错误摘要"));
+    }
+
+    @Test
+    void controlledEntrySeparatesDiscoveryShadowAndQueuedCollection() throws Exception {
+        long sourceId = jdbc.queryForObject(
+                "SELECT id FROM source_registry WHERE domain='www.news.cn'", Long.class);
+        jdbc.update("UPDATE source_registry SET enabled=TRUE,allow_auto_ai=FALSE WHERE id=?", sourceId);
+        long before = jdbc.queryForObject("SELECT COUNT(*) FROM source_document", Long.class);
+
+        mvc.perform(post("/api/source-registries/{id}/discover", sourceId)
+                        .header("Authorization", platformAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"method":"SECTION","entryUrl":"https://www.news.cn/"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.candidates[0].canonical_url")
+                        .value("https://www.news.cn/controlled-article.html"));
+        org.junit.jupiter.api.Assertions.assertEquals(before,
+                jdbc.queryForObject("SELECT COUNT(*) FROM source_document", Long.class));
+
+        mvc.perform(post("/api/source-registries/{id}/shadow", sourceId)
+                        .header("Authorization", platformAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"url":"https://www.news.cn/controlled-article.html"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").value("受控采集测试文章"));
+        org.junit.jupiter.api.Assertions.assertEquals(before,
+                jdbc.queryForObject("SELECT COUNT(*) FROM source_document", Long.class));
+
+        mvc.perform(post("/api/source-registries/{id}/collect", sourceId)
+                        .header("Authorization", platformAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"url":"https://www.news.cn/controlled-article.html"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.aiQueueStatus").value("WAITING_APPROVAL"));
+        org.junit.jupiter.api.Assertions.assertEquals(before + 1,
+                jdbc.queryForObject("SELECT COUNT(*) FROM source_document", Long.class));
+        assertTrue(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ai_processing_queue WHERE status='WAITING_APPROVAL' "
+                        + "AND document_id=(SELECT id FROM source_document "
+                        + "WHERE title='受控采集测试文章')",
+                Integer.class) == 1);
     }
 
     private long create(String domain, String homepage) throws Exception {

@@ -160,3 +160,81 @@ test("来源、调度和预算页面在 375px 与 1440px 均不横向溢出视�
       .toBeTruthy();
   }
 });
+
+test("发现文章、影子采集和立即采集保持三段式人工控制", async ({ page }) => {
+  await prepare(page);
+  const enabledRegistry = { ...registry, enabled: true, allow_image_candidates: true };
+  const candidate = {
+    discovered_url: "https://health.example.gov.cn/article/1",
+    canonical_url: "https://health.example.gov.cn/article/1",
+    title: "老年健康科普文章",
+    published_time: "2026-07-29T10:00:00+08:00",
+    discovery_method: "RSS",
+    discovery_page: enabledRegistry.rss_url,
+    content_kind_candidate: "HEALTH_EDUCATION",
+    dedup_key: "article-1",
+  };
+  const calls: string[] = [];
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/public-sources") return fulfill(route, []);
+    if (path === "/api/source-registries" && request.method() === "GET") {
+      return fulfill(route, [enabledRegistry]);
+    }
+    if (path === "/api/crawl-tasks") return fulfill(route, []);
+    if (path === "/api/ai-queue") return fulfill(route, []);
+    if (path.endsWith("/discover")) {
+      calls.push("discover");
+      return fulfill(route, {
+        sourceId: 31,
+        method: "RSS",
+        candidates: [candidate],
+        duplicateCount: 0,
+        errors: [],
+      });
+    }
+    if (path.endsWith("/shadow")) {
+      calls.push("shadow");
+      return fulfill(route, {
+        title: candidate.title,
+        source_name: enabledRegistry.source_name,
+        cover_image_type: "ARTICLE_IMAGE",
+        canonical_url: candidate.canonical_url,
+        content_preview: "这是影子采集得到的正文预览，不创建材料。",
+        content_kind: "HEALTH_EDUCATION",
+        authority_level: "A",
+        robots_allowed: true,
+        robots_status: "ALLOWED",
+        warnings: [],
+        image_cached: false,
+      });
+    }
+    if (path.endsWith("/collect")) {
+      calls.push("collect");
+      return fulfill(route, {
+        documentId: 601,
+        imageReviewRequired: true,
+        aiQueueStatus: "WAITING_APPROVAL",
+      });
+    }
+    return fulfill(route, null, 404, "测试未配置该接口");
+  });
+
+  await page.goto(`${institutionUrl}/public-sources`);
+  await page.getByRole("button", { name: "发现文章" }).click();
+  await expect(page.getByText(/未创建材料、未调用 AI/)).toBeVisible();
+  await expect(page.getByText(candidate.title)).toBeVisible();
+  expect(calls).toEqual(["discover"]);
+
+  await page.getByRole("button", { name: "影子采集" }).click();
+  await expect(page.getByText(/影子采集完成/)).toBeVisible();
+  await expect(page.getByText("这是影子采集得到的正文预览，不创建材料。")).toBeVisible();
+  expect(calls).toEqual(["discover", "shadow"]);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "立即采集" }).click();
+  await expect(page.getByText(/材料 #601 已创建/)).toBeVisible();
+  await expect(page.getByText(/等待人工批准/)).toBeVisible();
+  expect(calls).toEqual(["discover", "shadow", "collect"]);
+});
