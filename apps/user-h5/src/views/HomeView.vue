@@ -15,11 +15,18 @@ const cats = [["健康", HeartPulse, "健康"], ["养老政策", Landmark, "养�
 const today = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
 const hour = new Date().getHours();
 const greeting = hour < 11 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
-const alerts = computed(() => [...items.value].filter((item) => ["反诈", "健康", "生活服务"].includes(item.category)).sort((a,b) => importanceScore(b)-importanceScore(a)).slice(0,2));
 const todayReads = computed(() => { const preferred = readerPreferences().channels.map((item) => item === "政策" ? "养老政策" : item === "生活" ? "社区服务" : item); return [...items.value].filter((item) => contentKind(item) === "news").sort((a,b) => (importanceScore(b) + (preferred.includes(b.category) ? 15 : 0)) - (importanceScore(a) + (preferred.includes(a.category) ? 15 : 0))).slice(0,7); });
 const featured = computed(() => todayReads.value[0]);
-const newsStream = computed(() => todayReads.value.slice(1, 5));
-const guides = computed(() => items.value.filter((item) => item.content_kind === "SERVICE_NOTICE" || contentKind(item) === "guide").slice(0,3));
+const alerts = computed(() => [...items.value]
+  .filter((item) => item.id !== featured.value?.id && ["反诈", "健康", "生活服务", "社区服务"].includes(item.category))
+  .sort((a,b) => importanceScore(b)-importanceScore(a)).slice(0,2));
+const usedPrimaryIds = computed(() => new Set([featured.value?.id, ...alerts.value.map((item) => item.id)].filter(Boolean)));
+const newsStream = computed(() => todayReads.value.filter((item) => !usedPrimaryIds.value.has(item.id)).slice(0,4));
+const usedNewsIds = computed(() => new Set([...usedPrimaryIds.value, ...newsStream.value.map((item) => item.id)]));
+const guides = computed(() => items.value.filter((item) => !usedNewsIds.value.has(item.id) && (item.content_kind === "SERVICE_NOTICE" || contentKind(item) === "guide")).slice(0,3));
+const usedAllIds = computed(() => new Set([...usedNewsIds.value, ...guides.value.map((item) => item.id)]));
+const healthReminders = computed(() => items.value.filter((item) => !usedAllIds.value.has(item.id) && item.category === "健康").slice(0,3));
+const fraudReminders = computed(() => items.value.filter((item) => !usedAllIds.value.has(item.id) && item.category === "反诈").slice(0,3));
 function fallbackCover(event: Event, item: PublicItem) {
   const image = event.currentTarget as HTMLImageElement;
   const fallback = categoryDefaultCover(item);
@@ -36,11 +43,15 @@ onMounted(load);
     <header v-if="featured" class="stream-heading home-recommend-heading"><div><h2>今日推荐</h2><p>从权威资讯中为您优先选择</p></div></header>
     <section v-if="featured" class="featured-story">
       <img :src="articleCover(featured)" :alt="featured.image_alt_text || `${featured.title}配图`" fetchpriority="high" decoding="async" referrerpolicy="no-referrer" @error="fallbackCover($event, featured)"/>
-      <div><span>{{featured.category}}{{featured.is_local?" · 本地":""}}</span><h2>{{normalizeTitle(featured.title)}}</h2><p>{{truncateSummary(featured.summary)}}</p><small>{{featured.source_name}} · {{String(featured.published_at).slice(0,10)}} · {{featured.reading_minutes||1}}分钟阅读</small><RouterLink :to="`/news/${featured.slug}`">查看适老版<ArrowRight/></RouterLink></div>
+      <div><span>{{featured.category}}{{featured.is_local?" · 本地":""}}</span><h2>{{normalizeTitle(featured.title)}}</h2><p>{{truncateSummary(featured.summary)}}</p><small>权威来源 · {{featured.source_name}} · {{String(featured.published_at).slice(0,10)}} · {{featured.reading_minutes||1}}分钟阅读</small><RouterLink :to="`/news/${featured.slug}`">查看适老版<ArrowRight/></RouterLink></div>
     </section>
     <section v-if="alerts.length" class="important-alerts"><header><BellRing /><div><h2>重要提醒</h2><p>请优先留意安全、健康和公共服务变化</p></div></header><article v-for="alert in alerts" :key="alert.id"><span>{{ alert.category }}</span><div><h3>{{ normalizeTitle(alert.title) }}</h3><p>{{ truncateSummary(alert.summary, 100) }}</p><small>{{ alert.source_name }} · {{ String(alert.published_at).slice(0,10) }}</small></div><RouterLink :to="`/${contentKind(alert)}/${alert.slug}`">立即查看<ArrowRight /></RouterLink></article></section>
     <section class="home-stream"><header class="stream-heading"><div><h2>图文资讯</h2><p>按人工置顶、重要程度和发布时间排序</p></div><RouterLink to="/news">更多内容<ChevronRight /></RouterLink></header><ContentCard v-for="item in newsStream" :key="item.id" :item="item" actions /></section>
     <section class="service-brief"><header class="stream-heading"><div><h2>重要公共服务通知</h2><p>时间、地点和办理要求，提前看清楚</p></div><RouterLink to="/services">全部通知<ChevronRight /></RouterLink></header><div class="service-brief__grid"><RouterLink v-for="item in guides" :key="item.id" :to="`/${contentKind(item)}/${item.slug}`"><span>{{ item.category }}</span><h3>{{ normalizeTitle(item.title) }}</h3><p>{{ truncateSummary(item.summary, 90) }}</p><small>{{ item.source_name }}</small><b>查看怎么做<ArrowRight /></b></RouterLink></div><div v-if="!guides.length" class="compact-empty">当前没有已发布公共服务通知</div></section>
+    <section v-if="healthReminders.length || fraudReminders.length" class="home-topic-grid">
+      <article v-if="healthReminders.length"><header><HeartPulse/><div><h2>健康提醒</h2><p>来自已审核权威内容</p></div></header><RouterLink v-for="item in healthReminders" :key="item.id" :to="`/news/${item.slug}`"><span><b>{{ normalizeTitle(item.title) }}</b><small>{{ item.source_name }} · {{ String(item.published_at).slice(0,10) }}</small></span><ChevronRight/></RouterLink></article>
+      <article v-if="fraudReminders.length"><header><ShieldAlert/><div><h2>防诈提醒</h2><p>先核实，再操作</p></div></header><RouterLink v-for="item in fraudReminders" :key="item.id" :to="`/news/${item.slug}`"><span><b>{{ normalizeTitle(item.title) }}</b><small>{{ item.source_name }} · {{ String(item.published_at).slice(0,10) }}</small></span><ChevronRight/></RouterLink></article>
+    </section>
     <section class="home-categories"><header class="stream-heading"><div><h2>按分类查看</h2><p>快速找到关心的公共服务内容</p></div></header><nav class="categories" aria-label="快捷频道"><RouterLink v-for="c in cats" :key="c[0]" :to="`/category/${c[2]}`"><span><component :is="c[1]" /></span><b>{{ c[0] }}</b></RouterLink><RouterLink class="all-channel" to="/news"><span><ChevronRight /></span><b>全部资讯</b></RouterLink></nav></section>
     <RouterLink class="home-all-news" to="/news">查看全部权威资讯<ChevronRight /></RouterLink>
   </template>
