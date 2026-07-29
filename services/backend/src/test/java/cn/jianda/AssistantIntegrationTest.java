@@ -65,7 +65,33 @@ class AssistantIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.mode").value("retrieval"))
                 .andExpect(jsonPath("$.data.citations.length()").value(0))
-                .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("当前已发布内容中没有可靠答案")));
+                .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("没有可靠依据")));
+    }
+
+    @Test
+    void answersRuntimeStatusWithoutCallingContentGeneration() throws Exception {
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"简达助手的运行状态正常吗？"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("status"))
+                .andExpect(jsonPath("$.data.citations.length()").value(0))
+                .andExpect(jsonPath("$.data.answer")
+                        .value(org.hamcrest.Matchers.containsString("已审核内容检索可用")));
+    }
+
+    @Test
+    void expandsChineseSynonymsBeforeRankingPublishedContent() throws Exception {
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"遇到诈骗时有什么提醒？"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
+                .andExpect(jsonPath("$.data.citations[0].slug").value("assistant-test-published"));
     }
 
     @Test

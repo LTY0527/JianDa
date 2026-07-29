@@ -13,6 +13,8 @@ from app.models import (
     ArticleDiscoveryResponse,
     AssistantAnswerRequest,
     AssistantAnswerResponse,
+    GeneralAssistantRequest,
+    GeneralAssistantResponse,
     ExtractTextResult,
     MetadataPreview,
     RewriteOnlyRequest,
@@ -159,6 +161,28 @@ def assistant_answer(request: AssistantAnswerRequest) -> AssistantAnswerResponse
         )
     try:
         return ExternalLlmProvider().answer_assistant(request)
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=503, detail=exc.safe_detail()) from exc
+
+
+@app.post(
+    "/internal/assistant/general-answer",
+    response_model=GeneralAssistantResponse,
+)
+def assistant_general_answer(
+    request: GeneralAssistantRequest,
+) -> GeneralAssistantResponse:
+    if os.getenv("ASSISTANT_EXTERNAL_ENABLED", "false").lower() != "true":
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "ASSISTANT_EXTERNAL_DISABLED",
+                "message": "助手外部模型未启用",
+                "retryable": False,
+            },
+        )
+    try:
+        return ExternalLlmProvider().answer_general_assistant(request)
     except ExternalProviderError as exc:
         raise HTTPException(status_code=503, detail=exc.safe_detail()) from exc
 

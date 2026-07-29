@@ -23,4 +23,6 @@ public interface AiClient {
                                 Map<String, Object> context, Map<String, Object> factCheckpoint);
 
     Map<String, Object> answerAssistant(String question, List<Map<String, Object>> evidence);
+
+    Map<String, Object> answerGeneralAssistant(String question);
 }

@@ -11,6 +11,7 @@ import pytest
 from app.models import (
     AssistantAnswerRequest,
     AssistantEvidence,
+    GeneralAssistantRequest,
     FactExtractionResponse,
     FeeRule,
     ServiceWindow,
@@ -255,6 +256,32 @@ def test_assistant_rag_rejects_answer_without_valid_citation():
         )
         assert "JSON" in prompt
         assert "请到现场窗口咨询" in prompt
+
+
+def test_general_assistant_is_separate_from_grounded_rag_and_returns_metrics():
+    envelope = json_completion(
+        {
+            "answer": "这是通用知识的简短解释。",
+            "actions": ["继续查阅可靠科普资料。"],
+        }
+    )
+    envelope["id"] = "assistant-general-1"
+    envelope["usage"] = {
+        "prompt_tokens": 60,
+        "completion_tokens": 20,
+        "total_tokens": 80,
+    }
+    with QueueServer([response(200, envelope)]) as server:
+        provider = ExternalLlmProvider(settings(server.url, retries=0))
+        result = provider.answer_general_assistant(
+            GeneralAssistantRequest(question="什么是数字素养？")
+        )
+
+    assert result.answer == "这是通用知识的简短解释。"
+    assert result.total_tokens == 80
+    sent = server.requests[0]["json"]
+    assert "通用AI参考" in sent["messages"][0]["content"]
+    assert "数字素养" in sent["messages"][1]["content"]
 
 
 def test_base_url_already_contains_completion_path_is_not_duplicated():

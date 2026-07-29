@@ -16,7 +16,7 @@ interface ConversationMessage {
   actions?: string[];
   citations?: AssistantCitation[];
   disclaimer?: string;
-  mode?: "retrieval" | "ai";
+  mode?: "status" | "retrieval" | "ai" | "general_ai";
   createdAt: string;
 }
 
@@ -139,6 +139,15 @@ function detailPath(citation: AssistantCitation) {
 function formatDate(value: string) {
   return value ? new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(new Date(value)) : "发布时间待核对";
 }
+function modeLabel(mode?: ConversationMessage["mode"]) {
+  const labels: Record<NonNullable<ConversationMessage["mode"]>, string> = {
+    status: "平台运行状态",
+    retrieval: "原文检索",
+    ai: "已审核内容 + AI 整理",
+    general_ai: "通用 AI 参考",
+  };
+  return mode ? labels[mode] : "原文检索";
+}
 
 onMounted(async () => {
   try { suggestions.value = await fetchAssistantSuggestions(); }
@@ -183,7 +192,7 @@ onMounted(async () => {
           <small>{{ message.role === "user" ? "您" : "简达助手" }}</small>
           <div class="assistant-bubble">{{ message.text }}</div>
           <p v-if="message.role === 'assistant'" class="assistant-mode">
-            {{ message.mode === "ai" ? "AI 基于已审核来源整理" : "当前使用已审核内容检索回答" }}
+            {{ modeLabel(message.mode) }}
           </p>
           <section v-if="message.actions?.length" class="assistant-actions">
             <h3>你现在可以怎么做</h3>

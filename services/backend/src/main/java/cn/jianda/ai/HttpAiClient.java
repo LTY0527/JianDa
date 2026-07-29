@@ -28,6 +28,7 @@ public class HttpAiClient implements AiClient {
     private final URI webPreviewUri;
     private final URI articleDiscoveryUri;
     private final URI assistantAnswerUri;
+    private final URI assistantGeneralAnswerUri;
 
     public HttpAiClient(ObjectMapper objectMapper, @Value("${jianda.ai-service-url}") String baseUrl) {
         this.objectMapper = objectMapper;
@@ -38,6 +39,7 @@ public class HttpAiClient implements AiClient {
         this.webPreviewUri = URI.create(baseUrl + "/internal/web-ingest/preview");
         this.articleDiscoveryUri = URI.create(baseUrl + "/internal/article-discovery");
         this.assistantAnswerUri = URI.create(baseUrl + "/internal/assistant/answer");
+        this.assistantGeneralAnswerUri = URI.create(baseUrl + "/internal/assistant/general-answer");
     }
 
     @Override
@@ -126,6 +128,15 @@ public class HttpAiClient implements AiClient {
                 assistantAnswerUri,
                 Map.of("question", question, "evidence", evidence),
                 "assistant RAG",
+                75_000);
+    }
+
+    @Override
+    public Map<String, Object> answerGeneralAssistant(String question) {
+        return sendJson(
+                assistantGeneralAnswerUri,
+                Map.of("question", question),
+                "assistant general answer",
                 75_000);
     }
 

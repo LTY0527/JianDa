@@ -23,6 +23,7 @@ public class AssistantService {
     private static final int MAX_CITATIONS = 3;
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
+    private final PublishedContentRetriever retriever;
     private final boolean externalEnabled;
     private final int dailyCallLimit;
     private final int dailyTokenLimit;
@@ -30,11 +31,13 @@ public class AssistantService {
     public AssistantService(
             JdbcTemplate jdbc,
             AiClient aiClient,
+            PublishedContentRetriever retriever,
             @Value("${jianda.assistant.external-enabled:false}") boolean externalEnabled,
             @Value("${jianda.assistant.daily-call-limit:30}") int dailyCallLimit,
             @Value("${jianda.assistant.daily-token-limit:30000}") int dailyTokenLimit) {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
+        this.retriever = retriever;
         this.externalEnabled = externalEnabled;
         this.dailyCallLimit = dailyCallLimit;
         this.dailyTokenLimit = dailyTokenLimit;
@@ -58,11 +61,18 @@ public class AssistantService {
         if (question.isBlank()) {
             return retrievalResponse("请先输入您想了解的问题。", List.of());
         }
+        if (isStatusQuestion(question)) {
+            recordEvent(question, contextSlug, "status", 0, 0, true,
+                    null, null, 0, 0, 0, 0, null);
+            return response(
+                    externalEnabled
+                            ? "简达助手运行正常。已审核内容检索可用，AI 整理能力已启用。"
+                            : "简达助手运行正常。已审核内容检索可用，当前使用原文检索回答。",
+                    List.of(),
+                    "status");
+        }
 
-        List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT p.slug,p.title,p.summary,p.category,p.source_name,p.published_at,d.raw_text "
-                        + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
-                        + "WHERE p.status='PUBLISHED' ORDER BY p.published_at DESC,p.id DESC");
+        List<Map<String, Object>> rows = retriever.publishedContent();
         Set<String> terms = terms(question);
         List<RankedItem> ranked = rows.stream()
                 .map(row -> new RankedItem(row, score(row, terms, contextSlug)))
@@ -74,9 +84,17 @@ public class AssistantService {
                 .toList();
 
         if (ranked.isEmpty()) {
+            if (!requiresGroundedEvidence(question)
+                    && externalEnabled && withinDailyBudget()) {
+                return generalAiResponse(question, contextSlug);
+            }
             recordEvent(question, contextSlug, "retrieval", 0, 0, true,
                     null, null, 0, 0, 0, 0, "NO_EVIDENCE");
-            return retrievalResponse("当前已发布内容中没有可靠答案。", List.of());
+            return retrievalResponse(
+                    requiresGroundedEvidence(question)
+                            ? "当前已审核发布内容中没有可靠依据。这个问题涉及资格、金额、材料、医疗或其他重要决定，简达不会猜测，请查阅主管部门原文或向工作人员核实。"
+                            : "当前已审核发布内容中没有可靠答案，且通用 AI 当前不可用。",
+                    List.of());
         }
 
         List<Map<String, Object>> citations = ranked.stream()
@@ -158,9 +176,37 @@ public class AssistantService {
     private boolean withinDailyBudget() {
         Map<String, Object> usage = jdbc.queryForMap(
                 "SELECT COUNT(*) call_count,COALESCE(SUM(total_tokens),0) token_count "
-                        + "FROM assistant_query_event WHERE mode='ai' AND created_at>=CURRENT_DATE");
+                        + "FROM assistant_query_event WHERE mode IN ('ai','general_ai') "
+                        + "AND created_at>=CURRENT_DATE");
         return number(usage.get("call_count")) < dailyCallLimit
                 && number(usage.get("token_count")) < dailyTokenLimit;
+    }
+
+    private Map<String, Object> generalAiResponse(String question, String contextSlug) {
+        long started = System.nanoTime();
+        try {
+            Map<String, Object> generated = aiClient.answerGeneralAssistant(question);
+            String answer = text(generated, "answer").trim();
+            if (answer.isBlank()) throw new IllegalStateException("general assistant answer is empty");
+            int promptTokens = number(generated.get("prompt_tokens"));
+            int completionTokens = number(generated.get("completion_tokens"));
+            int totalTokens = number(generated.get("total_tokens"));
+            long elapsed = number(generated.get("elapsed_ms"));
+            if (elapsed <= 0) elapsed = elapsedMs(started);
+            recordEvent(question, contextSlug, "general_ai", 0, 0, true,
+                    text(generated, "model"), text(generated, "request_id"),
+                    promptTokens, completionTokens, totalTokens, elapsed, null);
+            Map<String, Object> result = response(answer, List.of(), "general_ai");
+            result.put("actions", stringList(generated.get("actions")));
+            return result;
+        } catch (RuntimeException exception) {
+            long elapsed = elapsedMs(started);
+            recordEvent(question, contextSlug, "retrieval", 0, 0, false,
+                    null, null, 0, 0, 0, elapsed, "GENERAL_EXTERNAL_FALLBACK");
+            LOGGER.warn("assistant_general_fallback category={} elapsed_ms={} error_type={}",
+                    questionCategory(question), elapsed, exception.getClass().getSimpleName());
+            return retrievalResponse("当前已审核发布内容中没有可靠答案，通用 AI 暂时不可用。", List.of());
+        }
     }
 
     private void recordEvent(
@@ -268,7 +314,42 @@ public class AssistantService {
         for (String category : List.of("时政", "健康", "养老", "反诈", "生活服务", "文化", "办事", "材料", "地点", "费用", "时间")) {
             if (normalized.contains(category)) result.add(category);
         }
+        expandSynonyms(normalized, result);
         return result;
+    }
+
+    private void expandSynonyms(String normalized, Set<String> result) {
+        List<List<String>> groups = List.of(
+                List.of("办理", "申请", "申办"),
+                List.of("材料", "证件", "资料"),
+                List.of("时间", "日期", "期限", "截止"),
+                List.of("地点", "地址", "窗口"),
+                List.of("电话", "联系方式", "咨询"),
+                List.of("费用", "收费", "金额", "免费"),
+                List.of("老年", "老人", "银龄", "长者"),
+                List.of("防诈", "诈骗", "反诈"));
+        for (List<String> group : groups) {
+            if (group.stream().anyMatch(normalized::contains)) {
+                result.addAll(group);
+            }
+        }
+    }
+
+    private boolean isStatusQuestion(String question) {
+        String normalized = normalize(question);
+        return List.of("运行状态", "服务状态", "助手状态", "系统正常吗", "能用吗")
+                .stream().anyMatch(normalized::contains);
+    }
+
+    private boolean requiresGroundedEvidence(String question) {
+        String normalized = normalize(question);
+        return List.of(
+                "诊断", "症状", "治疗", "用药", "吃药", "剂量",
+                "资格", "符合条件", "能不能申请", "可以申请吗",
+                "金额", "补贴多少", "费用多少", "收费多少",
+                "办理材料", "申请材料", "需要什么材料", "带什么证件",
+                "法律", "投资", "收益", "转账")
+                .stream().anyMatch(normalized::contains);
     }
 
     private String normalize(String value) {

@@ -473,3 +473,22 @@ class AssistantAnswerResponse(BaseModel):
     completion_tokens: int = Field(ge=0)
     total_tokens: int = Field(ge=0)
     elapsed_ms: int = Field(ge=0)
+
+
+class GeneralAssistantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=500)
+
+
+class GeneralAssistantResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str = Field(min_length=1, max_length=2000)
+    actions: list[str] = Field(default_factory=list, max_length=5)
+    model: str
+    request_id: str
+    prompt_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+    elapsed_ms: int = Field(ge=0)

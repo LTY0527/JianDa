@@ -99,6 +99,25 @@ class AssistantExternalIntegrationTest {
                 Integer.class) == 1);
     }
 
+    @Test
+    void usesGeneralAiOnlyForLowRiskQuestionWithoutPublishedEvidence() throws Exception {
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"请用通俗语言解释什么是量子纠缠"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("general_ai"))
+                .andExpect(jsonPath("$.data.citations.length()").value(0))
+                .andExpect(jsonPath("$.data.answer")
+                        .value(org.hamcrest.Matchers.containsString("通用知识")));
+        assertTrue(LAST_REQUEST.get().contains("量子纠缠"));
+        assertTrue(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM assistant_query_event "
+                        + "WHERE mode='general_ai' AND evidence_count=0 AND total_tokens=90",
+                Integer.class) == 1);
+    }
+
     private long insertDocument(String title, String rawText) {
         jdbc.update("INSERT INTO source_document(organization_id,title,file_name,file_type,storage_path,raw_text,page_count,processing_status,created_by) "
                 + "VALUES (1,?,NULL,'HTML',NULL,?,1,'PUBLISHED',1)", title, rawText);
@@ -115,11 +134,16 @@ class AssistantExternalIntegrationTest {
     private static HttpServer startServer() {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            server.createContext("/internal/assistant/answer", exchange -> {
+            com.sun.net.httpserver.HttpHandler handler = exchange -> {
                 LAST_REQUEST.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
                 int status = FAIL.get() ? 503 : 200;
+                boolean general = exchange.getRequestURI().getPath().endsWith("/general-answer");
                 String body = FAIL.get()
                         ? "{\"detail\":{\"error_code\":\"UPSTREAM_FAILED\",\"message\":\"暂时不可用\",\"retryable\":true}}"
+                        : general
+                        ? "{\"answer\":\"这是通用知识的通俗解释。\",\"actions\":[\"如需深入了解，请查阅可靠科普资料。\"],"
+                        + "\"model\":\"deepseek-v4-flash\",\"request_id\":\"mock-general-1\","
+                        + "\"prompt_tokens\":70,\"completion_tokens\":20,\"total_tokens\":90,\"elapsed_ms\":20}"
                         : "{\"answer\":\"立即停止操作，不要提供验证码。[1]\",\"actions\":[\"通过官方渠道核实。[1]\"],"
                         + "\"used_citation_indexes\":[1],\"model\":\"deepseek-v4-flash\",\"request_id\":\"mock-request-1\","
                         + "\"prompt_tokens\":140,\"completion_tokens\":40,\"total_tokens\":180,\"elapsed_ms\":25}";
@@ -128,7 +152,9 @@ class AssistantExternalIntegrationTest {
                 exchange.sendResponseHeaders(status, bytes.length);
                 exchange.getResponseBody().write(bytes);
                 exchange.close();
-            });
+            };
+            server.createContext("/internal/assistant/answer", handler);
+            server.createContext("/internal/assistant/general-answer", handler);
             server.start();
             return server;
         } catch (Exception exception) {

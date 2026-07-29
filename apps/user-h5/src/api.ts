@@ -46,7 +46,7 @@ export interface AssistantReply {
   actions?: string[];
   citations: AssistantCitation[];
   disclaimer: string;
-  mode: "retrieval" | "ai";
+  mode: "status" | "retrieval" | "ai" | "general_ai";
 }
 
 export type AssistantFailureReason =
@@ -146,7 +146,7 @@ export async function askAssistant(
       typeof data.answer !== "string" ||
       !Array.isArray(data.citations) ||
       typeof data.disclaimer !== "string" ||
-      !["retrieval", "ai"].includes(data.mode)
+      !["status", "retrieval", "ai", "general_ai"].includes(data.mode)
     ) {
       throw new AssistantApiError("format");
     }
