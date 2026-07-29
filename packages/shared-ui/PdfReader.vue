@@ -39,10 +39,22 @@ const scale = ref(1);
 const fitWidth = ref(true);
 const loading = ref(true);
 const error = ref("");
+const loadNotice = ref("");
 let renderTask: ReturnType<PDFPageProxy["render"]> | null = null;
 let loadTask: ReturnType<typeof getDocument> | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let touchDistance = 0;
+let blobUrl = "";
+
+class PdfHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly contentType = "",
+  ) {
+    super(`PDF HTTP ${status}`);
+    this.name = "PdfHttpError";
+  }
+}
 
 const canPrevious = computed(() => page.value > 1);
 const canNext = computed(() => page.value < pages.value);
@@ -50,10 +62,13 @@ const scaleLabel = computed(() => `${Math.round(scale.value * 100)}%`);
 
 async function load() {
   error.value = "";
+  loadNotice.value = "";
   loading.value = true;
   renderTask?.cancel();
   await loadTask?.destroy();
+  revokeBlobUrl();
   documentProxy.value = null;
+  let rangeFailure: unknown;
   try {
     loadTask = getDocument({
       url: props.src,
@@ -65,12 +80,92 @@ async function load() {
     page.value = 1;
     await render();
   } catch (cause) {
-    if ((cause as Error)?.name !== "AbortException") {
-      error.value = "PDF 加载失败，请检查网络后重试。";
+    if ((cause as Error)?.name === "AbortException") return;
+    rangeFailure = cause;
+    await loadTask?.destroy();
+    try {
+      const response = await fetch(props.src, {
+        headers: props.headers,
+        credentials: "same-origin",
+      });
+      const contentType = (response.headers.get("content-type") || "")
+        .split(";")[0]
+        .trim()
+        .toLowerCase();
+      if (!response.ok) throw new PdfHttpError(response.status, contentType);
+      if (contentType === "application/json" || contentType.endsWith("+json")) {
+        throw new PdfHttpError(response.status, contentType);
+      }
+      if (
+        contentType &&
+        contentType !== "application/pdf" &&
+        contentType !== "application/octet-stream"
+      ) {
+        throw new PdfHttpError(response.status, contentType);
+      }
+      const blob = await response.blob();
+      blobUrl = URL.createObjectURL(
+        blob.type ? blob : new Blob([blob], { type: "application/pdf" }),
+      );
+      loadTask = getDocument({ url: blobUrl });
+      documentProxy.value = await loadTask.promise;
+      pages.value = documentProxy.value.numPages;
+      page.value = 1;
+      loadNotice.value = "Range 分段加载失败，已自动切换到完整文件模式。";
+      await render();
+    } catch (fallbackFailure) {
+      if ((fallbackFailure as Error)?.name !== "AbortException") {
+        error.value = diagnoseLoadFailure(fallbackFailure, rangeFailure);
+      }
     }
   } finally {
     loading.value = false;
   }
+}
+
+function revokeBlobUrl() {
+  if (!blobUrl) return;
+  URL.revokeObjectURL(blobUrl);
+  blobUrl = "";
+}
+
+function diagnoseLoadFailure(fallback: unknown, range: unknown): string {
+  if (fallback instanceof PdfHttpError) {
+    if (fallback.status === 401) return "登录状态已失效，请重新登录后再试。";
+    if (fallback.status === 403) return "当前机构没有权限查看这份原文件。";
+    if (fallback.status === 404) return "原文件记录或存储文件不存在。";
+    if (fallback.status === 416) {
+      return "Range 请求异常，完整文件模式也未能取得原文件。";
+    }
+    if (
+      fallback.contentType === "application/json" ||
+      fallback.contentType.endsWith("+json")
+    ) {
+      return "后端返回了错误信息而不是 PDF 文件，请查看任务或服务日志。";
+    }
+    if (fallback.contentType) {
+      return `原文件响应类型为 ${fallback.contentType}，不是可读取的 PDF。`;
+    }
+    return `原文件请求失败（HTTP ${fallback.status}）。`;
+  }
+  const candidate = fallback instanceof Error ? fallback : range;
+  const name = candidate instanceof Error ? candidate.name : "";
+  const message =
+    candidate instanceof Error ? candidate.message.toLowerCase() : "";
+  if (name === "PasswordException" || message.includes("password")) {
+    return "PDF 已加密或需要密码，当前无法在线预览。";
+  }
+  if (name === "InvalidPDFException" || message.includes("invalid pdf")) {
+    return "PDF 格式损坏或内容不完整，完整文件模式仍然无法读取。";
+  }
+  if (
+    message.includes("worker") ||
+    message.includes("fake worker") ||
+    message.includes("setting up")
+  ) {
+    return "PDF.js Worker 加载失败，请检查前端静态资源部署。";
+  }
+  return "Range 分段加载失败，完整文件模式仍然无法读取 PDF。";
 }
 
 async function render() {
@@ -142,7 +237,7 @@ async function download() {
     anchor.click();
     URL.revokeObjectURL(url);
   } catch {
-    error.value = "下载失败，请稍后重试。";
+    error.value = "下载失败，请检查登录状态、文件权限或网络后重试。";
   }
 }
 
@@ -184,6 +279,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   renderTask?.cancel();
   void loadTask?.destroy();
+  revokeBlobUrl();
 });
 </script>
 
@@ -201,6 +297,9 @@ onBeforeUnmount(() => {
       <button type="button" @click="download">下载原文件</button>
     </div>
     <p v-if="loading" class="pdf-reader__state">正在加载 PDF…</p>
+    <p v-else-if="loadNotice && !error" class="pdf-reader__notice">
+      {{ loadNotice }}
+    </p>
     <div v-else-if="error" class="pdf-reader__state pdf-reader__error">
       <p>{{ error }}</p>
       <button type="button" @click="load">重新加载</button>
@@ -269,6 +368,13 @@ onBeforeUnmount(() => {
   justify-self: center;
   padding: 2rem;
   text-align: center;
+}
+.pdf-reader__notice {
+  margin: 0;
+  padding: 0.55rem 0.85rem;
+  color: #4b6074;
+  background: #f8fafb;
+  border-bottom: 1px solid #d7dde4;
 }
 .pdf-reader__error {
   color: #9d2f2f;
