@@ -383,6 +383,9 @@ async function rejectCandidate(candidate: ImageCandidate) {
     <p v-for="warning in resourceWarnings" :key="warning" class="inline-error">
       {{ warning }}
     </p>
+    <p v-if="isWebArticle && (document?.version_no || 1) > 1" class="version-review-note">
+      当前审核对象：V{{ document?.version_no }}。已发布的 V{{ (document?.version_no || 1) - 1 }} 继续保持公开，只有本版本完成人工审核并发布后才会替换。
+    </p>
 
     <section v-if="isWebArticle" class="panel web-source-review">
       <div class="web-source-review__cover">
@@ -404,7 +407,7 @@ async function rejectCandidate(candidate: ImageCandidate) {
       <p>候选仅供内部核对，未经来源和许可确认不会成为公开封面。</p>
       <div class="form-row"><label class="field">图片来源<input v-model="candidateSourceName" placeholder="例如：新华网原网页" /></label><label class="field">许可说明<input v-model="candidateUsageBasis" placeholder="填写授权、公开使用依据或人工核对说明" /></label></div>
       <label class="field">拒绝原因<input v-model="candidateRejectionReason" placeholder="例如：版权不明确、尺寸不适合或与正文无关" /></label>
-      <div><figure v-for="candidate in imageCandidates" :key="candidate.id"><img :src="candidate.candidate_url" :alt="candidate.alt_text || '网页图片候选'" referrerpolicy="no-referrer"/><figcaption>{{candidate.discovery_method}} · {{candidate.width}}×{{candidate.height}} · {{candidate.mime_type || '图片'}}<br/>{{candidate.alt_text || '无替代文本'}}<br/>状态：{{candidate.review_status}} / {{candidate.rights_status}}</figcaption><div class="form-actions"><button v-if="candidate.review_status === 'PENDING'" class="btn primary" type="button" @click="approveCandidate(candidate)">确认可用</button><button v-if="candidate.review_status === 'PENDING'" class="btn secondary" type="button" @click="rejectCandidate(candidate)">拒绝</button></div></figure></div>
+      <div><figure v-for="candidate in imageCandidates" :key="candidate.id"><img :src="candidate.candidate_url" :alt="candidate.alt_text || '网页图片候选'" referrerpolicy="no-referrer"/><figcaption><b>图片 URL</b><a :href="candidate.candidate_url" target="_blank" rel="noopener noreferrer">{{candidate.candidate_url}}</a><br/><b>来源页</b><a :href="candidate.source_page_url" target="_blank" rel="noopener noreferrer">{{candidate.source_page_url}}</a><br/>发现方式：{{candidate.discovery_method}} · {{candidate.width}}×{{candidate.height}} · {{candidate.mime_type || '图片'}}<br/>替代文本：{{candidate.alt_text || '无替代文本'}}<br/>状态：{{candidate.review_status}} / {{candidate.rights_status}}</figcaption><div class="form-actions"><button v-if="candidate.review_status === 'PENDING'" class="btn primary" type="button" :disabled="!candidateSourceName.trim() || !candidateUsageBasis.trim()" @click="approveCandidate(candidate)">确认可用</button><button v-if="candidate.review_status === 'PENDING'" class="btn secondary" type="button" @click="rejectCandidate(candidate)">拒绝</button></div></figure></div>
     </section>
     <section v-if="isWebArticle && !imageCandidates.length" class="panel"><h2>图片候选</h2><p>没有通过安全、尺寸和比例过滤的第三方图片，将使用分类默认图。</p></section>
 

@@ -30,6 +30,11 @@ const form = reactive({
   allowPublicOriginal: false,
 });
 const isDirty = computed(() => Boolean(initialForm.value) && JSON.stringify(form) !== initialForm.value);
+const imageReviewBlocked = computed(
+  () =>
+    document.value?.source_type === "WEB_ARTICLE" &&
+    document.value?.image_reviewed !== true,
+);
 onBeforeRouteLeave(() => {
   if (allowLeave.value || publishedSlug.value || !isDirty.value) return true;
   return window.confirm("发布信息尚未保存，确定离开吗？");
@@ -86,6 +91,10 @@ onMounted(async () => {
 });
 
 async function publish() {
+  if (imageReviewBlocked.value) {
+    error.value = "网页文章图片尚未完成人工审核，请返回审核页确认候选图片或使用分类默认图。";
+    return;
+  }
   if (!window.confirm("确认审核通过并发布到用户端吗？发布后公众即可查看。")) return;
   submitting.value = true;
   error.value = "";
@@ -181,10 +190,11 @@ async function publish() {
         ><input v-model="form.allowPublicOriginal" type="checkbox" />允许用户端查看上传的原始{{ document?.mime_type?.startsWith("image/") ? "图片" : "PDF" }}。原文件可能包含个人信息，请确认适合公开。</label
       >
       <p v-if="error" class="form-error">{{ error }}</p>
+      <p v-if="imageReviewBlocked" class="inline-error">发布已阻止：网页文章图片尚未完成人工审核。请返回审核页确认图片来源与许可，或改用分类默认图。</p>
       <div class="form-actions">
         <button
           class="btn primary"
-          :disabled="submitting || !agreed || !form.title || !form.sourceName"
+          :disabled="submitting || !agreed || !form.title || !form.sourceName || imageReviewBlocked"
           @click="publish"
         >
           <Send :size="17" />{{ submitting ? "正在发布…" : "审核通过并发布" }}

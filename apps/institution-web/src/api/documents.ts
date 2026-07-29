@@ -56,6 +56,12 @@ export interface DocumentDetail {
   extracted_text?: string;
   original_page_available?: boolean;
   content_kind?: string;
+  version_root_id?: number;
+  previous_version_id?: number;
+  version_no?: number;
+  old_content_hash?: string;
+  new_content_hash?: string;
+  content_change_summary?: string;
   processing_status: string;
 }
 

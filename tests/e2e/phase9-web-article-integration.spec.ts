@@ -220,6 +220,9 @@ test("网页文章审核页读取快照且不会请求 PDF 原文件", async ({ 
       ]),
     ),
   );
+  await page.route("**/api/web-articles/27/image-candidates", (route) =>
+    route.fulfill(api([])),
+  );
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${institutionUrl}/documents/27/review`);
