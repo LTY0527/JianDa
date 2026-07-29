@@ -174,6 +174,16 @@ public class PublicController {
         return ApiResponse.ok(null);
     }
 
+    @PostMapping("/items/{id}/view")
+    public ApiResponse<Void> view(@PathVariable long id) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM published_item WHERE id=? AND status='PUBLISHED'",
+                Integer.class, id);
+        if (count == null || count == 0) throw new BusinessException(404, "内容不存在或已撤回");
+        jdbc.update("INSERT INTO content_engagement_event(published_item_id,event_type) VALUES (?,'VIEW')", id);
+        return ApiResponse.ok(null);
+    }
+
     @GetMapping("/items/{slug}/cover")
     public ResponseEntity<byte[]> cover(@PathVariable String slug) throws IOException {
         return OriginalFileHttp.response(documentService.publicCover(slug), null, false);

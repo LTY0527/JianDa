@@ -6,9 +6,13 @@ import { documentApi, type DocumentRow } from "../api/documents";
 import { apiMessage } from "../api/http";
 import { Upload, ArrowRight, FileClock, CircleCheck, BookOpen, TriangleAlert, Globe2, FileImage, FileText } from "lucide-vue-next";
 import { formatDisplayDate, formatDisplayDateTime, statusLabel } from "../utils/display";
+import { isPlatformAdmin } from "../auth";
+import { operationMetricsApi, type OperationMetrics } from "../api/operations";
 const rows = ref<DocumentRow[]>([]);
 const loading = ref(true);
 const error = ref("");
+const metrics = ref<OperationMetrics | null>(null);
+const metricsError = ref("");
 const waiting = computed(() => rows.value.filter((row) => row.status === "WAITING_REVIEW"));
 const processing = computed(() => rows.value.filter((row) => ["UPLOADED", "PROCESSING"].includes(row.status)));
 const published = computed(() => rows.value.filter((row) => row.status === "PUBLISHED"));
@@ -24,7 +28,37 @@ function sourceDescription(row: DocumentRow) {
   }
   return row.file_name || "上传材料";
 }
-onMounted(async () => { try { rows.value = (await documentApi.list()).data.data; } catch (cause) { error.value = apiMessage(cause); } finally { loading.value = false; } });
+const operationCards = computed(() => {
+  if (!metrics.value) return [];
+  const value = metrics.value;
+  return [
+    ["权威来源", value.authoritySourceCount, "个"],
+    ["发现文章", value.discoveredArticleCount, "篇"],
+    ["成功抓取", value.successfulCrawlCount, "次"],
+    ["去重", value.duplicateCount, "篇"],
+    ["待审核", value.waitingReviewCount, "篇"],
+    ["已发布", value.publishedCount, "篇"],
+    ["处理失败", value.failedCount, "篇"],
+    ["平均处理", Math.round(value.averageProcessingMs / 100) / 10, "秒"],
+    ["AI 请求", value.aiRequestCount, "次"],
+    ["AI Token", value.aiTokenCount, ""],
+    ["AI 成功率", value.aiSuccessRate, "%"],
+    ["用户浏览", value.viewCount, "次"],
+    ["收藏", value.favoriteCount, "次"],
+    ["助手提问", value.assistantQueryCount, "次"],
+    ["引用回答", value.citedAnswerRate, "%"],
+    ["人工修改率", value.manualEditRate, "%"],
+  ];
+});
+onMounted(async () => {
+  try { rows.value = (await documentApi.list()).data.data; }
+  catch (cause) { error.value = apiMessage(cause); }
+  finally { loading.value = false; }
+  if (isPlatformAdmin()) {
+    try { metrics.value = (await operationMetricsApi.current()).data.data; }
+    catch (cause) { metricsError.value = apiMessage(cause); }
+  }
+});
 </script>
 <template>
   <div>
@@ -37,6 +71,16 @@ onMounted(async () => { try { rows.value = (await documentApi.list()).data.data;
       <article><span class="metric-icon orange"><TriangleAlert /></span><div><small>等待审核</small><strong>{{ loading ? "—" : waiting.length }}</strong><em>需要人工逐项确认</em></div></article>
       <article><span class="metric-icon green"><CircleCheck /></span><div><small>正在公开</small><strong>{{ loading ? "—" : published.length }}</strong><em>用户端当前可查看</em></div></article>
       <article><span class="metric-icon teal"><BookOpen /></span><div><small>处理异常</small><strong>{{ loading ? "—" : failed.length }}</strong><em>需要检查服务日志</em></div></article>
+    </section>
+    <section v-if="isPlatformAdmin()" class="panel operation-dashboard">
+      <div class="panel-title"><div><h2>试运营数据</h2><p>全部来自当前数据库；暂无事件时显示 0，不使用演示估算。</p></div></div>
+      <p v-if="metricsError" class="inline-error">{{ metricsError }}</p>
+      <div v-else-if="metrics" class="operation-metrics">
+        <article v-for="card in operationCards" :key="String(card[0])">
+          <small>{{ card[0] }}</small><strong>{{ card[1] }}<em>{{ card[2] }}</em></strong>
+        </article>
+      </div>
+      <div v-else class="empty-state">正在读取试运营数据…</div>
     </section>
     <div class="dashboard-grid">
       <section class="panel">
