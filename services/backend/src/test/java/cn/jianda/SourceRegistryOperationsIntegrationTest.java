@@ -49,6 +49,7 @@ class SourceRegistryOperationsIntegrationTest {
 
     @BeforeEach
     void prepare() throws Exception {
+        jdbc.update("DELETE FROM source_registry_identity");
         jdbc.update("DELETE FROM source_registry WHERE domain LIKE 'phase93b-%'");
         platformAuth = "Bearer " + login("platform_admin");
         when(aiClient.discoverArticles(anyLong(), anyString(), anyString(), anyString(), anyInt()))
@@ -115,6 +116,47 @@ class SourceRegistryOperationsIntegrationTest {
         mvc.perform(put("/api/source-registries/{id}/enabled", id).header("Authorization", platformAuth)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.enabled").value(false));
+    }
+
+    @Test
+    void quickPreviewRequiresAdministratorConfirmationAndStoresIdentityFingerprint() throws Exception {
+        String url = "https://www.news.cn/controlled-article.html";
+        mvc.perform(post("/api/source-registries/quick-preview").header("Authorization", platformAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.domain").value("www.news.cn"))
+                .andExpect(jsonPath("$.data.robots_allowed").value(true))
+                .andExpect(jsonPath("$.data.official_verified").value(false))
+                .andExpect(jsonPath("$.data.source_identity_fingerprint").isNotEmpty());
+
+        Map<String, Object> confirmation = Map.ofEntries(
+                Map.entry("url", url),
+                Map.entry("sourceName", "新华网"),
+                Map.entry("sourceType", "OFFICIAL_MEDIA"),
+                Map.entry("verificationNote", "已通过公开官网机构信息人工核对"),
+                Map.entry("officialConfirmed", true),
+                Map.entry("mode", "SAVE_MANUAL_SCAN"),
+                Map.entry("imageUsagePolicy", "MANUAL_REVIEW"),
+                Map.entry("imageUsageBasis", ""),
+                Map.entry("autoApproveImages", false),
+                Map.entry("imageCacheAllowed", false),
+                Map.entry("continueImport", false));
+        mvc.perform(post("/api/source-registries/quick-confirm").header("Authorization", platformAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(confirmation)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.source.official_verified").value(true));
+        assertTrue(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_registry_identity WHERE official_verified=TRUE",
+                Integer.class) >= 1);
+
+        confirmation = new java.util.HashMap<>(confirmation);
+        confirmation.put("officialConfirmed", false);
+        mvc.perform(post("/api/source-registries/quick-confirm").header("Authorization", platformAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(confirmation)))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

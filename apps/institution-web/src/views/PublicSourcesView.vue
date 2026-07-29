@@ -10,6 +10,7 @@ import {
   type ArticleDiscoveryResult,
   type CrawlJob,
   type PublicSource,
+  type QuickSourcePreview,
   type SourceRegistryPayload,
   type WebArticlePreview,
   type WebSourceRegistry,
@@ -40,18 +41,62 @@ const saving = ref(false);
 const error = ref("");
 const showForm = ref(false);
 const editingRegistryId = ref<number | null>(null);
+const activeSection = ref<"sources" | "scan" | "ai" | "jobs" | "advanced">("sources");
+const sectionTabs = [
+  { id: "sources", label: "来源列表" },
+  { id: "scan", label: "扫描与导入" },
+  { id: "ai", label: "AI 等待队列" },
+  { id: "jobs", label: "采集任务" },
+  { id: "advanced", label: "高级自动采集设置" },
+] as const;
+const selectedUrls = ref<string[]>([]);
+const quickUrl = ref("");
+const quickPreview = ref<QuickSourcePreview | null>(null);
+const quickForm = reactive({
+  sourceName: "",
+  sourceType: "OTHER_VERIFIED_OFFICIAL",
+  verificationNote: "",
+  officialConfirmed: false,
+  mode: "SAVE_MANUAL_SCAN" as "TEMPORARY_IMPORT" | "SAVE_TRUSTED" | "SAVE_MANUAL_SCAN" | "SAVE_AUTO_SCAN",
+  imageUsagePolicy: "MANUAL_REVIEW",
+  imageUsageBasis: "",
+  autoApproveImages: false,
+  imageCacheAllowed: false,
+  continueImport: true,
+});
+const scanForm = reactive({
+  recentDays: 7,
+  maxArticles: 20,
+  includeKeywords: "",
+  excludeKeywords: "",
+  onlyUnimported: true,
+});
 const form = reactive({ name: "", type: "GOVERNMENT", url: "https://", publisher: "", notes: "" });
 const registryForm = reactive<SourceRegistryPayload>({
   name: "", domain: "", type: "PUBLIC_INSTITUTION", authorityLevel: "B",
   homepageUrl: "https://", rssUrl: "", sitemapUrl: "", sectionUrl: "",
   discoveryMode: "MANUAL", dailyCrawlTime: "03:30", maxArticlesPerRun: 5,
   allowImageCandidates: false, allowAutoAi: false, dailyArticleBudget: 0, dailyTokenBudget: 0,
+  scheduleMode: "DAILY", intervalHours: 24, scheduleTimezone: "Asia/Shanghai", recentDays: 7,
+  includeKeywords: "", excludeKeywords: "", autoSaveDraft: true, duplicateStrategy: "SKIP",
+  maxRetries: 3, imageUsagePolicy: "MANUAL_REVIEW", imageUsageBasis: "",
+  autoApproveImages: false, imageCacheAllowed: false,
 });
 const typeText: Record<string, string> = {
   GOVERNMENT: "政府",
-  HOSPITAL: "医院",
-  MAINSTREAM_MEDIA: "主流媒体",
-  PUBLIC_INSTITUTION: "公共机构",
+  PUBLIC_INSTITUTION: "事业单位",
+  HOSPITAL: "公立医院 / 权威医疗机构",
+  COMMUNITY_HEALTH: "社区卫生服务中心",
+  CDC: "疾病预防控制机构",
+  ELDERLY_SERVICE_ORG: "官方养老服务机构",
+  OFFICIAL_MEDIA: "官方或主流媒体",
+  OFFICIAL_WECHAT: "官方微信公众号",
+  UNIVERSITY_PUBLIC_SERVICE: "高校公共服务",
+  OTHER_VERIFIED_OFFICIAL: "其他已核验官方来源",
+  MAINSTREAM_MEDIA: "主流媒体（历史）",
+  ANTI_FRAUD: "反诈机构（历史）",
+  ELDERLY_CARE: "养老机构（历史）",
+  OTHER_PUBLIC_SERVICE: "其他公共服务（历史）",
 };
 
 async function load() {
@@ -110,6 +155,10 @@ async function saveRegistry() {
       name: "", domain: "", type: "PUBLIC_INSTITUTION", authorityLevel: "B", homepageUrl: "https://",
       rssUrl: "", sitemapUrl: "", sectionUrl: "", discoveryMode: "MANUAL", dailyCrawlTime: "03:30",
       maxArticlesPerRun: 5, allowImageCandidates: false, dailyArticleBudget: 0, dailyTokenBudget: 0,
+      allowAutoAi: false, scheduleMode: "DAILY", intervalHours: 24, scheduleTimezone: "Asia/Shanghai",
+      recentDays: 7, includeKeywords: "", excludeKeywords: "", autoSaveDraft: true,
+      duplicateStrategy: "SKIP", maxRetries: 3, imageUsagePolicy: "MANUAL_REVIEW",
+      imageUsageBasis: "", autoApproveImages: false, imageCacheAllowed: false,
     });
     await load();
   } catch (cause) {
@@ -128,6 +177,13 @@ function editRegistry(source: WebSourceRegistry) {
     discoveryMode: source.discovery_mode, dailyCrawlTime: source.daily_crawl_time,
     maxArticlesPerRun: source.max_articles_per_run, allowImageCandidates: source.allow_image_candidates,
     allowAutoAi: source.allow_auto_ai, dailyArticleBudget: source.daily_article_budget, dailyTokenBudget: source.daily_token_budget,
+    scheduleMode: source.schedule_mode, intervalHours: source.interval_hours,
+    scheduleTimezone: source.schedule_timezone, recentDays: source.recent_days,
+    includeKeywords: source.include_keywords || "", excludeKeywords: source.exclude_keywords || "",
+    autoSaveDraft: source.auto_save_draft, duplicateStrategy: source.duplicate_strategy,
+    maxRetries: source.max_retries, imageUsagePolicy: source.image_usage_policy,
+    imageUsageBasis: source.image_usage_basis || "", autoApproveImages: source.auto_approve_images,
+    imageCacheAllowed: source.image_cache_allowed,
   });
 }
 
@@ -214,17 +270,90 @@ async function discoverArticles(source: WebSourceRegistry) {
   shadowPreview.value = null;
   try {
     const entry = discoveryEntry(source);
-    const response = await publicSourceApi.discoverRegistryArticles(
-      source.id,
-      entry.method,
-      entry.entryUrl,
-    );
+    const response = await publicSourceApi.discoverRegistryArticles(source.id, {
+      method: entry.method,
+      entryUrl: entry.entryUrl,
+      ...scanForm,
+    });
     discoveryResult.value = { source, data: response.data.data };
+    selectedUrls.value = [];
     operationMessage.value = `发现完成：${response.data.data.candidates.length} 个 URL，未创建材料、未调用 AI。`;
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
     operatingSourceId.value = null;
+  }
+}
+
+function selectAllUnimported() {
+  selectedUrls.value = discoveryResult.value?.data.candidates
+    .filter((item) => !item.imported)
+    .map((item) => item.canonical_url) || [];
+}
+
+async function collectSelected() {
+  if (!discoveryResult.value || selectedUrls.value.length === 0) return;
+  if (!window.confirm(`确认保存所选 ${selectedUrls.value.length} 篇为材料并加入 AI 等待队列吗？不会自动发布。`)) return;
+  operatingSourceId.value = discoveryResult.value.source.id;
+  try {
+    const response = await publicSourceApi.collectRegistryArticles(
+      discoveryResult.value.source.id,
+      selectedUrls.value,
+    );
+    operationMessage.value = `批量采集完成：新增 ${response.data.data.importedCount} 篇，失败 ${response.data.data.failedCount} 篇。`;
+    selectedUrls.value = [];
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    operatingSourceId.value = null;
+  }
+}
+
+async function previewQuickSource() {
+  if (!quickUrl.value.trim()) return;
+  saving.value = true;
+  error.value = "";
+  quickPreview.value = null;
+  try {
+    const response = await publicSourceApi.quickPreviewSource(quickUrl.value.trim());
+    quickPreview.value = response.data.data;
+    quickForm.sourceName = quickPreview.value.wechat_account_name
+      || quickPreview.value.source_name || quickPreview.value.domain;
+    quickForm.sourceType = quickPreview.value.source_type_suggestion;
+    operationMessage.value = "安全预览完成。该结果仅用于核对，尚未将来源标记为权威。";
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function confirmQuickSource() {
+  if (!quickPreview.value) return;
+  saving.value = true;
+  error.value = "";
+  try {
+    const response = await publicSourceApi.quickConfirmSource({
+      url: quickUrl.value.trim(),
+      ...quickForm,
+    });
+    const imported = response.data.data.imported;
+    operationMessage.value = imported
+      ? `来源身份已确认，材料 #${imported.documentId} 已创建并进入 ${statusLabel(imported.aiQueueStatus)}。`
+      : "来源身份已确认并保存。";
+    quickPreview.value = null;
+    quickUrl.value = "";
+    Object.assign(quickForm, {
+      sourceName: "", sourceType: "OTHER_VERIFIED_OFFICIAL", verificationNote: "",
+      officialConfirmed: false, mode: "SAVE_MANUAL_SCAN", imageUsagePolicy: "MANUAL_REVIEW",
+      imageUsageBasis: "", autoApproveImages: false, imageCacheAllowed: false, continueImport: true,
+    });
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -269,7 +398,14 @@ onMounted(load);
       <button class="btn primary" @click="showForm = !showForm"><Plus :size="17" />新增来源</button>
     </PageHeader>
 
-    <form v-if="showForm" class="panel source-create" @submit.prevent="createSource">
+    <nav class="source-tabs" aria-label="来源管理分区">
+      <button v-for="tab in sectionTabs" :key="tab.id" type="button" :class="{ active: activeSection === tab.id }"
+        @click="activeSection = tab.id">
+        {{ tab.label }}
+      </button>
+    </nav>
+
+    <form v-if="showForm && activeSection === 'sources'" class="panel source-create" @submit.prevent="createSource">
       <div class="form-row">
         <label class="field">来源名称<input v-model="form.name" required placeholder="例如：市卫生健康委员会" /></label>
         <label class="field">来源类型<select v-model="form.type"><option v-for="(label, value) in typeText" :key="value" :value="value">{{ label }}</option></select></label>
@@ -283,7 +419,7 @@ onMounted(load);
     </form>
 
     <div v-if="error" class="inline-error">{{ error }}</div>
-    <section class="panel">
+    <section v-show="activeSection === 'sources'" class="panel">
       <table class="data-table source-table">
         <thead><tr><th>来源</th><th>类型</th><th>白名单</th><th>状态</th><th>最近导入</th><th>操作</th></tr></thead>
         <tbody v-if="!loading">
@@ -300,9 +436,65 @@ onMounted(load);
       <div v-if="loading" class="empty-state">正在加载权威来源…</div>
       <div v-else-if="sources.length === 0" class="empty-state">暂无权威来源，请先新增。</div>
     </section>
-    <section class="panel">
+    <section v-show="activeSection === 'scan'" class="panel quick-source-panel">
+      <div class="panel-title">
+        <div>
+          <h2>粘贴官方文章 URL</h2>
+          <p>先执行 SSRF、DNS/IP、robots、重定向、大小和 MIME 安全检查，再由平台管理员确认官方身份。</p>
+        </div>
+      </div>
+      <div class="quick-url-row">
+        <label class="field">公开文章地址
+          <input v-model="quickUrl" type="url" placeholder="https://官方站点/文章" />
+        </label>
+        <button class="btn primary" type="button" :disabled="saving || !quickUrl" @click="previewQuickSource">
+          {{ saving ? "正在安全预览…" : "安全预览来源身份" }}
+        </button>
+      </div>
+      <form v-if="quickPreview" class="identity-review" @submit.prevent="confirmQuickSource">
+        <div class="identity-summary">
+          <div><span>页面标题</span><b>{{ quickPreview.page_title }}</b></div>
+          <div><span>域名</span><b>{{ quickPreview.domain }}</b></div>
+          <div><span>Canonical</span><b>{{ quickPreview.canonical_url }}</b></div>
+          <div><span>HTTPS / robots</span><b>{{ quickPreview.https ? "HTTPS" : "普通 HTTP" }} · {{ quickPreview.robots_status }}</b></div>
+          <div v-if="quickPreview.wechat_article"><span>公众号名称</span><b>{{ quickPreview.wechat_account_name || "未提取，请人工核对" }}</b></div>
+          <div v-if="quickPreview.wechat_article"><span>发布主体 / 账号标识</span><b>{{ quickPreview.account_subject || "未提取" }} · {{ quickPreview.wechat_biz || "未提取" }}</b></div>
+        </div>
+        <p v-if="quickPreview.wechat_article" class="safe-note">
+          mp.weixin.qq.com 是共享文章域名，平台不会仅凭域名认定官方账号；必须核对公众号名称、发布主体或稳定账号标识。
+        </p>
+        <div class="form-row">
+          <label class="field">来源名称<input v-model="quickForm.sourceName" required /></label>
+          <label class="field">来源类型<select v-model="quickForm.sourceType"><option v-for="(label, value) in typeText" :key="value" :value="value">{{ label }}</option></select></label>
+        </div>
+        <label class="field">官方性质核对说明<textarea v-model="quickForm.verificationNote" required rows="2" placeholder="说明核对的机构官网、账号主体或公开证明" /></label>
+        <div class="form-row">
+          <label class="field">保存方式<select v-model="quickForm.mode">
+            <option value="TEMPORARY_IMPORT">仅本次临时导入</option>
+            <option value="SAVE_TRUSTED">保存为可信来源</option>
+            <option value="SAVE_MANUAL_SCAN">保存并允许后续手动扫描</option>
+            <option value="SAVE_AUTO_SCAN">保存并配置自动定时扫描</option>
+          </select></label>
+          <label class="field">图片策略<select v-model="quickForm.imageUsagePolicy">
+            <option value="MANUAL_REVIEW">逐篇人工确认</option>
+            <option value="ORGANIZATION_OWNED">机构自有</option>
+            <option value="OFFICIAL_PUBLICITY">官方公开宣传材料</option>
+            <option value="AUTHORIZED">已有使用授权</option>
+            <option value="LOCAL_DEMO_CONFIRMED">本地演示且已人工确认</option>
+          </select></label>
+        </div>
+        <label v-if="quickForm.imageUsagePolicy !== 'MANUAL_REVIEW'" class="field">图片使用依据
+          <textarea v-model="quickForm.imageUsageBasis" rows="2" required />
+        </label>
+        <label class="check-line"><input v-model="quickForm.officialConfirmed" type="checkbox" required /> 我已核对并确认该账号或站点属于所填官方机构</label>
+        <label class="check-line"><input v-model="quickForm.continueImport" type="checkbox" /> 保存来源后继续创建材料（仍需 AI、图片和内容人工审核）</label>
+        <div class="form-actions"><button class="btn primary" :disabled="saving || !quickForm.officialConfirmed">确认来源并继续</button></div>
+      </form>
+    </section>
+
+    <section v-show="['sources','scan','advanced'].includes(activeSection)" class="panel">
       <div class="panel-title"><div><h2>网页白名单来源</h2><p>维护调度入口、文章上限和自动处理预算；新来源默认停用。</p></div></div>
-      <form class="source-create" @submit.prevent="saveRegistry">
+      <form v-show="activeSection !== 'scan'" class="source-create" @submit.prevent="saveRegistry">
         <p class="safe-note">默认安全策略：新来源保持停用，原图缓存和自动 AI 均关闭，所有候选内容必须人工审核后才能发布。</p>
         <div class="form-row">
           <label class="field">来源名称<input v-model="registryForm.name" required /></label>
@@ -319,8 +511,41 @@ onMounted(load);
         <div class="form-row"><label class="field">每日文章预算<input v-model.number="registryForm.dailyArticleBudget" type="number" min="0" /></label><label class="field">每日 Token 预算<input v-model.number="registryForm.dailyTokenBudget" type="number" min="0" /></label></div>
         <label class="field"><input v-model="registryForm.allowImageCandidates" type="checkbox" /> 允许生成图片候选（仍需人工确认版权）</label>
         <label class="field"><input v-model="registryForm.allowAutoAi" type="checkbox" /> 允许自动 AI（仅在全局开关和预算同时允许时生效）</label>
+        <fieldset v-if="activeSection === 'advanced'" class="advanced-settings">
+          <legend>高级自动采集设置</legend>
+          <p class="safe-note">自动扫描和自动 AI 均按来源单独开启；自动审核与自动发布始终禁止。</p>
+          <div class="form-row">
+            <label class="field">调度方式<select v-model="registryForm.scheduleMode"><option value="DAILY">每日固定时间</option><option value="INTERVAL">按小时间隔</option></select></label>
+            <label class="field">每隔小时数<input v-model.number="registryForm.intervalHours" type="number" min="1" max="168" /></label>
+          </div>
+          <div class="form-row">
+            <label class="field">时区<input v-model="registryForm.scheduleTimezone" /></label>
+            <label class="field">扫描最近天数<select v-model.number="registryForm.recentDays"><option :value="1">1 天</option><option :value="3">3 天</option><option :value="7">7 天</option><option :value="30">30 天</option></select></label>
+          </div>
+          <div class="form-row"><label class="field">包含关键词<input v-model="registryForm.includeKeywords" /></label><label class="field">排除关键词<input v-model="registryForm.excludeKeywords" /></label></div>
+          <div class="form-row">
+            <label class="field">重复策略<select v-model="registryForm.duplicateStrategy"><option value="SKIP">跳过重复</option><option value="CREATE_VERSION">检测变化并创建新版本</option></select></label>
+            <label class="field">失败重试次数<input v-model.number="registryForm.maxRetries" type="number" min="0" max="10" /></label>
+          </div>
+          <label class="check-line"><input v-model="registryForm.autoSaveDraft" type="checkbox" /> 自动保存草稿（不会自动审核或发布）</label>
+          <div class="form-row">
+            <label class="field">图片使用策略<select v-model="registryForm.imageUsagePolicy"><option value="MANUAL_REVIEW">逐篇人工确认</option><option value="ORGANIZATION_OWNED">机构自有</option><option value="OFFICIAL_PUBLICITY">官方公开宣传材料</option><option value="AUTHORIZED">已有使用授权</option><option value="LOCAL_DEMO_CONFIRMED">本地演示且已人工确认</option></select></label>
+            <label class="field">图片使用依据<input v-model="registryForm.imageUsageBasis" /></label>
+          </div>
+          <label class="check-line"><input v-model="registryForm.autoApproveImages" type="checkbox" /> 符合本来源策略时自动确认图片</label>
+          <label class="check-line"><input v-model="registryForm.imageCacheAllowed" type="checkbox" /> 允许审核通过后缓存图片到本地</label>
+        </fieldset>
         <div class="form-actions"><button v-if="editingRegistryId" type="button" class="btn secondary" @click="editingRegistryId = null">取消编辑</button><button class="btn primary" :disabled="saving">{{ saving ? "正在保存…" : editingRegistryId ? "保存修改" : "新增运营来源" }}</button></div>
       </form>
+      <div v-if="activeSection === 'scan'" class="scan-settings">
+        <div class="form-row">
+          <label class="field">最近范围<select v-model.number="scanForm.recentDays"><option :value="1">1 天</option><option :value="3">3 天</option><option :value="7">7 天</option><option :value="30">30 天</option></select></label>
+          <label class="field">最多发现篇数<input v-model.number="scanForm.maxArticles" type="number" min="1" max="100" /></label>
+        </div>
+        <div class="form-row"><label class="field">关键词<input v-model="scanForm.includeKeywords" /></label><label class="field">排除关键词<input v-model="scanForm.excludeKeywords" /></label></div>
+        <label class="check-line"><input v-model="scanForm.onlyUnimported" type="checkbox" /> 只显示未导入内容</label>
+        <p class="safe-note">发现文章只扫描 URL，不创建材料、不调用 AI；影子采集仅抓取预览；立即或批量采集才创建材料，但不会自动发布。</p>
+      </div>
       <table class="data-table">
         <thead><tr><th>来源</th><th>调度</th><th>预算</th><th>最近状态</th><th>错误摘要</th><th>操作</th></tr></thead>
         <tbody v-if="!loading">
@@ -333,7 +558,7 @@ onMounted(load);
             <td>
               <button class="text-action" @click="editRegistry(source)">编辑</button>
               <button class="text-action" @click="toggleRegistry(source)">{{source.enabled ? "停用" : "启用"}}</button>
-              <button v-if="source.enabled" class="text-action strong" :disabled="operatingSourceId === source.id" @click="discoverArticles(source)">发现文章</button>
+              <button class="btn secondary scan-action" :disabled="!source.enabled || operatingSourceId === source.id" :title="source.enabled ? '只发现 URL，不创建材料' : '请先启用已核验来源'" @click="activeSection = 'scan'; discoverArticles(source)">扫描最近文章</button>
             </td>
           </tr>
         </tbody>
@@ -341,7 +566,7 @@ onMounted(load);
       <div v-if="loading" class="empty-state">正在加载运营来源…</div>
       <div v-else-if="registries.length === 0" class="empty-state">暂无运营来源，请先新增。</div>
       <div v-if="operationMessage" class="safe-note" role="status">{{ operationMessage }}</div>
-      <section v-if="discoveryResult" class="source-create controlled-crawl">
+      <section v-if="activeSection === 'scan' && discoveryResult" class="source-create controlled-crawl">
         <div class="panel-title">
           <div>
             <h2>{{ discoveryResult.source.source_name }} · 受控采集验收</h2>
@@ -353,12 +578,13 @@ onMounted(load);
           {{ discoveryResult.data.errors.join("；") }}
         </div>
         <table class="data-table">
-          <thead><tr><th>发现文章</th><th>方式</th><th>状态</th><th>受控操作</th></tr></thead>
+          <thead><tr><th>选择</th><th>发现文章</th><th>方式</th><th>状态</th><th>受控操作</th></tr></thead>
           <tbody>
             <tr v-for="article in discoveryResult.data.candidates" :key="article.dedup_key">
+              <td><input v-model="selectedUrls" type="checkbox" :value="article.canonical_url" :disabled="article.imported" :aria-label="`选择${article.title || '文章'}`" /></td>
               <td><b>{{ article.title || "标题待抓取" }}</b><small>{{ article.canonical_url }}</small></td>
               <td>{{ article.discovery_method }}</td>
-              <td>{{ article.published_time || "发布时间待核对" }}</td>
+              <td>{{ article.imported ? "已导入 / 已有版本" : article.published_time || "发布时间待核对" }}</td>
               <td>
                 <button class="text-action" :disabled="operatingSourceId !== null" @click="shadowArticle(discoveryResult.source, article)">影子采集</button>
                 <button class="text-action strong" :disabled="operatingSourceId !== null" @click="collectArticle(discoveryResult.source, article)">立即采集</button>
@@ -366,6 +592,10 @@ onMounted(load);
             </tr>
           </tbody>
         </table>
+        <div class="form-actions batch-actions">
+          <button class="btn secondary" type="button" @click="selectAllUnimported">全选未重复内容</button>
+          <button class="btn primary" type="button" :disabled="selectedUrls.length === 0 || operatingSourceId !== null" @click="collectSelected">批量保存所选并加入 AI 队列（{{ selectedUrls.length }}）</button>
+        </div>
         <div v-if="!discoveryResult.data.candidates.length" class="empty-state">没有发现可验收的文章 URL，请检查入口配置和错误摘要。</div>
         <article v-if="shadowPreview" class="shadow-preview">
           <span class="verified">影子预览 · 未落库</span>
@@ -378,7 +608,7 @@ onMounted(load);
         </article>
       </section>
     </section>
-    <section class="panel">
+    <section v-show="activeSection === 'ai'" class="panel">
       <div class="panel-title"><div><h2>AI 处理队列与预算</h2><p>自动 AI 默认关闭；等待预算的任务不会自动执行，也不会被标记为已自动处理。</p></div></div>
       <table class="data-table">
         <thead><tr><th>材料 / 来源</th><th>状态</th><th>预算说明</th><th>预计恢复</th><th>操作</th></tr></thead>
@@ -398,7 +628,7 @@ onMounted(load);
       </table>
       <div v-if="!loading && aiQueue.length === 0" class="empty-state">当前没有待处理的 AI 队列任务。</div>
     </section>
-    <section class="panel">
+    <section v-show="activeSection === 'jobs'" class="panel">
       <div class="panel-title"><div><h2>采集任务中心</h2><p>统一查看任务计数、错误队列和重试状态。</p></div></div>
       <div class="form-row">
         <label class="field">状态筛选<select v-model="taskStatus" @change="load"><option value="">全部状态</option><option v-for="status in ['PENDING','RUNNING','SUCCESS','PARTIAL_SUCCESS','FAILED','CANCELLED','DISABLED']" :key="status" :value="status">{{statusLabel(status)}}</option></select></label>
@@ -427,3 +657,116 @@ onMounted(load);
     </section>
   </div>
 </template>
+
+<style scoped>
+.source-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--border-color, #d9e0e7);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.source-tabs button {
+  min-height: 44px;
+  padding: 0 16px;
+  white-space: nowrap;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #435162;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.source-tabs button.active {
+  background: #eaf3ef;
+  color: #185b45;
+}
+
+.quick-url-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.identity-review,
+.scan-settings,
+.advanced-settings {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid #d9e0e7;
+  border-radius: 10px;
+  background: #f8fafb;
+}
+
+.identity-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.identity-summary div {
+  min-width: 0;
+  padding: 12px;
+  background: #fff;
+  border-radius: 8px;
+}
+
+.identity-summary span,
+.identity-summary b {
+  display: block;
+}
+
+.identity-summary span {
+  margin-bottom: 5px;
+  color: #687789;
+  font-size: 13px;
+}
+
+.identity-summary b {
+  overflow-wrap: anywhere;
+}
+
+.check-line {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 12px 0;
+}
+
+.check-line input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.advanced-settings legend {
+  padding: 0 8px;
+  font-weight: 750;
+}
+
+.scan-action {
+  margin-top: 7px;
+}
+
+.batch-actions {
+  justify-content: space-between;
+}
+
+@media (max-width: 720px) {
+  .quick-url-row,
+  .identity-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .source-tabs {
+    margin-inline: -4px;
+  }
+}
+</style>

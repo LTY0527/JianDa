@@ -465,6 +465,9 @@ class WebArticleImage(BaseModel):
 class WebArticlePreview(BaseModel):
     title: str
     source_name: str = ""
+    wechat_account_name: str = ""
+    account_subject: str = ""
+    wechat_biz: str = ""
     published_at: datetime | None = None
     author: str = ""
     cover_image_url: str = ""

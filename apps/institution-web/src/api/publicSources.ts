@@ -118,6 +118,19 @@ export interface WebSourceRegistry {
   requires_manual_review?: boolean;
   daily_article_budget: number;
   daily_token_budget: number;
+  schedule_mode: "DAILY" | "INTERVAL";
+  interval_hours: number;
+  schedule_timezone: string;
+  recent_days: 1 | 3 | 7 | 30;
+  include_keywords?: string;
+  exclude_keywords?: string;
+  auto_save_draft: boolean;
+  duplicate_strategy: "SKIP" | "CREATE_VERSION";
+  max_retries: number;
+  image_usage_policy: string;
+  image_usage_basis?: string;
+  auto_approve_images: boolean;
+  image_cache_allowed: boolean;
   last_crawled_at?: string;
   last_status: string;
   next_run_at?: string;
@@ -161,6 +174,19 @@ export interface SourceRegistryPayload {
   allowAutoAi: boolean;
   dailyArticleBudget: number;
   dailyTokenBudget: number;
+  scheduleMode: "DAILY" | "INTERVAL";
+  intervalHours: number;
+  scheduleTimezone: string;
+  recentDays: 1 | 3 | 7 | 30;
+  includeKeywords: string;
+  excludeKeywords: string;
+  autoSaveDraft: boolean;
+  duplicateStrategy: "SKIP" | "CREATE_VERSION";
+  maxRetries: number;
+  imageUsagePolicy: string;
+  imageUsageBasis: string;
+  autoApproveImages: boolean;
+  imageCacheAllowed: boolean;
 }
 
 export interface ArticleDiscoveryCandidate {
@@ -172,6 +198,28 @@ export interface ArticleDiscoveryCandidate {
   discovery_page?: string;
   content_kind_candidate?: string;
   dedup_key: string;
+  imported?: boolean;
+  duplicate?: boolean;
+  has_previous_version?: boolean;
+}
+
+export interface QuickSourcePreview {
+  original_url: string;
+  canonical_url: string;
+  domain: string;
+  https: boolean;
+  page_title: string;
+  source_name?: string;
+  wechat_account_name?: string;
+  account_subject?: string;
+  wechat_biz?: string;
+  wechat_article: boolean;
+  source_identity_fingerprint: string;
+  source_type_suggestion: string;
+  robots_allowed: boolean;
+  robots_status: string;
+  official_verified: boolean;
+  registered_source?: Pick<WebSourceRegistry, "id" | "source_name" | "source_type" | "enabled">;
 }
 
 export interface ArticleDiscoveryResult {
@@ -290,10 +338,17 @@ export const publicSourceApi = {
     http.put<ApiResponse<WebSourceRegistry>>(`/source-registries/${id}`, payload),
   setWebRegistryEnabled: (id: number, enabled: boolean) =>
     http.put<ApiResponse<WebSourceRegistry>>(`/source-registries/${id}/enabled`, { enabled }),
-  discoverRegistryArticles: (id: number, method: string, entryUrl: string) =>
+  discoverRegistryArticles: (id: number, payload: {
+    method: string;
+    entryUrl: string;
+    recentDays: number;
+    maxArticles: number;
+    includeKeywords: string;
+    excludeKeywords: string;
+    onlyUnimported: boolean;
+  }) =>
     http.post<ApiResponse<ArticleDiscoveryResult>>(`/source-registries/${id}/discover`, {
-      method,
-      entryUrl,
+      ...payload,
     }),
   shadowRegistryArticle: (id: number, url: string) =>
     http.post<ApiResponse<WebArticlePreview>>(`/source-registries/${id}/shadow`, { url }),
@@ -303,6 +358,31 @@ export const publicSourceApi = {
       imageReviewRequired: boolean;
       aiQueueStatus: string;
     }>>(`/source-registries/${id}/collect`, { url }),
+  collectRegistryArticles: (id: number, urls: string[]) =>
+    http.post<ApiResponse<{
+      importedCount: number;
+      failedCount: number;
+      imported: Array<{ documentId: number; aiQueueStatus: string }>;
+      errors: Array<{ url: string; message: string }>;
+    }>>(`/source-registries/${id}/collect-batch`, { urls }),
+  quickPreviewSource: (url: string) =>
+    http.post<ApiResponse<QuickSourcePreview>>("/source-registries/quick-preview", { url }),
+  quickConfirmSource: (payload: {
+    url: string;
+    sourceName: string;
+    sourceType: string;
+    verificationNote: string;
+    officialConfirmed: boolean;
+    mode: "TEMPORARY_IMPORT" | "SAVE_TRUSTED" | "SAVE_MANUAL_SCAN" | "SAVE_AUTO_SCAN";
+    imageUsagePolicy: string;
+    imageUsageBasis: string;
+    autoApproveImages: boolean;
+    imageCacheAllowed: boolean;
+    continueImport: boolean;
+  }) => http.post<ApiResponse<{
+    source: WebSourceRegistry;
+    imported?: { documentId: number; aiQueueStatus: string };
+  }>>("/source-registries/quick-confirm", payload),
   crawlJobs: (params?: { status?: string; sourceId?: number }) =>
     http.get<ApiResponse<CrawlJob[]>>("/crawl-tasks", { params }),
   crawlJob: (jobId: number) =>

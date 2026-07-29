@@ -45,6 +45,30 @@ public class SourceRegistryController {
         return ApiResponse.ok(service.create(request, UserContext.current()));
     }
 
+    @PostMapping("/quick-preview")
+    public ApiResponse<Map<String, Object>> quickPreview(@Valid @RequestBody ControlledUrlRequest request) {
+        return ApiResponse.ok(webArticleService.previewUnregistered(request.url()));
+    }
+
+    @PostMapping("/quick-confirm")
+    public ApiResponse<Map<String, Object>> quickConfirm(@Valid @RequestBody QuickConfirmRequest request) {
+        Map<String, Object> preview = webArticleService.previewUnregistered(request.url());
+        SourceRegistryService.QuickSourceConfirmation confirmation =
+                new SourceRegistryService.QuickSourceConfirmation(
+                        request.sourceName(), request.sourceType(), request.verificationNote(),
+                        request.officialConfirmed(), request.mode(), request.imageUsagePolicy(),
+                        request.imageUsageBasis(), request.autoApproveImages(),
+                        request.imageCacheAllowed(), request.continueImport());
+        Map<String, Object> source = service.confirmQuickSource(confirmation, preview, UserContext.current());
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("source", source);
+        if (Boolean.TRUE.equals(request.continueImport())) {
+            result.put("imported", webArticleService.importApprovedArticle(
+                    request.url(), ((Number) source.get("id")).longValue(), UserContext.current()));
+        }
+        return ApiResponse.ok(result);
+    }
+
     @PutMapping("/{id}")
     public ApiResponse<Map<String, Object>> update(@PathVariable long id,
             @Valid @RequestBody SourceRegistryService.SourceConfiguration request) {
@@ -58,7 +82,10 @@ public class SourceRegistryController {
 
     @PostMapping("/{id}/discover")
     public ApiResponse<Map<String, Object>> discover(@PathVariable long id, @RequestBody DiscoveryRequest request) {
-        return ApiResponse.ok(discoveryService.discover(id, request.method(), request.entryUrl()));
+        return ApiResponse.ok(discoveryService.discover(id, request.method(), request.entryUrl(),
+                new ArticleDiscoveryService.DiscoveryOptions(
+                        request.recentDays(), request.maxArticles(), request.includeKeywords(),
+                        request.excludeKeywords(), request.onlyUnimported())));
     }
 
     @PostMapping("/{id}/shadow")
@@ -77,10 +104,52 @@ public class SourceRegistryController {
         return ApiResponse.ok(webArticleService.importArticle(request.url(), UserContext.current()));
     }
 
+    @PostMapping("/{id}/collect-batch")
+    public ApiResponse<Map<String, Object>> collectBatch(
+            @PathVariable long id, @Valid @RequestBody BatchControlledUrlRequest request) {
+        List<Map<String, Object>> imported = new java.util.ArrayList<>();
+        List<Map<String, Object>> errors = new java.util.ArrayList<>();
+        for (String url : request.urls().stream().distinct().limit(100).toList()) {
+            try {
+                Map<String, Object> preview = webArticleService.preview(url);
+                service.assertPreviewBelongsTo(id, preview);
+                imported.add(webArticleService.importArticle(url, UserContext.current()));
+            } catch (cn.jianda.common.BusinessException exception) {
+                errors.add(Map.of("url", url, "message", exception.getMessage()));
+            }
+        }
+        return ApiResponse.ok(Map.of("imported", imported, "errors", errors,
+                "importedCount", imported.size(), "failedCount", errors.size()));
+    }
+
     public record EnabledRequest(boolean enabled) {}
-    public record DiscoveryRequest(String method, String entryUrl) {}
+    public record DiscoveryRequest(String method, String entryUrl, Integer recentDays, Integer maxArticles,
+            String includeKeywords, String excludeKeywords, Boolean onlyUnimported) {}
     public record ControlledUrlRequest(
             @jakarta.validation.constraints.NotBlank
             @jakarta.validation.constraints.Size(max = 1500)
             String url) {}
+
+    public record BatchControlledUrlRequest(
+            @jakarta.validation.constraints.NotEmpty
+            @jakarta.validation.constraints.Size(max = 100)
+            List<@jakarta.validation.constraints.NotBlank
+                    @jakarta.validation.constraints.Size(max = 1500) String> urls) {}
+
+    public record QuickConfirmRequest(
+            @jakarta.validation.constraints.NotBlank
+            @jakarta.validation.constraints.Size(max = 1500)
+            String url,
+            String sourceName,
+            String sourceType,
+            @jakarta.validation.constraints.NotBlank
+            @jakarta.validation.constraints.Size(max = 1000)
+            String verificationNote,
+            boolean officialConfirmed,
+            String mode,
+            String imageUsagePolicy,
+            String imageUsageBasis,
+            Boolean autoApproveImages,
+            Boolean imageCacheAllowed,
+            Boolean continueImport) {}
 }

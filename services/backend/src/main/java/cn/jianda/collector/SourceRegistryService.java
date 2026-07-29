@@ -19,12 +19,23 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SourceRegistryService {
     private static final Set<String> SOURCE_TYPES = Set.of(
-            "GOVERNMENT", "HOSPITAL", "COMMUNITY_HEALTH", "ANTI_FRAUD",
-            "ELDERLY_CARE", "MAINSTREAM_MEDIA", "PUBLIC_INSTITUTION", "OTHER_PUBLIC_SERVICE");
+            "GOVERNMENT", "PUBLIC_INSTITUTION", "HOSPITAL", "COMMUNITY_HEALTH", "CDC",
+            "ELDERLY_SERVICE_ORG", "OFFICIAL_MEDIA", "OFFICIAL_WECHAT",
+            "UNIVERSITY_PUBLIC_SERVICE", "OTHER_VERIFIED_OFFICIAL",
+            // Historical values remain readable and editable.
+            "ANTI_FRAUD", "ELDERLY_CARE", "MAINSTREAM_MEDIA", "OTHER_PUBLIC_SERVICE");
     private static final Set<String> DISCOVERY_MODES = Set.of("MANUAL", "RSS", "ATOM", "SITEMAP", "SECTION", "MIXED");
+    private static final Set<String> SCHEDULE_MODES = Set.of("DAILY", "INTERVAL");
+    private static final Set<String> DUPLICATE_STRATEGIES = Set.of("SKIP", "CREATE_VERSION");
+    private static final Set<String> IMAGE_POLICIES = Set.of(
+            "MANUAL_REVIEW", "ORGANIZATION_OWNED", "OFFICIAL_PUBLICITY",
+            "AUTHORIZED", "LOCAL_DEMO_CONFIRMED");
     private static final String PUBLIC_COLUMNS = "id,domain,source_name,source_type,authority_level,enabled,"
             + "crawl_mode,discovery_mode,homepage_url,rss_url,sitemap_url,section_url,daily_crawl_time,"
             + "max_articles_per_run,allow_image_candidates,allow_auto_ai,daily_article_budget,daily_token_budget,"
+            + "schedule_mode,interval_hours,schedule_timezone,recent_days,include_keywords,exclude_keywords,"
+            + "auto_save_draft,duplicate_strategy,max_retries,image_usage_policy,image_usage_basis,"
+            + "auto_approve_images,image_cache_allowed,image_policy_reviewed_by,image_policy_reviewed_at,"
             + "last_crawled_at,last_status,next_run_at,last_error,failure_count,created_at,updated_at";
 
     private final JdbcTemplate jdbc;
@@ -75,6 +86,7 @@ public class SourceRegistryService {
         Number generatedKey = keys.getKey();
         if (generatedKey == null) throw new IllegalStateException("未能取得来源编号");
         long id = generatedKey.longValue();
+        updateAdvanced(id, value, user.id());
         log(user, "CREATE_SOURCE_REGISTRY", id);
         return get(id);
     }
@@ -89,11 +101,20 @@ public class SourceRegistryService {
         int changed = jdbc.update("UPDATE source_registry SET domain=?,source_name=?,source_type=?,authority_level=?,"
                         + "discovery_mode=?,homepage_url=?,rss_url=?,sitemap_url=?,section_url=?,daily_crawl_time=?,"
                         + "max_articles_per_run=?,allow_image_candidates=?,allow_auto_ai=?,daily_article_budget=?,daily_token_budget=?,"
+                        + "schedule_mode=?,interval_hours=?,schedule_timezone=?,recent_days=?,include_keywords=?,exclude_keywords=?,"
+                        + "auto_save_draft=?,duplicate_strategy=?,max_retries=?,image_usage_policy=?,image_usage_basis=?,"
+                        + "auto_approve_images=?,image_cache_allowed=?,image_policy_reviewed_by=?,image_policy_reviewed_at=?,"
                         + "operator_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 value.domain(), value.name(), value.type(), value.authorityLevel(), value.discoveryMode(),
                 value.homepageUrl(), value.rssUrl(), value.sitemapUrl(), value.sectionUrl(), value.dailyCrawlTime(),
                 value.maxArticlesPerRun(), value.allowImageCandidates(), value.allowAutoAi(), value.dailyArticleBudget(),
-                value.dailyTokenBudget(), user.id(), id);
+                value.dailyTokenBudget(), value.scheduleMode(), value.intervalHours(), value.scheduleTimezone(),
+                value.recentDays(), value.includeKeywords(), value.excludeKeywords(), value.autoSaveDraft(),
+                value.duplicateStrategy(), value.maxRetries(), value.imageUsagePolicy(), value.imageUsageBasis(),
+                value.autoApproveImages(), value.imageCacheAllowed(),
+                value.autoApproveImages() ? user.id() : null,
+                value.autoApproveImages() ? Timestamp.valueOf(LocalDateTime.now()) : null,
+                user.id(), id);
         if (changed == 0) throw new BusinessException(404, "权威来源不存在");
         log(user, "UPDATE_SOURCE_REGISTRY", id);
         return get(id);
@@ -101,13 +122,80 @@ public class SourceRegistryService {
 
     @Transactional
     public Map<String, Object> setEnabled(long id, boolean enabled, AuthUser user) {
-        int changed = jdbc.update("UPDATE source_registry SET enabled=?,allow_auto_crawl=?,paused_at=?,next_run_at=?,"
+        int changed = jdbc.update("UPDATE source_registry SET enabled=?,paused_at=?,next_run_at=?,"
                         + "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                enabled, enabled, enabled ? null : Timestamp.valueOf(LocalDateTime.now()),
+                enabled, enabled ? null : Timestamp.valueOf(LocalDateTime.now()),
                 enabled ? Timestamp.valueOf(LocalDateTime.now()) : null, id);
         if (changed == 0) throw new BusinessException(404, "权威来源不存在");
         log(user, enabled ? "ENABLE_SOURCE_REGISTRY" : "DISABLE_SOURCE_REGISTRY", id);
         return get(id);
+    }
+
+    @Transactional
+    public Map<String, Object> confirmQuickSource(
+            QuickSourceConfirmation request, Map<String, Object> preview, AuthUser user) {
+        if (request == null || !request.officialConfirmed()) {
+            throw new BusinessException(400, "必须由平台管理员确认该来源属于官方机构");
+        }
+        String note = optionalText(request.verificationNote(), 1000);
+        if (note == null) throw new BusinessException(400, "请填写官方性质核对说明");
+        String fingerprint = String.valueOf(preview.getOrDefault("source_identity_fingerprint", "")).trim();
+        if (!fingerprint.matches("[0-9a-f]{64}")) throw new BusinessException(400, "来源身份指纹无效");
+        String domain = String.valueOf(preview.getOrDefault("domain", "")).trim().toLowerCase(Locale.ROOT);
+        String canonical = String.valueOf(preview.getOrDefault("canonical_url", "")).trim();
+        String sourceType = defaultNormalized(request.sourceType(),
+                Boolean.TRUE.equals(preview.get("wechat_article")) ? "OFFICIAL_WECHAT" : "OTHER_VERIFIED_OFFICIAL");
+        if (!SOURCE_TYPES.contains(sourceType)) throw new BusinessException(400, "来源类型不正确");
+        if ("OFFICIAL_WECHAT".equals(sourceType)
+                && text(preview.get("wechat_account_name")).isBlank()
+                && text(preview.get("wechat_biz")).isBlank()) {
+            throw new BusinessException(400, "未提取到可核对的公众号名称或账号标识");
+        }
+        String mode = defaultNormalized(request.mode(), "SAVE_TRUSTED");
+        if (!Set.of("TEMPORARY_IMPORT", "SAVE_TRUSTED", "SAVE_MANUAL_SCAN", "SAVE_AUTO_SCAN").contains(mode)) {
+            throw new BusinessException(400, "快速确认方式不正确");
+        }
+        List<Long> existing = jdbc.query("SELECT id FROM source_registry WHERE LOWER(domain)=? ORDER BY id LIMIT 1",
+                (row, index) -> row.getLong(1), domain);
+        long registryId;
+        if (existing.isEmpty()) {
+            SourceConfiguration configuration = new SourceConfiguration(
+                    request.sourceName() == null || request.sourceName().isBlank()
+                            ? fallbackSourceName(preview) : request.sourceName().trim(),
+                    domain, sourceType, "A", canonical, "", "", canonical, "MANUAL", "03:30", 10,
+                    true, false, 20, 100000, "DAILY", 24, "Asia/Shanghai", 7, "", "",
+                    true, "SKIP", 3, defaultNormalized(request.imageUsagePolicy(), "MANUAL_REVIEW"),
+                    request.imageUsageBasis(), Boolean.TRUE.equals(request.autoApproveImages()),
+                    Boolean.TRUE.equals(request.imageCacheAllowed()));
+            registryId = ((Number) create(configuration, user).get("id")).longValue();
+        } else {
+            registryId = existing.get(0);
+        }
+        boolean enabled = !"TEMPORARY_IMPORT".equals(mode);
+        boolean autoCrawl = "SAVE_AUTO_SCAN".equals(mode);
+        jdbc.update("UPDATE source_registry SET enabled=?,allow_auto_crawl=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                enabled, autoCrawl, registryId);
+        List<Long> identityIds = jdbc.query(
+                "SELECT id FROM source_registry_identity WHERE source_identity_fingerprint=?",
+                (row, index) -> row.getLong(1), fingerprint);
+        if (identityIds.isEmpty()) {
+            jdbc.update("INSERT INTO source_registry_identity(source_registry_id,identity_type,wechat_account_name,"
+                            + "account_subject,wechat_biz,verification_note,official_verified,verified_by,verified_at,"
+                            + "source_identity_fingerprint) VALUES (?,?,?,?,?,?,TRUE,?,CURRENT_TIMESTAMP,?)",
+                    registryId, Boolean.TRUE.equals(preview.get("wechat_article")) ? "WECHAT_ACCOUNT" : "WEB_DOMAIN",
+                    nullableText(preview.get("wechat_account_name")), nullableText(preview.get("account_subject")),
+                    nullableText(preview.get("wechat_biz")), note, user.id(), fingerprint);
+        } else {
+            jdbc.update("UPDATE source_registry_identity SET verification_note=?,official_verified=TRUE,"
+                            + "verified_by=?,verified_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    note, user.id(), identityIds.get(0));
+        }
+        log(user, "VERIFY_SOURCE_IDENTITY", registryId);
+        Map<String, Object> result = new java.util.LinkedHashMap<>(get(registryId));
+        result.put("confirmation_mode", mode);
+        result.put("source_identity_fingerprint", fingerprint);
+        result.put("official_verified", true);
+        return result;
     }
 
     public boolean acquireLease(long sourceId, String owner, Duration duration) {
@@ -169,9 +257,37 @@ public class SourceRegistryService {
         String authority = request.authorityLevel() == null || request.authorityLevel().isBlank()
                 ? "B" : request.authorityLevel().trim().toUpperCase(Locale.ROOT);
         if (!Set.of("A", "B", "C").contains(authority)) throw new BusinessException(400, "权威等级不正确");
+        String scheduleMode = defaultNormalized(request.scheduleMode(), "DAILY");
+        if (!SCHEDULE_MODES.contains(scheduleMode)) throw new BusinessException(400, "调度方式不正确");
+        int intervalHours = request.intervalHours() == null ? 24 : request.intervalHours();
+        int recentDays = request.recentDays() == null ? 7 : request.recentDays();
+        int maxRetries = request.maxRetries() == null ? 3 : request.maxRetries();
+        if (intervalHours < 1 || intervalHours > 168) throw new BusinessException(400, "间隔小时必须在 1 到 168 之间");
+        if (!Set.of(1, 3, 7, 30).contains(recentDays)) throw new BusinessException(400, "最近天数仅支持 1、3、7 或 30");
+        if (maxRetries < 0 || maxRetries > 10) throw new BusinessException(400, "失败重试次数必须在 0 到 10 之间");
+        String timezone = request.scheduleTimezone() == null || request.scheduleTimezone().isBlank()
+                ? "Asia/Shanghai" : request.scheduleTimezone().trim();
+        try {
+            java.time.ZoneId.of(timezone);
+        } catch (java.time.DateTimeException exception) {
+            throw new BusinessException(400, "时区名称不正确");
+        }
+        String duplicateStrategy = defaultNormalized(request.duplicateStrategy(), "SKIP");
+        if (!DUPLICATE_STRATEGIES.contains(duplicateStrategy)) throw new BusinessException(400, "重复内容策略不正确");
+        String imagePolicy = defaultNormalized(request.imageUsagePolicy(), "MANUAL_REVIEW");
+        if (!IMAGE_POLICIES.contains(imagePolicy)) throw new BusinessException(400, "图片使用策略不正确");
+        boolean autoApproveImages = Boolean.TRUE.equals(request.autoApproveImages());
+        boolean imageCacheAllowed = Boolean.TRUE.equals(request.imageCacheAllowed());
+        String imageBasis = optionalText(request.imageUsageBasis(), 1000);
+        if ((autoApproveImages || imageCacheAllowed) && ("MANUAL_REVIEW".equals(imagePolicy) || imageBasis == null)) {
+            throw new BusinessException(400, "自动确认或缓存图片前必须选择明确策略并填写使用依据");
+        }
         return new ValidatedSource(request.name().trim(), domain, type, authority, homepage.toString(), rss, sitemap,
                 section, discoveryMode, crawlTime, maxArticles, Boolean.TRUE.equals(request.allowImageCandidates()),
-                Boolean.TRUE.equals(request.allowAutoAi()), articleBudget, tokenBudget);
+                Boolean.TRUE.equals(request.allowAutoAi()), articleBudget, tokenBudget, scheduleMode, intervalHours,
+                timezone, recentDays, optionalText(request.includeKeywords(), 1000),
+                optionalText(request.excludeKeywords(), 1000), !Boolean.FALSE.equals(request.autoSaveDraft()),
+                duplicateStrategy, maxRetries, imagePolicy, imageBasis, autoApproveImages, imageCacheAllowed);
     }
 
     private static URI httpUri(String value, String label) {
@@ -194,6 +310,46 @@ public class SourceRegistryService {
 
     private static String normalized(String value) {
         return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private static String defaultNormalized(String value, String fallback) {
+        String normalized = normalized(value);
+        return normalized.isBlank() ? fallback : normalized;
+    }
+
+    private static String optionalText(String value, int maxLength) {
+        if (value == null || value.isBlank()) return null;
+        String trimmed = value.trim();
+        return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private static String nullableText(Object value) {
+        String result = text(value);
+        return result.isBlank() ? null : result;
+    }
+
+    private static String fallbackSourceName(Map<String, Object> preview) {
+        for (String key : List.of("wechat_account_name", "source_name", "domain")) {
+            String value = text(preview.get(key));
+            if (!value.isBlank()) return value;
+        }
+        return "待核对官方来源";
+    }
+
+    private void updateAdvanced(long id, ValidatedSource value, long operatorId) {
+        jdbc.update("UPDATE source_registry SET schedule_mode=?,interval_hours=?,schedule_timezone=?,recent_days=?,"
+                        + "include_keywords=?,exclude_keywords=?,auto_save_draft=?,duplicate_strategy=?,max_retries=?,"
+                        + "image_usage_policy=?,image_usage_basis=?,auto_approve_images=?,image_cache_allowed=?,"
+                        + "image_policy_reviewed_by=?,image_policy_reviewed_at=? WHERE id=?",
+                value.scheduleMode(), value.intervalHours(), value.scheduleTimezone(), value.recentDays(),
+                value.includeKeywords(), value.excludeKeywords(), value.autoSaveDraft(), value.duplicateStrategy(),
+                value.maxRetries(), value.imageUsagePolicy(), value.imageUsageBasis(), value.autoApproveImages(),
+                value.imageCacheAllowed(), value.autoApproveImages() ? operatorId : null,
+                value.autoApproveImages() ? Timestamp.valueOf(LocalDateTime.now()) : null, id);
     }
 
     private static void bind(PreparedStatement statement, ValidatedSource value, long operatorId) throws java.sql.SQLException {
@@ -224,10 +380,20 @@ public class SourceRegistryService {
     public record SourceConfiguration(String name, String domain, String type, String authorityLevel,
             String homepageUrl, String rssUrl, String sitemapUrl, String sectionUrl, String discoveryMode,
             String dailyCrawlTime, Integer maxArticlesPerRun, Boolean allowImageCandidates, Boolean allowAutoAi,
-            Integer dailyArticleBudget, Integer dailyTokenBudget) {}
+            Integer dailyArticleBudget, Integer dailyTokenBudget, String scheduleMode, Integer intervalHours,
+            String scheduleTimezone, Integer recentDays, String includeKeywords, String excludeKeywords,
+            Boolean autoSaveDraft, String duplicateStrategy, Integer maxRetries, String imageUsagePolicy,
+            String imageUsageBasis, Boolean autoApproveImages, Boolean imageCacheAllowed) {}
+
+    public record QuickSourceConfirmation(String sourceName, String sourceType, String verificationNote,
+            boolean officialConfirmed, String mode, String imageUsagePolicy, String imageUsageBasis,
+            Boolean autoApproveImages, Boolean imageCacheAllowed, Boolean continueImport) {}
 
     private record ValidatedSource(String name, String domain, String type, String authorityLevel,
             String homepageUrl, String rssUrl, String sitemapUrl, String sectionUrl, String discoveryMode,
             String dailyCrawlTime, int maxArticlesPerRun, boolean allowImageCandidates, boolean allowAutoAi,
-            int dailyArticleBudget, int dailyTokenBudget) {}
+            int dailyArticleBudget, int dailyTokenBudget, String scheduleMode, int intervalHours,
+            String scheduleTimezone, int recentDays, String includeKeywords, String excludeKeywords,
+            boolean autoSaveDraft, String duplicateStrategy, int maxRetries, String imageUsagePolicy,
+            String imageUsageBasis, boolean autoApproveImages, boolean imageCacheAllowed) {}
 }

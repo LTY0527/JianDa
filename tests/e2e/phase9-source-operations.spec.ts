@@ -125,11 +125,13 @@ test("来源默认安全配置、调度预算请求和等待预算状态清晰",
   await expect(page.getByText(/已停用 · RSS/)).toBeVisible();
   await expect(page.getByText(/每日 12 篇/)).toBeVisible();
   await expect(page.getByText(/48,000 Token · 自动 AI 关闭/)).toBeVisible();
+  await page.getByRole("button", { name: "AI 等待队列" }).click();
   await expect(page.getByRole("cell", { name: "等待预算恢复" }).first()).toBeVisible();
   await expect(page.getByText(waitingBudget.reason_summary)).toBeVisible();
   await expect(page.getByRole("button", { name: "等待预算恢复" })).toBeDisabled();
   await expect(page.getByText("已自动执行")).toHaveCount(0);
 
+  await page.getByRole("button", { name: "来源列表" }).click();
   page.once("dialog", (dialog) => dialog.dismiss());
   await page.getByRole("button", { name: "启用", exact: true }).last().click();
   expect(enableRequests).toEqual([]);
@@ -222,7 +224,7 @@ test("发现文章、影子采集和立即采集保持三段式人工控制", as
   });
 
   await page.goto(`${institutionUrl}/public-sources`);
-  await page.getByRole("button", { name: "发现文章" }).click();
+  await page.getByRole("button", { name: "扫描最近文章" }).click();
   await expect(page.getByText(/未创建材料、未调用 AI/)).toBeVisible();
   await expect(page.getByText(candidate.title)).toBeVisible();
   expect(calls).toEqual(["discover"]);

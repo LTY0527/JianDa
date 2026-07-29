@@ -9,6 +9,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.time.OffsetDateTime;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +31,11 @@ public class ArticleDiscoveryService {
 
     @Transactional
     public Map<String, Object> discover(long sourceId, String method, String entryUrl) {
+        return discover(sourceId, method, entryUrl, null);
+    }
+
+    @Transactional
+    public Map<String, Object> discover(long sourceId, String method, String entryUrl, DiscoveryOptions options) {
         Map<String, Object> source = enabledSource(sourceId);
         String selectedMethod = method == null ? String.valueOf(source.get("discovery_mode"))
                 : method.trim().toUpperCase(Locale.ROOT);
@@ -44,6 +52,7 @@ public class ArticleDiscoveryService {
         Object rawCandidates = response.get("candidates");
         List<Map<String, Object>> candidates = rawCandidates instanceof List<?> list
                 ? sanitizeCandidates(sourceId, list) : List.of();
+        candidates = filterCandidates(candidates, options);
         int duplicates = 0;
         for (Map<String, Object> candidate : candidates) {
             if (taskService.hasCanonical(sourceId, String.valueOf(candidate.get("canonical_url")))) duplicates++;
@@ -55,6 +64,62 @@ public class ArticleDiscoveryService {
         return Map.of("sourceId", sourceId, "method", selectedMethod, "candidates", candidates,
                 "duplicateCount", duplicates,
                 "errors", errors.stream().limit(100).map(String::valueOf).toList());
+    }
+
+    private List<Map<String, Object>> filterCandidates(
+            List<Map<String, Object>> candidates, DiscoveryOptions options) {
+        if (options == null) options = new DiscoveryOptions(null, null, null, null, null);
+        int recentDays = options.recentDays() == null ? 7 : options.recentDays();
+        int maxArticles = options.maxArticles() == null ? 20 : options.maxArticles();
+        if (!Set.of(1, 3, 7, 30).contains(recentDays)) {
+            throw new BusinessException(400, "最近天数仅支持 1、3、7 或 30");
+        }
+        if (maxArticles < 1 || maxArticles > 100) {
+            throw new BusinessException(400, "最大发现篇数必须在 1 到 100 之间");
+        }
+        List<String> includes = keywords(options.includeKeywords());
+        List<String> excludes = keywords(options.excludeKeywords());
+        LocalDate earliest = LocalDate.now().minusDays(recentDays);
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> candidate : candidates) {
+            String searchable = (text(candidate.get("title")) + " " + text(candidate.get("canonical_url")))
+                    .toLowerCase(Locale.ROOT);
+            if (!includes.isEmpty() && includes.stream().noneMatch(searchable::contains)) continue;
+            if (excludes.stream().anyMatch(searchable::contains)) continue;
+            LocalDate published = candidateDate(candidate.get("published_time"));
+            if (published != null && published.isBefore(earliest)) continue;
+            String canonical = text(candidate.get("canonical_url"));
+            Integer imported = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM source_document WHERE canonical_url=?", Integer.class, canonical);
+            Map<String, Object> enriched = new LinkedHashMap<>(candidate);
+            enriched.put("imported", imported != null && imported > 0);
+            enriched.put("duplicate", imported != null && imported > 0);
+            enriched.put("has_previous_version", imported != null && imported > 0);
+            if (Boolean.TRUE.equals(options.onlyUnimported()) && imported != null && imported > 0) continue;
+            result.add(enriched);
+            if (result.size() >= maxArticles) break;
+        }
+        return result;
+    }
+
+    private static List<String> keywords(String value) {
+        if (value == null || value.isBlank()) return List.of();
+        return java.util.Arrays.stream(value.toLowerCase(Locale.ROOT).split("[,，;；\\s]+"))
+                .map(String::trim).filter(item -> !item.isBlank()).distinct().limit(20).toList();
+    }
+
+    private static LocalDate candidateDate(Object value) {
+        String text = text(value);
+        if (text.isBlank()) return null;
+        try {
+            return OffsetDateTime.parse(text).toLocalDate();
+        } catch (DateTimeParseException ignored) {
+            try {
+                return LocalDate.parse(text.substring(0, Math.min(10, text.length())));
+            } catch (DateTimeParseException | IndexOutOfBoundsException ignoredAgain) {
+                return null;
+            }
+        }
     }
 
     private Map<String, Object> enabledSource(long sourceId) {
@@ -121,4 +186,7 @@ public class ArticleDiscoveryService {
     private static String text(Object value) {
         return value == null ? "" : String.valueOf(value).trim();
     }
+
+    public record DiscoveryOptions(Integer recentDays, Integer maxArticles, String includeKeywords,
+            String excludeKeywords, Boolean onlyUnimported) {}
 }

@@ -18,6 +18,7 @@ def _run_preview(
     image_status: int = 200,
     allow_image_candidates: bool = True,
     requests: list[str] | None = None,
+    url: str = "https://www.news.cn/article",
 ):
     async def allow_public(_url: str) -> None:
         return None
@@ -43,7 +44,7 @@ def _run_preview(
     web_ingest._CACHE.clear()
     try:
         return asyncio.run(preview_web_article(
-            "https://www.news.cn/article",
+            url,
             allow_image_candidates=allow_image_candidates,
         ))
     finally:
@@ -193,6 +194,24 @@ def test_candidate_download_switch_is_independent_from_public_cache_permission(m
     assert "/candidate.png" in requests
     assert result.images[0].image_cached is False
     assert result.images[0].candidate_status == "VALID"
+
+
+def test_wechat_identity_hints_do_not_claim_official_status(monkeypatch):
+    html = """<html><head><title>社区健康提醒</title>
+    <meta name="profile_nickname" content="浦江健康服务">
+    <script>var biz = "MzA-test-account";</script></head><body><main>
+    <p>社区卫生服务中心发布夏季健康提醒，请居民关注高温天气和日常补水。</p>
+    <p>老年人如出现持续胸闷、头晕等异常信号，应及时联系医疗机构。</p>
+    <p>本文为公开健康提示，具体诊疗事项需要由专业医务人员判断。</p>
+    </main></body></html>"""
+    result = _run_preview(
+        monkeypatch,
+        html,
+        url="https://mp.weixin.qq.com/s/example",
+    )
+    assert result.wechat_account_name == "浦江健康服务"
+    assert result.wechat_biz == "MzA-test-account"
+    assert result.source_name == "浦江健康服务"
 
 
 def test_policy_and_health_classification_are_distinct():

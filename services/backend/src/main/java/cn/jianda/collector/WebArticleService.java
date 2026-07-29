@@ -5,6 +5,9 @@ import cn.jianda.ai.AiQueueService;
 import cn.jianda.common.BusinessException;
 import cn.jianda.security.AuthUser;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -106,10 +109,116 @@ public class WebArticleService {
         return result;
     }
 
+    public Map<String, Object> previewUnregistered(String rawUrl) {
+        String url = normalizeUrl(rawUrl);
+        Map<String, Object> raw;
+        try {
+            raw = new LinkedHashMap<>(aiClient.previewWebArticle(url, true));
+        } catch (RuntimeException exception) {
+            throw new BusinessException(502, safeMessage(exception, "网页暂时无法访问或解析"));
+        }
+        String canonical = normalizeUrl(String.valueOf(raw.getOrDefault("canonical_url", url)));
+        URI originalUri = URI.create(url);
+        URI canonicalUri = URI.create(canonical);
+        if (!originalUri.getHost().equalsIgnoreCase(canonicalUri.getHost())) {
+            throw new BusinessException(400, "canonical 地址与粘贴地址不同源，请先人工核对");
+        }
+        String domain = canonicalUri.getHost().toLowerCase(Locale.ROOT);
+        String accountName = text(raw.get("wechat_account_name"));
+        String accountSubject = text(raw.get("account_subject"));
+        String wechatBiz = text(raw.get("wechat_biz"));
+        boolean wechat = "mp.weixin.qq.com".equals(domain);
+        String identitySeed = identitySeed(domain, accountName, accountSubject, wechatBiz);
+        List<Map<String, Object>> registries = jdbc.queryForList(
+                "SELECT id,source_name,source_type,enabled FROM source_registry WHERE LOWER(domain)=?", domain);
+        List<Map<String, Object>> identities = jdbc.queryForList(
+                "SELECT i.id,i.source_registry_id,i.official_verified,i.verification_note "
+                        + "FROM source_registry_identity i WHERE i.source_identity_fingerprint=?",
+                sha256(identitySeed));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("original_url", url);
+        result.put("canonical_url", canonical);
+        result.put("domain", domain);
+        result.put("https", "https".equalsIgnoreCase(canonicalUri.getScheme()));
+        result.put("page_title", text(raw.get("title")));
+        result.put("source_name", text(raw.get("source_name")));
+        result.put("wechat_account_name", accountName);
+        result.put("account_subject", accountSubject);
+        result.put("wechat_biz", wechatBiz);
+        result.put("wechat_article", wechat);
+        result.put("source_identity_fingerprint", sha256(identitySeed));
+        result.put("source_type_suggestion", wechat ? "OFFICIAL_WECHAT" : "OTHER_VERIFIED_OFFICIAL");
+        result.put("robots_allowed", raw.get("robots_allowed"));
+        result.put("robots_status", raw.get("robots_status"));
+        result.put("content_kind", raw.get("content_kind"));
+        result.put("cover_image_url", raw.get("cover_image_url"));
+        result.put("images", raw.getOrDefault("images", List.of()));
+        result.put("warnings", raw.getOrDefault("warnings", List.of()));
+        result.put("registered_source", registries.isEmpty() ? null : registries.get(0));
+        result.put("verified_identity", identities.isEmpty() ? null : identities.get(0));
+        result.put("official_verified", !identities.isEmpty()
+                && Boolean.TRUE.equals(identities.get(0).get("official_verified")));
+        return result;
+    }
+
     @Transactional
     public Map<String, Object> importArticle(String url, AuthUser user) {
         Map<String, Object> preview = preview(url);
         String canonical = text(preview.get("canonical_url"));
+        String contentHash = text(preview.get("content_hash"));
+        Integer duplicate = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_document WHERE canonical_url=? OR content_hash=?",
+                Integer.class, canonical, contentHash);
+        if (duplicate != null && duplicate > 0) {
+            throw new BusinessException(409, "该网页或相同正文已经导入，请勿重复操作");
+        }
+        return persistArticle(preview, user);
+    }
+
+    @Transactional
+    public Map<String, Object> importApprovedArticle(String rawUrl, long registryId, AuthUser user) {
+        Map<String, Object> registry = jdbc.queryForMap("SELECT * FROM source_registry WHERE id=?", registryId);
+        String url = normalizeUrl(rawUrl);
+        Map<String, Object> preview;
+        try {
+            preview = new LinkedHashMap<>(aiClient.previewWebArticle(
+                    url, Boolean.TRUE.equals(registry.get("allow_image_candidates"))));
+        } catch (RuntimeException exception) {
+            throw new BusinessException(502, safeMessage(exception, "网页暂时无法访问或解析"));
+        }
+        String canonical = normalizeUrl(String.valueOf(preview.getOrDefault("canonical_url", url)));
+        String domain = URI.create(canonical).getHost().toLowerCase(Locale.ROOT);
+        if (!domain.equalsIgnoreCase(text(registry.get("domain")))) {
+            throw new BusinessException(400, "网页 canonical 地址与已确认来源不同");
+        }
+        String fingerprint = identityFingerprint(domain, preview);
+        Integer verified = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_registry_identity WHERE source_registry_id=? "
+                        + "AND source_identity_fingerprint=? AND official_verified=TRUE",
+                Integer.class, registryId, fingerprint);
+        if (verified == null || verified == 0) {
+            throw new BusinessException(403, "网页来源身份与管理员已确认的官方身份不一致");
+        }
+        preview.put("original_url", url);
+        preview.put("canonical_url", canonical);
+        preview.put("source_domain", domain);
+        preview.put("source_name", text(preview.get("source_name")).isBlank()
+                ? registry.get("source_name") : text(preview.get("source_name")));
+        preview.put("authority_level", registry.get("authority_level"));
+        preview.put("source_registry_id", registryId);
+        boolean allowImageCandidates = Boolean.TRUE.equals(registry.get("allow_image_candidates"));
+        preview.put("allow_image_cache", Boolean.TRUE.equals(registry.get("image_cache_allowed")));
+        preview.put("allow_image_candidates", allowImageCandidates);
+        preview.put("image_cached", false);
+        preview.put("image_source_name", preview.get("source_name"));
+        preview.put("image_source_url", canonical);
+        preview.put("image_license_note", "来源身份已确认；图片仍按来源策略和候选审核规则处理");
+        preview.put("external_source_verified", true);
+        if (!allowImageCandidates) {
+            preview.put("cover_image_url", "");
+            preview.put("cover_image_type", "CATEGORY_DEFAULT");
+            preview.put("images", List.of());
+        }
         String contentHash = text(preview.get("content_hash"));
         Integer duplicate = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM source_document WHERE canonical_url=? OR content_hash=?",
@@ -412,6 +521,28 @@ public class WebArticleService {
         } catch (IllegalArgumentException exception) {
             throw new BusinessException(400, "请输入有效的 HTTP 或 HTTPS 网址");
         }
+    }
+
+    private static String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private static String identityFingerprint(String domain, Map<String, Object> preview) {
+        return sha256(identitySeed(domain, text(preview.get("wechat_account_name")),
+                text(preview.get("account_subject")), text(preview.get("wechat_biz"))));
+    }
+
+    private static String identitySeed(String domain, String accountName, String accountSubject, String wechatBiz) {
+        return "mp.weixin.qq.com".equalsIgnoreCase(domain)
+                ? domain.toLowerCase(Locale.ROOT) + "|"
+                        + (wechatBiz.isBlank() ? accountName + "|" + accountSubject : wechatBiz)
+                : domain.toLowerCase(Locale.ROOT);
     }
 
     private static String categoryFor(String contentKind) {

@@ -95,6 +95,9 @@ class _ParsedPage:
     canonical_url: str = ""
     author: str = ""
     source_name: str = ""
+    wechat_account_name: str = ""
+    account_subject: str = ""
+    wechat_biz: str = ""
     published_at: str = ""
     cover_image_url: str = ""
     cover_image_type: str = "CATEGORY_DEFAULT"
@@ -194,6 +197,11 @@ class _ArticleParser(HTMLParser):
             self.page.published_at = value
         elif key in {"og:site_name", "source"}:
             self.page.source_name = value
+        elif key in {"profile_nickname", "wechat_account_name"}:
+            self.page.wechat_account_name = value
+            self.page.source_name = self.page.source_name or value
+        elif key in {"account_subject", "publisher"}:
+            self.page.account_subject = value
 
     def _image_candidates(self, tag: str, attr: dict[str, str]) -> None:
         sources: list[str] = []
@@ -283,6 +291,35 @@ def _json_ld_metadata(page: _ParsedPage) -> None:
             image_url = image.get("url") or image.get("contentUrl")
             if image_url:
                 page.json_ld_image_url = urljoin(page.canonical_url, str(image_url))
+
+
+def _wechat_metadata(page: _ParsedPage, html: str, host: str) -> None:
+    """Read public account hints without treating the shared domain as proof."""
+    if host.lower() != "mp.weixin.qq.com":
+        return
+    patterns = {
+        "wechat_biz": (
+            r"""["']?biz["']?\s*[:=]\s*["']([^"']{4,160})""",
+            r"""__biz=([^&"']+)""",
+        ),
+        "wechat_account_name": (
+            r"""profile_nickname["']?\s*[:=]\s*["']([^"']{2,160})""",
+            r"""<strong[^>]+class=["'][^"']*profile_nickname[^"']*["'][^>]*>(.*?)</strong>""",
+            r"""<span[^>]+id=["']js_name["'][^>]*>(.*?)</span>""",
+        ),
+        "account_subject": (
+            r"""account_subject["']?\s*[:=]\s*["']([^"']{2,160})""",
+        ),
+    }
+    for field_name, candidates in patterns.items():
+        for pattern in candidates:
+            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+            if match:
+                value = _clean(re.sub(r"<[^>]+>", " ", match.group(1)))
+                if value:
+                    setattr(page, field_name, value)
+                    break
+    page.source_name = page.source_name or page.wechat_account_name
 
 
 def _nested_name(value: object) -> str:
@@ -452,6 +489,7 @@ async def preview_web_article(
     parser.feed(html)
     page = parser.page
     page.canonical_url = page.canonical_url or str(response.url)
+    _wechat_metadata(page, html, urlparse(page.canonical_url).hostname or "")
     _json_ld_metadata(page)
     blocks = page.preferred_blocks if len("".join(page.preferred_blocks)) >= 200 else page.blocks
     deduplicated = list(dict.fromkeys(block for block in blocks if block != page.title))
@@ -471,6 +509,9 @@ async def preview_web_article(
     preview = WebArticlePreview(
         title=page.title or deduplicated[0][:120],
         source_name=page.source_name,
+        wechat_account_name=page.wechat_account_name,
+        account_subject=page.account_subject,
+        wechat_biz=page.wechat_biz,
         published_at=_published_at(page.published_at),
         author=page.author,
         cover_image_url=cover,
