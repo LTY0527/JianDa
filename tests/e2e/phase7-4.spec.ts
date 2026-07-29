@@ -38,7 +38,7 @@ async function installSpeechMock(context: import("@playwright/test").BrowserCont
 }
 
 test.describe("Phase 7.4 H5 navigation and speech", () => {
-  test("returns a cited retrieval answer through the H5 proxy", async ({ page }) => {
+  test("returns a cited reviewed-source answer through the H5 proxy", async ({ page }) => {
     await page.goto(`${h5Url}/assistant`);
     await page.getByLabel("输入您想了解的问题").fill("最近有哪些健康提醒？");
     const responsePromise = page.waitForResponse((response) =>
@@ -48,8 +48,14 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
     await page.getByRole("button", { name: "发送问题" }).click();
     const response = await responsePromise;
     expect(response.status()).toBe(200);
-    expect((await response.json()).data.mode).toBe("retrieval");
-    await expect(page.getByText("原文检索", { exact: true })).toBeVisible();
+    const mode = (await response.json()).data.mode;
+    expect(["retrieval", "ai"]).toContain(mode);
+    await expect(
+      page.getByText(
+        mode === "ai" ? "已审核内容 + AI 整理" : "原文检索",
+        { exact: true },
+      ),
+    ).toBeVisible();
     await expect(page.getByRole("heading", { name: "回答依据" })).toBeVisible();
     await expect(page.locator(".assistant-citation").first()).toBeVisible();
   });
@@ -69,7 +75,9 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
     await page.getByRole("button", { name: "发送问题" }).click();
     await expect(page.getByText("助手服务繁忙，请稍后重新发送。")).toBeVisible();
     await page.getByRole("button", { name: "重新发送" }).click();
-    await expect(page.getByText("原文检索", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(/^(原文检索|已审核内容 \+ AI 整理)$/),
+    ).toBeVisible();
   });
 
   test("uses five primary destinations and keeps news as a safe secondary page", async ({ page }) => {

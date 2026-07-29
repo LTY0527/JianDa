@@ -25,8 +25,9 @@ test("document 16 shows real processing counts and traceable external fields", a
   await expect(page.getByText("共 1 页，1 个段落")).toBeVisible();
   await expect(page.getByText("已生成 10 个可追溯字段")).toBeVisible();
   await expect(page.getByText("共 3 页，12 个段落")).toHaveCount(0);
+  await expect(page.getByText("处理完成", { exact: true })).toBeVisible();
 
-  await page.getByRole("link", { name: "进入对照审核" }).click();
+  await page.getByRole("link", { name: "进入原文对照审核" }).click();
   await expect(page).toHaveURL(`${institutionUrl}/documents/16/review`);
   await expect(page.getByRole("heading", { name: "原文对照审核" })).toBeVisible();
   await expect(page.locator(".source-pane")).toContainText("医院门诊预约调整告知");
