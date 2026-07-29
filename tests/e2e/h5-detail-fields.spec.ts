@@ -1,7 +1,7 @@
 import { devices, expect, test, type BrowserContext } from "@playwright/test";
 import { buildTelephoneHref } from "../../apps/user-h5/src/utils/contactActions";
 
-const h5Url = "http://127.0.0.1";
+const h5Url = process.env.JIANDA_H5_URL ?? "http://127.0.0.1";
 
 function item(
   slug: string,
@@ -38,6 +38,13 @@ async function mockDetail(
   slug: string,
   payload: ReturnType<typeof item>,
 ) {
+  await context.route(`**/api/public/items/${payload.data.id}/view`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: '{"code":0,"message":"ok","data":null}',
+    }),
+  );
   await context.route(`**/api/public/items/${slug}/neighbors**`, (route) =>
     route.fulfill({
       status: 200,

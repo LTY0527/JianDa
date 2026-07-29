@@ -85,6 +85,9 @@ test("首页清理技术文本并保持紧凑资讯布局", async ({ page }) => 
 });
 
 test("网页资讯快速看懂和完整解读可切换且不显示原 PDF", async ({ page }) => {
+  await page.route("**/api/public/items/901/view", (route) =>
+    route.fulfill(api(null)),
+  );
   await page.route("**/api/public/items/news-901", (route) =>
     route.fulfill(api(news)),
   );

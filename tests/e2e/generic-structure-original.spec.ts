@@ -106,6 +106,16 @@ const materialFive = {
   },
 };
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/public/items/105/view", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: '{"code":0,"message":"成功","data":null}',
+    }),
+  );
+});
+
 for (const width of [375, 768]) {
   test(`generic public-service structures render without overflow at ${width}px`, async ({
     page,
