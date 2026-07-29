@@ -251,30 +251,40 @@ async function navigateTo(target: PublicItemNeighbor | null) {
   await router.push(neighborPath(target));
   window.scrollTo({ top: 0, behavior: "auto" });
 }
+const interactiveSelector = "a,button,input,textarea,select,label,audio,video,details,summary,[contenteditable],[role='button'],[role='link']";
+function closestInteractive(target: EventTarget | null): Element | null {
+  return target instanceof Element ? target.closest(interactiveSelector) : null;
+}
+function clearPointerStart() {
+  pointerStart = null;
+}
 function onKeydown(event: KeyboardEvent) {
   if (!preferences.desktopSideNavigation || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-  const target = event.target as HTMLElement | null;
-  if (target?.matches("input,textarea,select,[contenteditable='true']")) return;
+  if (closestInteractive(event.target)) return;
   if (event.key === "ArrowLeft" && neighbors.value.previous) { event.preventDefault(); navigateTo(neighbors.value.previous); }
   if (event.key === "ArrowRight" && neighbors.value.next) { event.preventDefault(); navigateTo(neighbors.value.next); }
 }
 function pointerDown(event: PointerEvent) {
-  if (!preferences.mobileSwipeNavigation || window.innerWidth > 768) return;
-  if ((event.target as HTMLElement)?.closest("a,button,input,select,textarea,label,[role='button']")) return;
+  clearPointerStart();
+  if (!preferences.mobileSwipeNavigation || window.innerWidth > 768 || !event.isPrimary || event.button !== 0) return;
+  if (closestInteractive(event.target)) return;
   pointerStart = { x: event.clientX, y: event.clientY, time: Date.now(), id: event.pointerId };
 }
 function pointerUp(event: PointerEvent) {
-  if (!pointerStart || pointerStart.id !== event.pointerId) return;
+  if (!event.isPrimary || !pointerStart || pointerStart.id !== event.pointerId) return;
   const dx = event.clientX - pointerStart.x;
   const dy = event.clientY - pointerStart.y;
   const duration = Date.now() - pointerStart.time;
-  pointerStart = null;
+  clearPointerStart();
   if (duration > 800 || Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
   navigateTo(dx < 0 ? neighbors.value.next : neighbors.value.previous);
 }
-watch(() => String(route.params.slug), loadDetail, { immediate: true });
+watch(() => String(route.params.slug), (slug) => {
+  clearPointerStart();
+  return loadDetail(slug);
+}, { immediate: true });
 onMounted(() => window.addEventListener("keydown", onKeydown));
-onBeforeUnmount(() => { window.removeEventListener("keydown", onKeydown); speech.stop(); loadVersion += 1; });
+onBeforeUnmount(() => { window.removeEventListener("keydown", onKeydown); speech.stop(); clearPointerStart(); loadVersion += 1; });
 async function toggleFav() {
   const next = !favorite.value;
   try {
@@ -312,7 +322,7 @@ function openOfficial() {
 }
 </script>
 <template>
-  <div class="detail-page" :style="{ '--reader-size': font + 'px' }" @pointerdown="pointerDown" @pointerup="pointerUp">
+  <div class="detail-page" :style="{ '--reader-size': font + 'px' }" @pointerdown="pointerDown" @pointerup="pointerUp" @pointercancel="clearPointerStart" @lostpointercapture="clearPointerStart">
     <p class="sr-only" aria-live="polite">{{ navigationAnnouncement }}</p>
     <button v-if="preferences.desktopSideNavigation && neighbors.previous" type="button" class="article-side-nav article-side-nav--previous" :aria-label="`上一篇：${cleanDisplayTitle(neighbors.previous.title)}`" @click="navigateTo(neighbors.previous)">‹<span>{{ cleanDisplayTitle(neighbors.previous.title) }}</span></button>
     <button v-if="preferences.desktopSideNavigation && neighbors.next" type="button" class="article-side-nav article-side-nav--next" :aria-label="`下一篇：${cleanDisplayTitle(neighbors.next.title)}`" @click="navigateTo(neighbors.next)"><span>{{ cleanDisplayTitle(neighbors.next.title) }}</span>›</button>

@@ -49,7 +49,7 @@ public class PublicController {
                 + "d.image_license_note "
                 + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
                 + "WHERE p.status='PUBLISHED' ";
-        String order = "ORDER BY p.pinned DESC,p.importance DESC,p.published_at DESC";
+        String order = "ORDER BY p.pinned DESC,p.importance DESC,p.published_at DESC,p.id DESC";
         return ApiResponse.ok(category == null || category.isBlank() ? jdbc.queryForList(sql + order)
                 : jdbc.queryForList(sql + "AND p.category=? " + order, category));
     }
@@ -63,7 +63,7 @@ public class PublicController {
                 + "d.image_alt_text,d.image_cached,d.image_license_note "
                 + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
                 + "WHERE p.status='PUBLISHED' AND (p.title LIKE ? OR p.summary LIKE ?) "
-                + "ORDER BY p.published_at DESC", like, like));
+                + "ORDER BY p.pinned DESC,p.importance DESC,p.published_at DESC,p.id DESC", like, like));
     }
 
     @GetMapping("/categories")
@@ -112,32 +112,47 @@ public class PublicController {
             @RequestParam(defaultValue = "false") boolean sameCategory,
             @RequestParam(required = false) String category) {
         List<Map<String, Object>> currentRows = jdbc.queryForList(
-                "SELECT id,published_at,category FROM published_item WHERE slug=? AND status='PUBLISHED'", slug);
+                "SELECT id,pinned,importance,published_at,category FROM published_item "
+                        + "WHERE slug=? AND status='PUBLISHED'", slug);
         if (currentRows.isEmpty()) throw new BusinessException(404, "内容不存在或已撤回");
         Map<String, Object> current = currentRows.get(0);
-        long id = ((Number) current.get("id")).longValue();
-        Object publishedAt = current.get("published_at");
         String activeCategory = category == null || category.isBlank()
                 ? String.valueOf(current.get("category")) : category.trim();
-        String compact = "SELECT p.id,p.slug,p.title,p.category,p.cover_image_url,p.content_kind "
-                + "FROM published_item p WHERE p.status='PUBLISHED' ";
-        String categoryClause = sameCategory ? "AND p.category=? " : "";
-        Object previous = firstOrNull(sameCategory
-                ? jdbc.queryForList(compact + "AND (p.published_at>? OR (p.published_at=? AND p.id>?)) "
-                        + categoryClause + "ORDER BY p.published_at ASC,p.id ASC LIMIT 1",
-                        publishedAt, publishedAt, id, activeCategory)
-                : jdbc.queryForList(compact + "AND (p.published_at>? OR (p.published_at=? AND p.id>?)) "
-                        + "ORDER BY p.published_at ASC,p.id ASC LIMIT 1", publishedAt, publishedAt, id));
-        Object next = firstOrNull(sameCategory
-                ? jdbc.queryForList(compact + "AND (p.published_at<? OR (p.published_at=? AND p.id<?)) "
-                        + categoryClause + "ORDER BY p.published_at DESC,p.id DESC LIMIT 1",
-                        publishedAt, publishedAt, id, activeCategory)
-                : jdbc.queryForList(compact + "AND (p.published_at<? OR (p.published_at=? AND p.id<?)) "
-                        + "ORDER BY p.published_at DESC,p.id DESC LIMIT 1", publishedAt, publishedAt, id));
+        Object previous = sameCategory ? adjacent(current, true, activeCategory) : null;
+        Object next = sameCategory ? adjacent(current, false, activeCategory) : null;
+        if (previous == null) previous = adjacent(current, true, null);
+        if (next == null) next = adjacent(current, false, null);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("previous", previous);
         result.put("next", next);
         return ApiResponse.ok(result);
+    }
+
+    private Object adjacent(Map<String, Object> current, boolean previous, String category) {
+        Object pinnedValue = current.get("pinned");
+        int pinned = pinnedValue instanceof Number number ? number.intValue()
+                : Boolean.TRUE.equals(pinnedValue) ? 1 : 0;
+        int importance = ((Number) current.get("importance")).intValue();
+        Object publishedAt = current.get("published_at");
+        long id = ((Number) current.get("id")).longValue();
+        String comparison = previous ? ">" : "<";
+        String order = previous ? "ASC" : "DESC";
+        String sql = "SELECT p.id,p.slug,p.title,p.category,p.cover_image_url,p.content_kind "
+                + "FROM published_item p WHERE p.status='PUBLISHED' "
+                + (category == null ? "" : "AND p.category=? ")
+                + "AND ((CASE WHEN p.pinned THEN 1 ELSE 0 END " + comparison + " ?) "
+                + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND p.importance " + comparison + " ?) "
+                + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND p.importance=? AND p.published_at " + comparison + " ?) "
+                + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND p.importance=? AND p.published_at=? AND p.id " + comparison + " ?)) "
+                + "ORDER BY p.pinned " + order + ",p.importance " + order + ",p.published_at " + order
+                + ",p.id " + order + " LIMIT 1";
+        Object[] key = { pinned, pinned, importance, pinned, importance, publishedAt,
+                pinned, importance, publishedAt, id };
+        if (category == null) return firstOrNull(jdbc.queryForList(sql, key));
+        Object[] parameters = new Object[key.length + 1];
+        parameters[0] = category;
+        System.arraycopy(key, 0, parameters, 1, key.length);
+        return firstOrNull(jdbc.queryForList(sql, parameters));
     }
 
     private static Object firstOrNull(List<Map<String, Object>> rows) {
