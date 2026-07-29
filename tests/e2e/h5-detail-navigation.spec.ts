@@ -217,3 +217,52 @@ test("375px swipe respects interactive controls, vertical movement and pointer c
   await swipe(page, ".article-readable p", 70, 330);
   await expectArticle(page, articles.a);
 });
+
+test("375px 大字模式下键盘、按钮和滑动连续阅读保持边界与交互隔离", async ({ page, context }) => {
+  await context.addInitScript(() => localStorage.setItem("jianda_font", "24"));
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(`${h5Url}/news/${articles.a.slug}`);
+  await expectArticle(page, articles.a);
+  await expect(page.locator(".reader")).toHaveCSS("font-size", "24px");
+  const previousButton = page.locator(".article-neighbors button").first();
+  const nextButton = page.locator(".article-neighbors button").last();
+  await expect(nextButton).toContainText("连续阅读测试文章乙");
+  await expect(nextButton).toBeVisible();
+  await expect(previousButton).toBeDisabled();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    .toBeTruthy();
+
+  await page.keyboard.press("ArrowRight");
+  await expectArticle(page, articles.b);
+  await expect(page.locator(".article-neighbors button").last()).toBeDisabled();
+
+  await page.locator("main").evaluate((main) => {
+    const host = document.createElement("section");
+    host.innerHTML = '<a href="#safe-link">测试链接</a><button type="button">测试按钮</button>';
+    main.prepend(host);
+  });
+  for (const selector of ["a[href='#safe-link']", "button:has-text('测试按钮')"]) {
+    await swipe(page, selector, 70, 330);
+    await expectArticle(page, articles.b);
+  }
+  const selected = await page.locator(".article-readable p").evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return selection?.toString() || "";
+  });
+  expect(selected).toContain(articles.b.uniqueText);
+  await swipe(page, ".article-readable p", 70, 330);
+  await expectArticle(page, articles.b);
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+
+  await swipe(page, ".article-readable p", 70, 330);
+  await expectArticle(page, articles.a);
+  await swipe(page, ".article-readable p", 330, 70);
+  await expectArticle(page, articles.b);
+  await swipe(page, ".article-readable p", 330, 70);
+  await expectArticle(page, articles.b);
+});

@@ -122,6 +122,12 @@ for (const width of [375, 768]) {
         body: JSON.stringify({ code: 0, data: materialFive }),
       }),
     );
+    await page.route("**/api/public/items/guide-generic-105/neighbors**", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ code: 0, data: { previous: null, next: null } }),
+      }),
+    );
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`${h5Url}/guide/guide-generic-105`);
 
@@ -171,6 +177,12 @@ test("public original PDF route uses same-origin API and preserves safe back nav
     route.fulfill({
       contentType: "application/pdf",
       body: Buffer.from("%PDF-1.4\n% test"),
+    }),
+  );
+  await page.route("**/api/public/items/guide-generic-105/neighbors**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ code: 0, data: { previous: null, next: null } }),
     }),
   );
 

@@ -108,6 +108,37 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
 
   test("continues a long reading in chunks and advances the listen queue", async ({ context, page }) => {
     await installSpeechMock(context);
+    await context.route("**/api/public/items", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({
+          code: 0,
+          data: [
+            {
+              id: 701,
+              slug: "listen-queue-a",
+              title: "连续收听测试甲",
+              summary: "第一条收听内容。",
+              source_name: "测试来源",
+              category: "健康",
+              content_kind: "HEALTH_EDUCATION",
+              published_at: "2026-07-29T10:00:00",
+            },
+            {
+              id: 702,
+              slug: "listen-queue-b",
+              title: "连续收听测试乙",
+              summary: "第二条收听内容。",
+              source_name: "测试来源",
+              category: "健康",
+              content_kind: "HEALTH_EDUCATION",
+              published_at: "2026-07-29T09:00:00",
+            },
+          ],
+        }),
+      }),
+    );
     await page.goto(`${h5Url}/listen`);
     await page.getByRole("button", { name: "一键播放" }).click();
     const firstTitle = await page.locator(".listen-now h2").textContent();

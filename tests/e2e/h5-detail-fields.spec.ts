@@ -38,6 +38,17 @@ async function mockDetail(
   slug: string,
   payload: ReturnType<typeof item>,
 ) {
+  await context.route(`**/api/public/items/${slug}/neighbors**`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: JSON.stringify({
+        code: 0,
+        message: "ok",
+        data: { previous: null, next: null },
+      }),
+    }),
+  );
   await context.route(`**/api/public/items/${slug}`, (route) =>
     route.fulfill({
       status: 200,

@@ -277,6 +277,7 @@ function pointerUp(event: PointerEvent) {
   const duration = Date.now() - pointerStart.time;
   clearPointerStart();
   if (duration > 800 || Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+  if (window.getSelection()?.isCollapsed === false) return;
   navigateTo(dx < 0 ? neighbors.value.next : neighbors.value.previous);
 }
 watch(() => String(route.params.slug), (slug) => {

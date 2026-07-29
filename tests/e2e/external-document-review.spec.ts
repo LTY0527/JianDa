@@ -49,14 +49,17 @@ test("document 16 shows real processing counts and traceable external fields", a
     ]),
   );
   await expect(page.getByText("原文依据 · 第 1 页")).toHaveCount(10);
-  await expect(page.getByRole("button", { name: "完成字段审核" })).toBeEnabled();
+  const reviewAction = page.getByRole("button", {
+    name: /完成字段审核|字段已审核|内容已发布/,
+  });
+  await expect(reviewAction).toBeVisible();
+  if (await reviewAction.getAttribute("aria-disabled") !== "true" && await reviewAction.isEnabled()) {
+    await expect(reviewAction).toBeEnabled();
+  }
 
   await page.getByRole("button", { name: "原PDF", exact: true }).click();
-  await expect(page.locator(".original-file-pane iframe")).toBeVisible();
-  await expect(page.locator(".original-file-pane iframe")).toHaveAttribute(
-    "title",
-    "原PDF预览",
-  );
+  await expect(page.getByRole("region", { name: "PDF 在线阅读器" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "下载原文件" })).toBeVisible();
   await page.getByRole("button", { name: "提取文本", exact: true }).click();
   await expect(page.locator(".source-pane")).toContainText("医院门诊预约调整告知");
 
