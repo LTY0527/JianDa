@@ -33,6 +33,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:jianda-public-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
         "jianda.upload-dir=./target/test-public-uploads",
+        "jianda.processing.async-enabled=false",
         "jianda.crawl.daily-ai-max-articles=1000",
         "jianda.crawl.daily-ai-max-tokens=10000000"
 })
@@ -172,7 +173,7 @@ class PublicImportIntegrationTest {
                 .andExpect(jsonPath("$.data.length()").value(1));
         mvc.perform(post("/api/documents/{id}/process", id).header("Authorization", auth))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
         verify(aiClient).analyze(
                 anyString(), anyString(), anyString(), anyString(), anyList(),
                 argThat(context -> "b".repeat(64).equals(context.get("content_sha256"))
@@ -460,7 +461,7 @@ class PublicImportIntegrationTest {
                         .header("Authorization", auth)).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409));
         mvc.perform(post("/api/public-sources/imports/{id}/process", documentId).header("Authorization", auth))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("PROCESSING"));
 
         String fieldsBody = mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();

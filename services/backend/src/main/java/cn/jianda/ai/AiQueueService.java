@@ -183,8 +183,12 @@ public class AiQueueService {
         LocalDate date = LocalDate.now(clock.withZone(zoneId));
         ensureUsage(date, "GLOBAL", 0);
         Usage global = usageForUpdate(date, "GLOBAL", 0);
-        Integer duplicate = jdbc.queryForObject("SELECT COUNT(*) FROM ai_budget_reservation WHERE content_hash=? "
-                + "AND status IN ('RESERVED','SETTLED')", Integer.class, hash);
+        Integer duplicate = processingJobId == null
+                ? jdbc.queryForObject("SELECT COUNT(*) FROM ai_budget_reservation WHERE content_hash=? "
+                        + "AND status IN ('RESERVED','SETTLED')", Integer.class, hash)
+                : jdbc.queryForObject("SELECT COUNT(*) FROM ai_budget_reservation WHERE content_hash=? "
+                        + "AND document_id<>? AND status IN ('RESERVED','SETTLED')",
+                        Integer.class, hash, documentId);
         if (duplicate != null && duplicate > 0) {
             return block(queueId, documentId, sourceId, processingJobId, "CONTENT_HASH_DUPLICATE",
                     "相同正文 hash 已预留或完成 AI 处理", "DUPLICATE", estimated, approved);

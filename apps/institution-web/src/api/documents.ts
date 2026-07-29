@@ -106,6 +106,12 @@ export interface ProcessingJob {
   retry_count?: number;
   cache_hit?: boolean;
   total_ms?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  started_at?: string;
+  finished_at?: string;
+  updated_at?: string;
 }
 
 export const authApi = {
@@ -146,7 +152,14 @@ export const documentApi = {
     );
   },
   process: (id: number) =>
-    http.post<ApiResponse<{ status: string; progress: number }>>(
+    http.post<ApiResponse<{
+      documentId: number;
+      jobId: number;
+      status: string;
+      stage: string;
+      progress: number;
+      alreadyRunning?: boolean;
+    }>>(
       `/documents/${id}/process`,
     ),
   retryRewrite: (id: number) =>

@@ -1,5 +1,6 @@
 package cn.jianda;
 
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -38,6 +39,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:jianda-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
         "jianda.upload-dir=./target/test-uploads",
+        "jianda.processing.async-enabled=false",
         "jianda.crawl.daily-ai-max-articles=1000",
         "jianda.crawl.daily-ai-max-tokens=10000000"
 })
@@ -164,7 +166,9 @@ class CoreFlowIntegrationTest {
                 .andExpect(status().isForbidden());
 
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"))
+                .andExpect(jsonPath("$.data.jobId").isNumber());
 
         String fieldsBody = mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(2))
@@ -269,8 +273,8 @@ class CoreFlowIntegrationTest {
         when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
                 .thenThrow(new IllegalStateException("AI service unavailable"));
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.message").value("AI 服务暂时不可用，任务已标记失败，可稍后重试"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
         mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.processing_status").value("FAILED"));
@@ -281,7 +285,7 @@ class CoreFlowIntegrationTest {
     }
 
     @Test
-    void emptyAiFieldsFailWithoutGeneratedContentAndCanBeRetried() throws Exception {
+    void generatedModulesWithoutFlatFieldsCanEnterReviewAndBeReprocessed() throws Exception {
         String auth = "Bearer " + login();
         String created = mvc.perform(post("/api/documents").header("Authorization", auth)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -295,54 +299,52 @@ class CoreFlowIntegrationTest {
                         .header("Authorization", auth).param("manualText", sourceText))
                 .andExpect(status().isOk());
 
-        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
-                .thenReturn(Map.of(
+        Map<String, Object> noFieldsResult = Map.of(
                         "fields", List.of(),
                         "summary", List.of("没有字段的摘要"),
                         "plain_text", "没有字段的通俗版",
                         "steps", List.of(),
                         "term_explanations", Map.of(),
                         "warnings", List.of(),
-                        "audio_script", "没有字段的朗读稿"));
+                        "audio_script", "没有字段的朗读稿");
+        Map<String, Object> contactFieldResult = Map.of(
+                "fields", List.of(Map.of(
+                        "field_type", "CONTACT",
+                        "label", "咨询电话",
+                        "value", "021-5558 7301",
+                        "source_quote", "咨询电话：021-5558 7301。",
+                        "confidence", 0.95)),
+                "summary", List.of("请按通知咨询。"),
+                "plain_text", "请拨打通知中的电话咨询。",
+                "steps", List.of(),
+                "term_explanations", Map.of(),
+                "warnings", List.of(),
+                "audio_script", "请拨打通知中的电话咨询。");
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
+                .thenReturn(noFieldsResult, contactFieldResult);
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.message").value(
-                        "AI未生成可追溯的关键字段，请检查模型输出后重新处理"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
         mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.processing_status").value("FAILED"))
+                .andExpect(jsonPath("$.data.processing_status").value("WAITING_REVIEW"))
                 .andExpect(jsonPath("$.data.raw_text").value(sourceText));
         mvc.perform(get("/api/documents/{id}/jobs", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].status").value("FAILED"))
-                .andExpect(jsonPath("$.data[0].error_message").value(
-                        "AI未生成可追溯的关键字段，请检查模型输出后重新处理"));
+                .andExpect(jsonPath("$.data[0].status").value("SUCCEEDED"));
         mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(0));
         mvc.perform(get("/api/documents/{id}/generated", documentId).header("Authorization", auth))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(0));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(greaterThanOrEqualTo(2)));
         mvc.perform(get("/api/documents/{id}/segments", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].text").value(sourceText));
 
-        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
-                .thenReturn(Map.of(
-                        "fields", List.of(Map.of(
-                                "field_type", "CONTACT",
-                                "label", "咨询电话",
-                                "value", "021-5558 7301",
-                                "source_quote", "咨询电话：021-5558 7301。",
-                                "confidence", 0.95)),
-                        "summary", List.of("请按通知咨询。"),
-                        "plain_text", "请拨打通知中的电话咨询。",
-                        "steps", List.of(),
-                        "term_explanations", Map.of(),
-                        "warnings", List.of(),
-                        "audio_script", "请拨打通知中的电话咨询。"));
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
         mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1))
@@ -379,8 +381,8 @@ class CoreFlowIntegrationTest {
                         "request_id", "req-rewrite", "retryable", true,
                         "fact_checkpoint", checkpoint)));
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("事实提取结果已保留")));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
         mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(1));
         when(aiClient.rewrite(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap(), anyMap()))
@@ -414,7 +416,7 @@ class CoreFlowIntegrationTest {
         jdbc.update("INSERT INTO ai_budget_usage(budget_date,scope_type,scope_id,settled_articles) "
                 + "VALUES (CURRENT_DATE,'GLOBAL',0,1000)");
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_BUDGET"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("PROCESSING"));
         org.junit.jupiter.api.Assertions.assertEquals(1,
                 jdbc.queryForObject("SELECT COUNT(*) FROM extracted_field WHERE document_id=?", Integer.class, documentId));
         org.junit.jupiter.api.Assertions.assertEquals(1,

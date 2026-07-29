@@ -22,14 +22,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
@@ -42,15 +47,18 @@ public class DocumentService {
     private final AiClient aiClient;
     private final AiQueueService aiQueueService;
     private final ObjectMapper objectMapper;
+    private final Executor documentProcessingExecutor;
     private final Path uploadRoot;
 
     public DocumentService(JdbcTemplate jdbc, AiClient aiClient, AiQueueService aiQueueService,
                            ObjectMapper objectMapper,
+                           @Qualifier("documentProcessingExecutor") Executor documentProcessingExecutor,
                            @Value("${jianda.upload-dir}") String uploadDir) throws IOException {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
         this.aiQueueService = aiQueueService;
         this.objectMapper = objectMapper;
+        this.documentProcessingExecutor = documentProcessingExecutor;
         this.uploadRoot = Paths.get(uploadDir).toAbsolutePath().normalize();
         Files.createDirectories(uploadRoot);
     }
@@ -153,9 +161,40 @@ public class DocumentService {
         return detail(id, user);
     }
 
-    @Transactional(noRollbackFor = BusinessException.class)
+    @Transactional
     public Map<String, Object> process(long id, AuthUser user) {
-        return processInternal(id, user, null);
+        Map<String, Object> document = detail(id, user);
+        String rawText = document.get("raw_text") == null ? "" : document.get("raw_text").toString();
+        if (rawText.isBlank()) {
+            throw new BusinessException(400, "材料正文为空，请先上传可提取文本的 PDF 或录入正文");
+        }
+        jdbc.queryForObject(
+                "SELECT id FROM source_document WHERE id=? FOR UPDATE",
+                Long.class, id);
+        List<Map<String, Object>> running = jdbc.queryForList(
+                "SELECT id,status,stage,progress FROM processing_job "
+                        + "WHERE document_id=? AND status='PROCESSING' ORDER BY id DESC LIMIT 1",
+                id);
+        if (!running.isEmpty()) {
+            Map<String, Object> current = running.get(0);
+            return Map.of(
+                    "documentId", id,
+                    "jobId", current.get("id"),
+                    "status", current.get("status"),
+                    "stage", current.get("stage"),
+                    "progress", current.get("progress"),
+                    "alreadyRunning", true);
+        }
+        String traceId = UUID.randomUUID().toString();
+        Long jobId = insertProcessingJob(id, traceId);
+        jdbc.update("UPDATE source_document SET processing_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+        dispatchAfterCommit(id, user, jobId);
+        return Map.of(
+                "documentId", id,
+                "jobId", jobId,
+                "status", "PROCESSING",
+                "stage", "EXTRACTING_FACTS",
+                "progress", 25);
     }
 
     @Transactional(noRollbackFor = BusinessException.class)
@@ -163,7 +202,7 @@ public class DocumentService {
         AiQueueService.Reservation reservation = aiQueueService.reserveQueue(queueId);
         if (!reservation.allowed()) return waitingResult(reservation);
         try {
-            return processInternal(reservation.documentId(), user, reservation);
+            return processInternal(reservation.documentId(), user, reservation, null);
         } catch (RuntimeException exception) {
             aiQueueService.release(reservation, "PRE_AI_FAILURE");
             throw exception;
@@ -172,19 +211,28 @@ public class DocumentService {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> processInternal(long id, AuthUser user,
-                                                AiQueueService.Reservation preReserved) {
+                                                AiQueueService.Reservation preReserved,
+                                                Long existingJobId) {
         Map<String, Object> document = detail(id, user);
         String rawText = document.get("raw_text") == null ? "" : document.get("raw_text").toString();
         if (rawText.isBlank()) {
             throw new BusinessException(400, "材料正文为空，请先上传可提取文本的 PDF 或录入正文");
         }
         ensureTraceSegment(id, rawText);
-        String traceId = UUID.randomUUID().toString();
-        jdbc.update("INSERT INTO processing_job(document_id,job_type,status,stage,progress,trace_id,started_at) "
-                        + "VALUES (?,'FULL_PIPELINE','PROCESSING','EXTRACTING_FACTS',25,?,CURRENT_TIMESTAMP)",
-                id, traceId);
-        Long jobId = jdbc.queryForObject("SELECT MAX(id) FROM processing_job WHERE document_id=?", Long.class, id);
-        jdbc.update("UPDATE source_document SET processing_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+        String traceId;
+        Long jobId;
+        if (existingJobId == null) {
+            traceId = UUID.randomUUID().toString();
+            jobId = insertProcessingJob(id, traceId);
+            jdbc.update("UPDATE source_document SET processing_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+        } else {
+            jobId = existingJobId;
+            traceId = jdbc.queryForObject(
+                    "SELECT trace_id FROM processing_job WHERE id=? AND document_id=?",
+                    String.class, jobId, id);
+            jdbc.update("UPDATE processing_job SET status='PROCESSING',stage='EXTRACTING_FACTS',"
+                    + "progress=25,error_message=NULL WHERE id=?", jobId);
+        }
         AiQueueService.Reservation reservation = preReserved;
         int returnedActualTokens = 0;
         try {
@@ -237,6 +285,9 @@ public class DocumentService {
                 throw exception;
             }
             jdbc.update("UPDATE processing_job SET stage='VALIDATING_TRACE',progress=60 WHERE id=?", jobId);
+            if (!hasReviewableContent(result)) {
+                throw new AiResultValidationException();
+            }
             List<PreparedField> fields = prepareFields(id, result);
             long persistenceStarted = System.nanoTime();
             jdbc.update("UPDATE processing_job SET stage='SAVING_RESULT',progress=85 WHERE id=?", jobId);
@@ -268,6 +319,9 @@ public class DocumentService {
             saveStructuredIfPresent(id, result, "faq", "FAQ", "常见问题");
             saveStructuredIfPresent(id, result, "scope", "CONTENT_SCOPE", "适用范围");
             saveStructuredIfPresent(id, result, "uncertainties", "UNCERTAINTIES", "尚待确认");
+            saveStructuredIfPresent(id, result, "standard_sections", "STANDARD_SECTIONS", "标准规范结构");
+            saveStructuredIfPresent(id, result, "policy_sections", "POLICY_SECTIONS", "政策要点");
+            saveStructuredIfPresent(id, result, "health_guidance", "HEALTH_GUIDANCE", "健康指导");
             if (result.get("warnings") != null) {
                 saveGenerated(id, "RISK_WARNING", "风险提示", result.get("warnings"),
                         String.valueOf(result.get("warnings")));
@@ -335,6 +389,57 @@ public class DocumentService {
             jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "FAILED");
             throw new BusinessException(503, publicFailureMessage(exception));
+        }
+    }
+
+    private Long insertProcessingJob(long documentId, String traceId) {
+        KeyHolder keys = new GeneratedKeyHolder();
+        jdbc.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO processing_job(document_id,job_type,status,stage,progress,trace_id,started_at) "
+                            + "VALUES (?,'FULL_PIPELINE','PROCESSING','EXTRACTING_FACTS',25,?,CURRENT_TIMESTAMP)",
+                    new String[] {"id"});
+            statement.setLong(1, documentId);
+            statement.setString(2, traceId);
+            return statement;
+        }, keys);
+        Number key = keys.getKey();
+        if (key == null) {
+            throw new IllegalStateException("创建处理任务后未返回任务 ID");
+        }
+        return key.longValue();
+    }
+
+    private void dispatchAfterCommit(long documentId, AuthUser user, Long jobId) {
+        Runnable dispatch = () -> {
+            try {
+                documentProcessingExecutor.execute(() -> {
+                    try {
+                        processInternal(documentId, user, null, jobId);
+                    } catch (RuntimeException exception) {
+                        LOGGER.warn("Asynchronous document processing ended with failure for document {} job {}",
+                                documentId, jobId);
+                    }
+                });
+            } catch (RejectedExecutionException exception) {
+                LOGGER.error("Document processing executor rejected document {} job {}", documentId, jobId);
+                jdbc.update("UPDATE processing_job SET status='FAILED',stage='QUEUE_REJECTED',"
+                                + "last_failed_stage='QUEUE_REJECTED',progress=0,"
+                                + "error_message='后台处理队列暂时已满，请稍后重试',finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                        jobId);
+                jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        documentId);
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    dispatch.run();
+                }
+            });
+        } else {
+            dispatch.run();
         }
     }
 
@@ -929,7 +1034,7 @@ public class DocumentService {
 
     private List<PreparedField> prepareFields(long documentId, Map<String, Object> result) {
         if (result == null || !(result.get("fields") instanceof List<?> rawFields) || rawFields.isEmpty()) {
-            throw new AiResultValidationException();
+            return List.of();
         }
         List<PreparedField> prepared = new ArrayList<>();
         for (Object item : rawFields) {
@@ -960,6 +1065,20 @@ public class DocumentService {
             throw new AiResultValidationException();
         }
         return prepared;
+    }
+
+    private static boolean hasReviewableContent(Map<String, Object> result) {
+        if (result == null) return false;
+        for (String key : List.of(
+                "fields", "standard_sections", "policy_sections", "health_guidance",
+                "action_checklist", "key_facts", "service_schedule", "conditional_materials",
+                "faq", "scope", "summary", "plain_text")) {
+            Object value = result.get(key);
+            if (value instanceof String text && !text.isBlank()) return true;
+            if (value instanceof List<?> list && !list.isEmpty()) return true;
+            if (value instanceof Map<?, ?> map && !map.isEmpty()) return true;
+        }
+        return false;
     }
 
     private SourceTrace findSourceSegment(long documentId, String quote) {
@@ -1037,4 +1156,3 @@ public class DocumentService {
 
     private static final class AiResultValidationException extends RuntimeException {}
 }
-

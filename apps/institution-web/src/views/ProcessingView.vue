@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
 import {
@@ -23,13 +23,40 @@ const documentId = Number(route.params.id);
 const fields = ref<any[]>([]);
 const steps = ref<[string, string][]>([]);
 const summary = ref<string[]>([]);
+const generated = ref<any[]>([]);
 const document = ref<DocumentDetail | null>(null);
 const segmentCount = ref(0);
 const jobs = ref<ProcessingJob[]>([]);
 const error = ref("");
 const loading = ref(true);
+const refreshing = ref(false);
 const retrying = ref(false);
+const lastUpdatedAt = ref<Date | null>(null);
+const elapsedSeconds = ref(0);
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 const latestJob = computed(() => jobs.value[0]);
+const terminalStatuses = new Set([
+  "WAITING_REVIEW",
+  "FAILED",
+  "WAITING_BUDGET",
+  "CANCELLED",
+  "PUBLISHED",
+]);
+const terminal = computed(
+  () =>
+    terminalStatuses.has(document.value?.processing_status || "") ||
+    terminalStatuses.has(latestJob.value?.status || "") ||
+    latestJob.value?.status === "SUCCEEDED",
+);
+const hasReviewContent = computed(
+  () => fields.value.length > 0 || generated.value.length > 0,
+);
+const completed = computed(
+  () =>
+    document.value?.processing_status === "WAITING_REVIEW" &&
+    hasReviewContent.value,
+);
 const rewriteRecoverable = computed(
   () =>
     failed.value &&
@@ -43,10 +70,16 @@ const imageCount = computed(() =>
 );
 const stageText: Record<string, string> = {
   EXTRACTING_TEXT: "正在提取正文",
-  EXTRACTING_FACTS: "正在识别公共服务事实",
+  DETECTING_DOCUMENT_KIND: "正在识别材料类型",
+  EXTRACTING_FACTS: "正在分析材料关键事实",
+  ANALYZING_SECTIONS: "正在分析材料章节",
+  MERGING_FACTS: "正在合并关键事实",
   VALIDATING_TRACE: "正在校验原文追溯",
   GENERATING_ACCESSIBLE_CONTENT: "正在生成通俗内容",
   SAVING_RESULT: "正在保存结果",
+  WAITING_BUDGET: "等待 AI 预算恢复",
+  CANCELLED: "任务已取消",
+  QUEUE_REJECTED: "后台处理队列暂时已满",
   REWRITE_PENDING: "事实提取已保留，等待适老化改写",
   accessible_rewrite: "适老化改写失败，可单独重试",
   SUCCEEDED: "处理完成",
@@ -57,7 +90,7 @@ const emptyReviewResult = computed(
   () =>
     !loading.value &&
     document.value?.processing_status === "WAITING_REVIEW" &&
-    fields.value.length === 0,
+    !hasReviewContent.value,
 );
 const failureMessage = computed(
   () =>
@@ -77,8 +110,10 @@ function parseJsonArray(value?: string): unknown[] {
   }
 }
 
-async function load() {
-  loading.value = true;
+async function load(silent = false) {
+  if (refreshing.value) return;
+  refreshing.value = true;
+  if (!silent) loading.value = true;
   error.value = "";
   try {
     const [
@@ -97,6 +132,7 @@ async function load() {
     document.value = detailResponse.data.data;
     segmentCount.value = segmentResponse.data.data.length;
     jobs.value = jobResponse.data.data;
+    generated.value = generatedResponse.data.data;
     fields.value = fieldResponse.data.data.map((field) => ({
       id: field.id,
       label: field.field_label,
@@ -118,11 +154,42 @@ async function load() {
       (item) => item.content_type === "SUMMARY",
     );
     summary.value = parseJsonArray(summaryContent?.content_json).map(String);
+    lastUpdatedAt.value = new Date();
+    if (terminal.value) stopPolling();
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
-    loading.value = false;
+    if (!silent) loading.value = false;
+    refreshing.value = false;
   }
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(() => {
+    if (!terminal.value) void load(true);
+    else stopPolling();
+  }, 2000);
+}
+
+function updateElapsed() {
+  const started = latestJob.value?.started_at;
+  if (!started) {
+    elapsedSeconds.value = 0;
+    return;
+  }
+  const end = latestJob.value?.finished_at
+    ? new Date(latestJob.value.finished_at).getTime()
+    : Date.now();
+  elapsedSeconds.value = Math.max(
+    0,
+    Math.floor((end - new Date(started).getTime()) / 1000),
+  );
 }
 
 async function retry() {
@@ -131,6 +198,7 @@ async function retry() {
   try {
     if (rewriteRecoverable.value) await documentApi.retryRewrite(documentId);
     else await documentApi.process(documentId);
+    startPolling();
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -139,7 +207,16 @@ async function retry() {
   }
 }
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  updateElapsed();
+  if (!terminal.value) startPolling();
+  elapsedTimer = setInterval(updateElapsed, 1000);
+});
+onUnmounted(() => {
+  stopPolling();
+  if (elapsedTimer) clearInterval(elapsedTimer);
+});
 </script>
 <template>
   <div>
@@ -147,18 +224,28 @@ onMounted(load);
       title="AI 处理结果"
       description="查看结构化字段、通俗版摘要和办理步骤。"
       :breadcrumbs="['材料管理', '处理结果']"
-      :status="failed ? '处理失败' : fields.length ? '待审核' : '处理中'"
+      :status="failed ? '处理失败' : completed ? '处理完成' : '处理中'"
       ><RouterLink
-        v-if="fields.length"
+        v-if="completed"
         class="btn primary"
         :to="`/documents/${documentId}/review`"
-        >进入对照审核<ArrowRight :size="17" /></RouterLink
+        >进入原文对照审核<ArrowRight :size="17" /></RouterLink
     ></PageHeader>
     <p v-if="latestJob" class="info-note process-stage-note">
       {{ stageText[latestJob.stage || ""] || "正在处理" }}
-      <span v-if="latestJob.total_ms">· 用时 {{ (latestJob.total_ms / 1000).toFixed(1) }} 秒</span>
+      <span>· 进度 {{ latestJob.progress || 0 }}%</span>
+      <span>· 已处理 {{ elapsedSeconds }} 秒</span>
+      <span v-if="lastUpdatedAt">· 最近更新 {{ lastUpdatedAt.toLocaleTimeString("zh-CN", { hour12: false }) }}</span>
       <span v-if="latestJob.cache_hit">· 已复用相同文件的验证结果</span>
+      <span v-if="latestJob.total_tokens">· {{ latestJob.total_tokens }} Token</span>
+      <span v-if="latestJob.provider_request_id">· 请求编号 {{ latestJob.provider_request_id }}</span>
     </p>
+    <div class="process-actions">
+      <RouterLink class="btn secondary" to="/documents">返回材料列表，后台继续处理</RouterLink>
+      <button class="btn secondary" :disabled="refreshing" @click="load(true)">
+        <RefreshCw :size="17" />{{ refreshing ? "正在刷新…" : "重新加载状态" }}
+      </button>
+    </div>
     <p v-if="route.query.imported === 'web'" class="inline-success">
       网页文章已导入为文档 {{ documentId }}，预览阶段未创建其他材料。
     </p>
@@ -178,14 +265,14 @@ onMounted(load);
         >
       </div>
       <i></i>
-      <div :class="{ done: fields.length, failed }">
-        <CircleCheck v-if="fields.length" />
+      <div :class="{ done: hasReviewContent, failed }">
+        <CircleCheck v-if="hasReviewContent" />
         <TriangleAlert v-else-if="failed || emptyReviewResult" />
         <LoaderCircle v-else /><span
           ><b>{{ isWebArticle ? "内容类型识别与 AI 适老化处理" : "AI 分析" }}</b
           ><small>{{
-            fields.length
-              ? `${isWebArticle ? `${contentKindLabel(document?.content_kind)} · ` : ""}已生成 ${fields.length} 个可追溯字段`
+            hasReviewContent
+              ? `${isWebArticle ? `${contentKindLabel(document?.content_kind)} · ` : ""}已生成 ${fields.length} 个可追溯字段和 ${generated.length} 个内容模块`
               : failed || emptyReviewResult
                 ? "未生成可审核字段"
                 : "正在等待分析结果"
@@ -193,11 +280,11 @@ onMounted(load);
         >
       </div>
       <i></i>
-      <div :class="{ done: fields.length, active: !fields.length && !failed }">
-        <CircleCheck v-if="fields.length" />
+      <div :class="{ done: completed, active: !completed && !failed }">
+        <CircleCheck v-if="completed" />
         <LoaderCircle v-else /><span
           ><b>等待审核</b
-          ><small>{{ fields.length ? "请确认关键字段" : "尚未进入审核" }}</small></span
+          ><small>{{ completed ? "处理完成，可进入原文对照审核" : "尚未进入审核" }}</small></span
         >
       </div>
     </section>
@@ -236,7 +323,7 @@ onMounted(load);
         </div>
       </div>
     </section>
-    <div v-if="fields.length" class="result-grid">
+    <div v-if="hasReviewContent" class="result-grid">
       <section class="panel">
         <div class="panel-title">
           <div>
@@ -291,3 +378,12 @@ onMounted(load);
     </div>
   </div>
 </template>
+
+<style scoped>
+.process-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 14px 0;
+}
+</style>
