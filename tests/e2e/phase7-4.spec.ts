@@ -49,7 +49,7 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
     const response = await responsePromise;
     expect(response.status()).toBe(200);
     expect((await response.json()).data.mode).toBe("retrieval");
-    await expect(page.getByText("当前使用已审核内容检索回答")).toBeVisible();
+    await expect(page.getByText("原文检索", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "回答依据" })).toBeVisible();
     await expect(page.locator(".assistant-citation").first()).toBeVisible();
   });
@@ -69,7 +69,7 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
     await page.getByRole("button", { name: "发送问题" }).click();
     await expect(page.getByText("助手服务繁忙，请稍后重新发送。")).toBeVisible();
     await page.getByRole("button", { name: "重新发送" }).click();
-    await expect(page.getByText("当前使用已审核内容检索回答")).toBeVisible();
+    await expect(page.getByText("原文检索", { exact: true })).toBeVisible();
   });
 
   test("uses five primary destinations and keeps news as a safe secondary page", async ({ page }) => {
