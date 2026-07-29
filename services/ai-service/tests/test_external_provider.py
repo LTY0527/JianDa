@@ -13,6 +13,7 @@ from app.models import (
     AssistantEvidence,
     GeneralAssistantRequest,
     FactExtractionResponse,
+    RewriteResponse,
     FeeRule,
     ServiceWindow,
     SourceSegment,
@@ -282,6 +283,83 @@ def test_general_assistant_is_separate_from_grounded_rag_and_returns_metrics():
     sent = server.requests[0]["json"]
     assert "通用AI参考" in sent["messages"][0]["content"]
     assert "数字素养" in sent["messages"][1]["content"]
+
+
+def test_fact_schema_recovery_normalizes_aliases_and_quarantines_unknowns():
+    payload = {
+        "prompt_version": "web-v1.1",
+        "fields": [
+            {
+                "field_type": "PHONE",
+                "label": "咨询电话",
+                "value": "021-12345",
+                "source_quote": "咨询电话：021-12345",
+                "page_no": 1,
+                "segment_id": 1,
+                "confidence": 0.9,
+                "model_comment": "不应进入正式字段",
+            },
+            {
+                "field_type": "UNSUPPORTED_GUESS",
+                "label": "未知",
+                "value": "猜测值",
+                "source_quote": "原文",
+                "page_no": 1,
+                "segment_id": 1,
+                "confidence": 0.2,
+            },
+        ],
+        "unexpected_top_level": {"secret": "discard"},
+    }
+
+    repaired, paths = ExternalLlmProvider._repair_schema_payload(
+        payload, "fact_extract"
+    )
+    validated = FactExtractionResponse.model_validate(repaired)
+
+    assert validated.fields[0].field_type == "CONTACT"
+    assert len(validated.fields) == 1
+    assert any("unexpected_top_level" in item for item in validated.uncertain_fields)
+    assert any("$.fields[1].field_type" in item
+               for item in validated.uncertain_fields)
+    assert "$.fields[0].field_type:enum_alias" in paths
+    assert "$.sessions:default" in paths
+    assert "$.unexpected_top_level:quarantined" in paths
+
+
+def test_rewrite_schema_recovery_fills_optional_fields_and_preserves_uncertainty():
+    payload = {
+        "prompt_version": "web-v1.1",
+        "summary": ["通俗摘要"],
+        "plain_text": "通俗正文",
+        "audio_script": "播报正文",
+        "action_checklist": [{
+            "action": "查看官方原文",
+            "priority": "URGENT",
+            "source_quote": "请查看官方原文",
+            "segment_id": 1,
+            "internal_note": "unknown",
+        }],
+        "scope": {
+            "national_or_local": "NATIONAL",
+            "debug": True,
+        },
+        "invented_section": ["unknown"],
+    }
+
+    repaired, paths = ExternalLlmProvider._repair_schema_payload(
+        payload, "accessible_rewrite"
+    )
+    validated = RewriteResponse.model_validate(repaired)
+
+    assert validated.steps == []
+    assert validated.action_checklist[0].priority == "立即"
+    assert validated.scope is not None
+    assert validated.scope.national_or_local == "全国"
+    assert any("invented_section" in item for item in validated.uncertainties)
+    assert any("internal_note" in item for item in validated.uncertainties)
+    assert "$.steps:default" in paths
+    assert "$.scope.national_or_local:enum_alias" in paths
 
 
 def test_base_url_already_contains_completion_path_is_not_duplicated():

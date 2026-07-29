@@ -576,6 +576,7 @@ class ExternalLlmProvider(LlmProvider):
                     result_delivery=structured.result_delivery,
                     deadline_rules=structured.deadline_rules,
                     amendments=structured.amendments,
+                    uncertain_fields=structured.uncertain_fields,
                 )
                 exc.fact_checkpoint = {
                     "prompt_version": active_prompt_version,
@@ -655,7 +656,9 @@ class ExternalLlmProvider(LlmProvider):
             common_mistakes=rewrite.common_mistakes,
             faq=rewrite.faq,
             scope=rewrite.scope,
-            uncertainties=rewrite.uncertainties,
+            uncertainties=list(dict.fromkeys(
+                structured.uncertain_fields + rewrite.uncertainties
+            )),
             metrics=metrics,
         )
         if cache_key:
@@ -735,7 +738,10 @@ class ExternalLlmProvider(LlmProvider):
             amendments=checkpoint.amendments, quick_summary=rewrite.quick_summary or rewrite.summary,
             why_it_matters=rewrite.why_it_matters, action_checklist=rewrite.action_checklist,
             key_facts=rewrite.key_facts, common_mistakes=rewrite.common_mistakes,
-            faq=rewrite.faq, scope=rewrite.scope, uncertainties=rewrite.uncertainties,
+            faq=rewrite.faq, scope=rewrite.scope,
+            uncertainties=list(dict.fromkeys(
+                checkpoint.uncertain_fields + rewrite.uncertainties
+            )),
             metrics=metrics,
         )
 
@@ -969,6 +975,18 @@ class ExternalLlmProvider(LlmProvider):
                     normalization_applied=bool(repaired_paths),
                     normalization_rules=tuple(repaired_paths),
                 )
+            if stage in {"fact_extract", "accessible_rewrite"}:
+                parsed, schema_repairs = self._repair_schema_payload(parsed, stage)
+                repaired_paths = sorted(set(repaired_paths + schema_repairs))
+                if schema_repairs:
+                    LOGGER.info(
+                        "provider=external model=%s stage=%s request_id=%s "
+                        "schema_recovery=true repaired_paths=%s",
+                        self.settings.model,
+                        stage,
+                        request_id,
+                        ",".join(schema_repairs),
+                    )
             self._log_http_audit(
                 stage, response.status_code, request_id,
                 finish_reason, elapsed_ms, attempt, usage
@@ -1036,6 +1054,223 @@ class ExternalLlmProvider(LlmProvider):
             else:
                 repaired.append("unwrap_json_string")
         return parsed, sorted(set(repaired))
+
+    @classmethod
+    def _repair_schema_payload(
+        cls, payload: dict[str, Any], stage: str
+    ) -> tuple[dict[str, Any], list[str]]:
+        repaired: list[str] = []
+        uncertain: list[str] = []
+        if stage == "fact_extract":
+            allowed = {
+                "prompt_version", "fields", "sessions", "audience_rules",
+                "service_schedule", "conditional_materials", "fees",
+                "result_delivery", "deadline_rules", "amendments",
+                "uncertain_fields",
+            }
+            cls._quarantine_unknown(payload, allowed, "$", uncertain, repaired)
+            cls._fill_optional_defaults(payload, {
+                "sessions": [],
+                "audience_rules": {"audience": [], "conditions": []},
+                "service_schedule": {
+                    "service_windows": [], "closure_rules": [],
+                },
+                "conditional_materials": [],
+                "fees": [],
+                "result_delivery": [],
+                "deadline_rules": [],
+                "amendments": [],
+                "uncertain_fields": [],
+            }, "$", repaired)
+            raw_fields = payload.get("fields")
+            if isinstance(raw_fields, list):
+                normalized_fields: list[dict[str, Any]] = []
+                for index, raw in enumerate(raw_fields):
+                    path = f"$.fields[{index}]"
+                    if not isinstance(raw, dict):
+                        uncertain.append(f"{path} 不是对象，已隔离")
+                        repaired.append(f"{path}:quarantined")
+                        continue
+                    cls._quarantine_unknown(raw, {
+                        "field_type", "label", "value", "source_quote",
+                        "page_no", "segment_id", "confidence",
+                        "needs_human_review",
+                    }, path, uncertain, repaired)
+                    if "needs_human_review" not in raw:
+                        raw["needs_human_review"] = False
+                        repaired.append(
+                            f"{path}.needs_human_review:default"
+                        )
+                    aliases = {
+                        "AUDIENCE": "TARGET_AUDIENCE",
+                        "TARGET_GROUP": "TARGET_AUDIENCE",
+                        "QUALIFICATION": "ELIGIBILITY",
+                        "DATE_START": "START_DATE",
+                        "DATE_END": "END_DATE",
+                        "ADDRESS": "LOCATION",
+                        "PHONE": "CONTACT",
+                        "COST": "FEE",
+                        "MATERIALS": "MATERIAL",
+                        "RISK": "WARNING",
+                    }
+                    value = str(raw.get("field_type") or "").upper()
+                    if value in aliases:
+                        raw["field_type"] = aliases[value]
+                        repaired.append(f"{path}.field_type:enum_alias")
+                    supported = {
+                        "TARGET_AUDIENCE", "ELIGIBILITY", "START_DATE",
+                        "END_DATE", "EVENT_DATE", "SERVICE_TIME", "LOCATION",
+                        "CONTACT", "FEE", "MATERIAL", "WARNING", "RESULT_TIME",
+                    }
+                    if raw.get("field_type") not in supported:
+                        uncertain.append(
+                            f"{path}.field_type 无法确定，已隔离"
+                        )
+                        repaired.append(f"{path}.field_type:quarantined")
+                        continue
+                    normalized_fields.append(raw)
+                payload["fields"] = normalized_fields
+            deadline_aliases = {
+                "FIXED": "FIXED_DATE",
+                "DATE": "FIXED_DATE",
+                "RELATIVE": "RELATIVE_PERIOD",
+                "CAPACITY": "CAPACITY_LIMIT",
+                "NONE": "NO_FIXED_DATE",
+                "CHANNEL": "CHANNEL_SPECIFIC",
+            }
+            deadlines = payload.get("deadline_rules")
+            if isinstance(deadlines, list):
+                for index, raw in enumerate(deadlines):
+                    if not isinstance(raw, dict):
+                        continue
+                    value = str(raw.get("rule_type") or "").upper()
+                    if value in deadline_aliases:
+                        raw["rule_type"] = deadline_aliases[value]
+                        repaired.append(
+                            f"$.deadline_rules[{index}].rule_type:enum_alias"
+                        )
+            payload["uncertain_fields"] = (
+                cls._string_list(payload.get("uncertain_fields")) + uncertain
+            )
+        elif stage == "accessible_rewrite":
+            cls._quarantine_unknown(
+                payload, set(RewriteResponse.model_fields), "$",
+                uncertain, repaired
+            )
+            cls._fill_optional_defaults(payload, {
+                "steps": [],
+                "warnings": [],
+                "term_explanations": {},
+                "quick_summary": [],
+                "why_it_matters": [],
+                "action_checklist": [],
+                "key_facts": [],
+                "common_mistakes": [],
+                "faq": [],
+                "terms": {},
+                "scope": None,
+                "uncertainties": [],
+            }, "$", repaired)
+            priority_aliases = {
+                "URGENT": "立即",
+                "IMMEDIATE": "立即",
+                "SOON": "近期",
+                "NORMAL": "了解即可",
+                "FYI": "了解即可",
+            }
+            checklist = payload.get("action_checklist")
+            if isinstance(checklist, list):
+                for index, raw in enumerate(checklist):
+                    if not isinstance(raw, dict):
+                        continue
+                    priority = str(raw.get("priority") or "").upper()
+                    if priority in priority_aliases:
+                        raw["priority"] = priority_aliases[priority]
+                        repaired.append(
+                            f"$.action_checklist[{index}].priority:enum_alias"
+                        )
+            for key, allowed_fields in {
+                "steps": {"order", "title", "description"},
+                "action_checklist": {
+                    "action", "priority", "source_quote", "segment_id",
+                },
+                "key_facts": {
+                    "label", "value", "source_quote", "segment_id",
+                },
+                "faq": {
+                    "question", "answer", "source_quote", "segment_id",
+                },
+            }.items():
+                raw_items = payload.get(key)
+                if not isinstance(raw_items, list):
+                    continue
+                for index, raw in enumerate(raw_items):
+                    if isinstance(raw, dict):
+                        cls._quarantine_unknown(
+                            raw, allowed_fields, f"$.{key}[{index}]",
+                            uncertain, repaired
+                        )
+            scope = payload.get("scope")
+            if isinstance(scope, dict):
+                cls._quarantine_unknown(
+                    scope,
+                    {
+                        "national_or_local", "applicable_region",
+                        "needs_personal_action",
+                    },
+                    "$.scope",
+                    uncertain,
+                    repaired,
+                )
+                scope_aliases = {
+                    "NATIONAL": "全国",
+                    "LOCAL": "地方",
+                    "INSTITUTION": "具体机构",
+                    "UNKNOWN": "原文未说明",
+                    "NOT_STATED": "原文未说明",
+                }
+                value = str(scope.get("national_or_local") or "").upper()
+                if value in scope_aliases:
+                    scope["national_or_local"] = scope_aliases[value]
+                    repaired.append("$.scope.national_or_local:enum_alias")
+            payload["uncertainties"] = (
+                cls._string_list(payload.get("uncertainties")) + uncertain
+            )
+        return payload, sorted(set(repaired))
+
+    @staticmethod
+    def _quarantine_unknown(
+        payload: dict[str, Any],
+        allowed: set[str],
+        path: str,
+        uncertain: list[str],
+        repaired: list[str],
+    ) -> None:
+        for key in list(payload):
+            if key in allowed:
+                continue
+            payload.pop(key)
+            field_path = f"{path}.{key}"
+            uncertain.append(f"{field_path} 为未识别字段，已隔离")
+            repaired.append(f"{field_path}:quarantined")
+
+    @staticmethod
+    def _fill_optional_defaults(
+        payload: dict[str, Any],
+        defaults: dict[str, Any],
+        path: str,
+        repaired: list[str],
+    ) -> None:
+        for key, value in defaults.items():
+            if key not in payload or payload[key] is None:
+                payload[key] = value
+                repaired.append(f"{path}.{key}:default")
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
 
     @staticmethod
     def _validate_json_wrapper(prefix: str, suffix: str, source: str) -> None:
@@ -1445,6 +1680,7 @@ class ExternalLlmProvider(LlmProvider):
             result_delivery=result_delivery,
             deadline_rules=deadline_rules,
             amendments=amendments,
+            uncertain_fields=self._string_list(payload.get("uncertain_fields")),
         )
 
     def _validate_structured_items(

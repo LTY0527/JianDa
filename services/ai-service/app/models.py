@@ -300,6 +300,7 @@ class FactExtractionResponse(BaseModel):
     result_delivery: list[ResultDelivery] = Field(default_factory=list)
     deadline_rules: list[DeadlineRule] = Field(default_factory=list)
     amendments: list[Amendment] = Field(default_factory=list)
+    uncertain_fields: list[str] = Field(default_factory=list)
 
 
 class RewriteResponse(BaseModel):
