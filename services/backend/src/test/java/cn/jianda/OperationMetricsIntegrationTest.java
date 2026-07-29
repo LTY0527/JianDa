@@ -43,6 +43,8 @@ class OperationMetricsIntegrationTest {
 
         int sources = count("SELECT COUNT(*) FROM source_registry");
         int published = count("SELECT COUNT(*) FROM published_item WHERE status='PUBLISHED'");
+        int pendingImages = count(
+                "SELECT COUNT(*) FROM image_candidate WHERE review_status='PENDING'");
         mvc.perform(get("/api/operation-metrics")
                         .header("Authorization", "Bearer " + login("platform_admin")))
                 .andExpect(status().isOk())
@@ -51,7 +53,19 @@ class OperationMetricsIntegrationTest {
                 .andExpect(jsonPath("$.data.viewCount").value(viewsBefore + 1))
                 .andExpect(jsonPath("$.data.assistantQueryCount").value(queriesBefore + 1))
                 .andExpect(jsonPath("$.data.aiSuccessRate").isNumber())
-                .andExpect(jsonPath("$.data.manualEditRate").isNumber());
+                .andExpect(jsonPath("$.data.manualEditRate").isNumber())
+                .andExpect(jsonPath("$.data.todayDiscoveredCount").isNumber())
+                .andExpect(jsonPath("$.data.todayCollectedCount").isNumber())
+                .andExpect(jsonPath("$.data.todayDuplicateCount").isNumber())
+                .andExpect(jsonPath("$.data.todayFailedCount").isNumber())
+                .andExpect(jsonPath("$.data.pendingImageCandidateCount").value(pendingImages))
+                .andExpect(jsonPath("$.data.averageCrawlMs").isNumber())
+                .andExpect(jsonPath("$.data.averageAiMs").isNumber())
+                .andExpect(jsonPath("$.data.tokenBudgetTotal").isNumber())
+                .andExpect(jsonPath("$.data.tokenUsedToday").isNumber())
+                .andExpect(jsonPath("$.data.sources.length()").value(sources))
+                .andExpect(jsonPath("$.data.aiQueueByStatus").isArray())
+                .andExpect(jsonPath("$.data.recentErrors").isArray());
 
         assertEquals(1, count(
                 "SELECT COUNT(*) FROM daily_operation_snapshot WHERE snapshot_date=CURRENT_DATE"));

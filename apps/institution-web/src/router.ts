@@ -18,6 +18,7 @@ const router = createRouter({
         { path: "published", component: () => import("./views/PublishedView.vue"), meta: { title: "已发布内容", showBack: false } },
         { path: "public-sources", component: () => import("./views/PublicSourcesView.vue"), meta: { title: "权威来源", showBack: false, platformOnly: true } },
         { path: "public-import", component: () => import("./views/PublicImportView.vue"), meta: { title: "公开信息导入", showBack: false, platformOnly: true } },
+        { path: "operations", component: () => import("./views/OperationsView.vue"), meta: { title: "平台运营看板", showBack: false, platformOnly: true } },
         { path: "forbidden", component: () => import("./views/ForbiddenView.vue"), meta: { title: "无权访问", showBack: true, backTo: "/" } },
         { path: "logs", component: () => import("./views/LogsView.vue"), meta: { title: "操作日志", showBack: false } },
       ],

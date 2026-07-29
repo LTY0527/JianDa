@@ -10,6 +10,7 @@ import {
   ChevronDown,
   HeartHandshake,
   ShieldCheck,
+  Activity,
 } from "lucide-vue-next";
 import { currentUser } from "../auth";
 const route = useRoute();
@@ -23,6 +24,7 @@ const menus = computed(() => [
     ? [
         { path: "/public-sources", label: "权威来源管理", icon: ShieldCheck },
         { path: "/public-import", label: "公开信息导入", icon: CloudDownload },
+        { path: "/operations", label: "平台运营看板", icon: Activity },
       ]
     : []),
   { path: "/logs", label: "操作日志", icon: ScrollText },

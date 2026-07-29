@@ -3,6 +3,7 @@ package cn.jianda.operations;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -21,7 +22,8 @@ public class OperationMetricsService {
         Map<String, Object> metrics = new LinkedHashMap<>();
         metrics.put("authoritySourceCount", count("SELECT COUNT(*) FROM source_registry"));
         metrics.put("discoveredArticleCount", count("SELECT COALESCE(SUM(discovered_count),0) FROM crawl_job"));
-        metrics.put("successfulCrawlCount", count("SELECT COUNT(*) FROM crawl_job WHERE status='SUCCEEDED'"));
+        metrics.put("successfulCrawlCount", count(
+                "SELECT COUNT(*) FROM crawl_job WHERE status IN ('SUCCESS','SUCCEEDED')"));
         metrics.put("duplicateCount", count("SELECT COALESCE(SUM(duplicate_count),0) FROM crawl_job"));
         metrics.put("waitingReviewCount", count("SELECT COUNT(*) FROM source_document WHERE processing_status='WAITING_REVIEW'"));
         metrics.put("publishedCount", count("SELECT COUNT(*) FROM published_item WHERE status='PUBLISHED'"));
@@ -44,8 +46,58 @@ public class OperationMetricsService {
         int edits = count("SELECT COUNT(*) FROM review_record "
                 + "WHERE COALESCE(before_snapshot,'')<>COALESCE(after_snapshot,'')");
         metrics.put("manualEditRate", rate(edits, reviews));
+        metrics.put("todayDiscoveredCount", count(
+                "SELECT COALESCE(SUM(discovered_count),0) FROM crawl_job "
+                        + "WHERE discovered_at>=CURRENT_DATE"));
+        metrics.put("todayCollectedCount", count(
+                "SELECT COALESCE(SUM(added_count),0) FROM crawl_job "
+                        + "WHERE discovered_at>=CURRENT_DATE"));
+        metrics.put("todayDuplicateCount", count(
+                "SELECT COALESCE(SUM(duplicate_count),0) FROM crawl_job "
+                        + "WHERE discovered_at>=CURRENT_DATE"));
+        metrics.put("todayFailedCount", count(
+                "SELECT COALESCE(SUM(failed_count),0) FROM crawl_job "
+                        + "WHERE discovered_at>=CURRENT_DATE"));
+        metrics.put("pendingImageCandidateCount", count(
+                "SELECT COUNT(*) FROM image_candidate WHERE review_status='PENDING'"));
+        metrics.put("averageCrawlMs", decimal(
+                "SELECT COALESCE(AVG(duration_ms),0) FROM crawl_job "
+                        + "WHERE duration_ms>0"));
+        metrics.put("averageAiMs", decimal(
+                "SELECT COALESCE(AVG(TIMESTAMPDIFF(MICROSECOND,started_at,finished_at)/1000),0) "
+                        + "FROM processing_job WHERE started_at IS NOT NULL AND finished_at IS NOT NULL"));
+        metrics.put("tokenBudgetTotal", count(
+                "SELECT COALESCE(SUM(daily_token_budget),0) FROM source_registry WHERE enabled=TRUE"));
+        metrics.put("tokenUsedToday", count(
+                "SELECT COALESCE(SUM(actual_tokens),0) FROM ai_budget_usage "
+                        + "WHERE budget_date=CURRENT_DATE"));
+        metrics.put("sources", sourceStatus());
+        metrics.put("aiQueueByStatus", queueStatus());
+        metrics.put("recentErrors", recentErrors());
         saveSnapshot(metrics);
         return metrics;
+    }
+
+    private List<Map<String, Object>> sourceStatus() {
+        return jdbc.queryForList(
+                "SELECT id,source_name,domain,enabled,last_status,last_crawled_at,"
+                        + "next_run_at,last_error,failure_count FROM source_registry "
+                        + "ORDER BY enabled DESC,last_crawled_at DESC,source_name");
+    }
+
+    private List<Map<String, Object>> queueStatus() {
+        return jdbc.queryForList(
+                "SELECT status,COUNT(*) item_count,COALESCE(SUM(estimated_tokens),0) estimated_tokens,"
+                        + "COALESCE(SUM(actual_tokens),0) actual_tokens FROM ai_processing_queue "
+                        + "GROUP BY status ORDER BY status");
+    }
+
+    private List<Map<String, Object>> recentErrors() {
+        return jdbc.queryForList(
+                "SELECT e.id,e.error_code,e.error_summary,e.processing_stage,e.failed_url,"
+                        + "e.retryable,e.retry_count,e.created_at,r.source_name "
+                        + "FROM crawl_job_error e JOIN source_registry r ON r.id=e.source_registry_id "
+                        + "WHERE e.resolved_at IS NULL ORDER BY e.created_at DESC,e.id DESC LIMIT 10");
     }
 
     private int count(String sql) {
