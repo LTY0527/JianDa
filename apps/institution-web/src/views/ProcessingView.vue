@@ -52,6 +52,12 @@ const terminal = computed(
 const hasReviewContent = computed(
   () => fields.value.length > 0 || generated.value.length > 0,
 );
+const completedStatuses = new Set([
+  "WAITING_REVIEW",
+  "REVIEWED",
+  "PUBLISHED",
+  "WITHDRAWN",
+]);
 const structuredModuleTypes = new Set([
   "DOCUMENT_OUTLINE",
   "SECTION_SUMMARIES",
@@ -73,7 +79,7 @@ const structuredModules = computed(() =>
 );
 const completed = computed(
   () =>
-    document.value?.processing_status === "WAITING_REVIEW" &&
+    completedStatuses.has(document.value?.processing_status || "") &&
     hasReviewContent.value,
 );
 const rewriteRecoverable = computed(
