@@ -65,7 +65,7 @@ class AssistantIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.mode").value("retrieval"))
                 .andExpect(jsonPath("$.data.citations.length()").value(0))
-                .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("没有找到足够可靠的依据")));
+                .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("当前已发布内容中没有可靠答案")));
     }
 
     @Test

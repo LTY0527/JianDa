@@ -43,6 +43,7 @@ export interface AssistantCitation {
 
 export interface AssistantReply {
   answer: string;
+  actions?: string[];
   citations: AssistantCitation[];
   disclaimer: string;
   mode: "retrieval" | "ai";
@@ -104,6 +105,10 @@ export async function fetchNeighbors(
 export async function fetchDetail(slug: string): Promise<Record<string, any>> {
   const response = await client.get(`/public/items/${slug}`);
   return response.data.data;
+}
+
+export async function recordContentView(id: number): Promise<void> {
+  await client.post(`/public/items/${id}/view`);
 }
 
 export function publicOriginalFileUrl(slug: string, download = false): string {

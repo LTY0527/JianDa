@@ -13,6 +13,7 @@ interface ConversationMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  actions?: string[];
   citations?: AssistantCitation[];
   disclaimer?: string;
   mode?: "retrieval" | "ai";
@@ -73,6 +74,7 @@ async function submit(value = question.value, recordUser = true) {
       id: createUuid(),
       role: "assistant",
       text: reply.answer,
+      actions: reply.actions,
       citations: reply.citations,
       disclaimer: reply.disclaimer,
       mode: reply.mode,
@@ -180,9 +182,13 @@ onMounted(async () => {
         <article v-for="message in messages" :key="message.id" class="assistant-message" :class="`assistant-message--${message.role}`">
           <small>{{ message.role === "user" ? "您" : "简达助手" }}</small>
           <div class="assistant-bubble">{{ message.text }}</div>
-          <p v-if="message.role === 'assistant' && message.mode === 'retrieval'" class="assistant-mode">
-            当前使用已审核内容检索回答
+          <p v-if="message.role === 'assistant'" class="assistant-mode">
+            {{ message.mode === "ai" ? "AI 基于已审核来源整理" : "当前使用已审核内容检索回答" }}
           </p>
+          <section v-if="message.actions?.length" class="assistant-actions">
+            <h3>你现在可以怎么做</h3>
+            <ol><li v-for="action in message.actions" :key="action">{{ action }}</li></ol>
+          </section>
           <div v-if="message.role === 'assistant'" class="assistant-speech">
             <button type="button" @click="toggleAnswerSpeech(message)">
               <component :is="spokenMessageId === message.id && speech.status.value === 'playing' ? Pause : spokenMessageId === message.id && speech.status.value === 'paused' ? Play : Volume2" />
@@ -190,6 +196,9 @@ onMounted(async () => {
             </button>
             <button v-if="spokenMessageId === message.id && speech.isActive.value" type="button" @click="stopAnswerSpeech"><Square />停止</button>
             <SpeechRateSelector :model-value="speech.rate.value" @select="speech.setRate" />
+            <span v-if="spokenMessageId === message.id && speech.progress.value.total" class="speech-progress">
+              第 {{ speech.progress.value.current }} / {{ speech.progress.value.total }} 段
+            </span>
           </div>
           <div v-if="message.citations?.length" class="assistant-citations">
             <h3>回答依据</h3>

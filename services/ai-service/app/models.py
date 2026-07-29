@@ -440,3 +440,34 @@ class WebArticlePreview(BaseModel):
     original_page_available: bool = True
     images: list[WebArticleImage] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class AssistantEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=1, le=5)
+    title: str = Field(min_length=1, max_length=200)
+    slug: str = Field(min_length=1, max_length=180)
+    source_name: str = Field(min_length=1, max_length=160)
+    quote: str = Field(min_length=1, max_length=500)
+
+
+class AssistantAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=500)
+    evidence: list[AssistantEvidence] = Field(min_length=1, max_length=5)
+
+
+class AssistantAnswerResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str = Field(min_length=1, max_length=2000)
+    actions: list[str] = Field(default_factory=list, max_length=5)
+    used_citation_indexes: list[int] = Field(min_length=1, max_length=5)
+    model: str
+    request_id: str
+    prompt_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+    elapsed_ms: int = Field(ge=0)

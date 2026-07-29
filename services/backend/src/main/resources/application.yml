@@ -28,6 +28,10 @@ jianda:
   jwt-expiration-hours: 12
   upload-dir: ${UPLOAD_DIR:./uploads}
   ai-service-url: ${AI_SERVICE_URL:http://127.0.0.1:8001}
+  assistant:
+    external-enabled: ${ASSISTANT_EXTERNAL_ENABLED:false}
+    daily-call-limit: ${ASSISTANT_DAILY_CALL_LIMIT:30}
+    daily-token-limit: ${ASSISTANT_DAILY_TOKEN_LIMIT:30000}
   public-fixture: ${JIANDA_PUBLIC_FIXTURE:}
   crawl:
     scheduler-enabled: ${CRAWL_SCHEDULER_ENABLED:false}

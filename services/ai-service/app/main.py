@@ -11,6 +11,8 @@ from app.models import (
     AnalyzeResult,
     ArticleDiscoveryRequest,
     ArticleDiscoveryResponse,
+    AssistantAnswerRequest,
+    AssistantAnswerResponse,
     ExtractTextResult,
     MetadataPreview,
     RewriteOnlyRequest,
@@ -142,6 +144,23 @@ def generate_steps(request: TextRequest) -> dict[str, object]:
 @app.post("/internal/trace-fields")
 def trace_fields(request: TextRequest) -> dict[str, object]:
     return {"fields": analyze(request).fields}
+
+
+@app.post("/internal/assistant/answer", response_model=AssistantAnswerResponse)
+def assistant_answer(request: AssistantAnswerRequest) -> AssistantAnswerResponse:
+    if os.getenv("ASSISTANT_EXTERNAL_ENABLED", "false").lower() != "true":
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "ASSISTANT_EXTERNAL_DISABLED",
+                "message": "助手外部模型未启用",
+                "retryable": False,
+            },
+        )
+    try:
+        return ExternalLlmProvider().answer_assistant(request)
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=503, detail=exc.safe_detail()) from exc
 
 
 @app.post("/internal/article-discovery", response_model=ArticleDiscoveryResponse)
