@@ -74,7 +74,9 @@ v1.1 通用结构还包括：
 - `GET /api/source-registries`、`GET /api/source-registries/{id}`：查看来源域名、发现方式、调度时间、每轮上限、安全默认值、文章/Token 预算和最近运行状态。
 - `POST /api/source-registries`、`PUT /api/source-registries/{id}`：新增或更新来源。新来源固定为停用、禁止原图缓存、禁止自动采集、要求人工审核；启用由独立接口完成。
 - `PUT /api/source-registries/{id}/enabled`：显式启用或停用来源。
-- `POST /api/source-registries/{id}/discover`：对单个启用来源执行一次有界发现；请求包含 `method` 和同源 `entryUrl`。
+- `POST /api/source-registries/{id}/discover`：对单个启用来源执行一次有界发现；只返回候选 URL，不创建材料、不调用 AI。
+- `POST /api/source-registries/{id}/shadow`：抓取指定候选并返回正文、封面策略和图片候选预览；不创建材料、不调用 AI、不发布。
+- `POST /api/source-registries/{id}/collect`：确认指定候选后创建材料并进入 `WAITING_APPROVAL`；不会自动审核或发布。
 - `GET /api/crawl-tasks`、`GET /api/crawl-tasks/{id}`：按状态/来源查看任务计数、阶段、错误摘要和逐条错误队列。
 - `POST /api/crawl-tasks`：创建采集任务。
 - `POST /api/crawl-tasks/{id}/cancel`：取消仍可取消的任务。
@@ -97,10 +99,12 @@ v1.1 通用结构还包括：
 
 预算等待不会调用 AI，实际 Token 为 0，并返回自然语言原因和预计恢复时间。API 不返回 API Key、Authorization、Cookie、内部堆栈、完整提示词或模型响应。
 
-请求体为 `{ "url": "https://白名单域名/官方文章" }`。只有来源注册表明确设置
-`allow_image_cache=true` 时，AI 服务才会下载候选图片并校验 HTTP 状态、媒体类型、
-尺寸、比例和哈希；否则不下载原图，直接使用本地分类默认图。第三方封面未经人工确认
-不能发布。`查看官方原文` 始终使用文章 canonical URL，不使用图片 URL。
+请求体为 `{ "url": "https://白名单域名/官方文章" }`。来源注册表的
+`allow_image_candidates=true` 允许 AI 服务下载少量候选数据并校验 HTTP 状态、媒体
+类型、尺寸、比例和哈希，以便生成仅机构端可见的候选；`allow_image_cache` 只控制候选
+经人工填写来源和使用依据后能否缓存公开，设置为 `false` 不会删除候选。第三方封面未经
+人工确认不能发布，用户端安全回退分类默认图。`查看官方原文` 始终使用文章 canonical
+URL，不使用图片 URL。
 
 除平台管理员外，上述文档操作均校验 `organization_id`。跨机构访问返回 403，记录不存在
 返回 404。`WEB_ARTICLE` 的 `storage_path` 可以为空；此时
@@ -114,7 +118,7 @@ v1.1 通用结构还包括：
 - `GET /api/public/items/{slug}/original-file`：仅已发布且发布时显式设置 `allowPublicOriginal=true` 的材料可用；同样支持字节范围读取和内容 SHA-256 校验。
 - `POST|DELETE /api/public/items/{id}/favorite`
 - `GET /api/public/assistant/suggestions`：根据当前已发布分类返回稳定推荐问题。
-- `POST /api/public/assistant/chat`：仅检索 `PUBLISHED` 内容并返回回答、行动建议、来源引用、安全提示和 `mode`。默认稳定降级值为 `retrieval`；显式启用且未超过每日次数/Token 预算时可返回 `ai`，External 失败自动降级。
+- `POST /api/public/assistant/chat`：状态问题由后端直接回答；公共服务问题通过可替换检索器仅召回 `PUBLISHED` 内容，并返回回答、行动建议、来源引用、安全提示和 `mode`。`mode` 为 `status`、`retrieval`、`ai` 或 `general_ai`；显式启用且未超过每日次数/Token 预算时，有依据问题可返回 `ai`，低风险无依据问题可返回明确标注的 `general_ai`，External 失败安全降级。医疗诊断、政策资格、金额、办理材料等高风险问题无依据时拒绝猜测。
 - `POST /api/public/items/{id}/view`：仅对仍为 `PUBLISHED` 的内容记录一次匿名浏览事件，不保存用户问题或身份信息。
 
 助手请求示例：
@@ -136,12 +140,15 @@ AI 服务内部接口：
 - `POST /internal/assistant/answer`：接收用户问题和编号证据，返回短句回答、1—3 条行动
   建议、实际使用的引用编号、model、request_id、token 和耗时。仅在
   `ASSISTANT_EXTERNAL_ENABLED=true` 时可用；自动测试使用本地 Mock HTTP Server。
+- `POST /internal/assistant/general-answer`：只处理无已发布依据的低风险通用问题，并在
+  上层标注“通用 AI 参考”；高风险问题不会调用该接口。
 
-平台运营接口：
+平台运营接口（机构端路由 `/operations`，仅平台管理员可见）：
 
-- `GET /api/operation-metrics`：仅 `PLATFORM_ADMIN`，返回来源、发现、成功采集、去重、
-  待审核、已发布、失败、平均处理耗时、AI 次数/Token/成功率、浏览、收藏、助手提问/
-  引用率和人工修改率。读取时按日期幂等保存 `daily_operation_snapshot`，无数据返回 0。
+- `GET /api/operation-metrics`：仅 `PLATFORM_ADMIN`，返回来源启停及最近状态、今日发现/
+  采集/重复/失败、AI 队列和 Token 预算、待审图片候选、待审/已发布内容、平均采集和
+  AI 耗时、最近未解决错误及失败来源，并保留浏览、收藏、助手引用和人工修改率等运营
+  聚合。读取时按日期幂等保存 `daily_operation_snapshot`，无数据返回 0。
 
 本地服务文档与健康检查：
 
