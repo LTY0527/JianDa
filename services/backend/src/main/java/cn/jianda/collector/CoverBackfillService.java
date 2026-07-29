@@ -30,19 +30,23 @@ public class CoverBackfillService {
     private final WebArticleService webArticleService;
     private final ImageCandidateService imageCandidateService;
     private final Path uploadRoot;
+    private final boolean enabled;
 
     public CoverBackfillService(
             JdbcTemplate jdbc, AiClient aiClient, WebArticleService webArticleService,
             ImageCandidateService imageCandidateService,
-            @Value("${jianda.upload-dir}") String uploadDir) {
+            @Value("${jianda.upload-dir}") String uploadDir,
+            @Value("${jianda.crawl.historical-cover-backfill-enabled:true}") boolean enabled) {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
         this.webArticleService = webArticleService;
         this.imageCandidateService = imageCandidateService;
         this.uploadRoot = Paths.get(uploadDir).toAbsolutePath().normalize();
+        this.enabled = enabled;
     }
 
     public Map<String, Object> preview(BackfillFilter filter) {
+        assertEnabled();
         List<Map<String, Object>> items = candidates(filter);
         Map<String, Long> byType = new LinkedHashMap<>();
         for (String type : List.of("WEB_ARTICLE", "PDF", "IMAGE")) {
@@ -53,6 +57,7 @@ public class CoverBackfillService {
     }
 
     public Map<String, Object> execute(BackfillFilter filter, AuthUser user) {
+        assertEnabled();
         List<Map<String, Object>> items = candidates(filter);
         int updated = 0;
         int candidatesCreated = 0;
@@ -225,6 +230,12 @@ public class CoverBackfillService {
 
     private static String text(Object value) {
         return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private void assertEnabled() {
+        if (!enabled) {
+            throw new BusinessException(503, "历史封面补齐能力当前未启用");
+        }
     }
 
     public record BackfillFilter(Boolean onlyMissing, Long sourceId, String contentKind,

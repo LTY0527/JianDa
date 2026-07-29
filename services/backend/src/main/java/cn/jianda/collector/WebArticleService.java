@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Service;
@@ -30,14 +31,18 @@ public class WebArticleService {
     private final AiClient aiClient;
     private final AiQueueService aiQueueService;
     private final ImageCandidateService imageCandidateService;
+    private final boolean webImageCandidatesEnabled;
     private final Map<String, CachedPreview> previews = new ConcurrentHashMap<>();
 
     public WebArticleService(JdbcTemplate jdbc, AiClient aiClient, AiQueueService aiQueueService,
-                             ImageCandidateService imageCandidateService) {
+                             ImageCandidateService imageCandidateService,
+                             @Value("${jianda.crawl.web-image-candidates-enabled:true}")
+                             boolean webImageCandidatesEnabled) {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
         this.aiQueueService = aiQueueService;
         this.imageCandidateService = imageCandidateService;
+        this.webImageCandidatesEnabled = webImageCandidatesEnabled;
     }
 
     public List<Map<String, Object>> registries() {
@@ -71,7 +76,8 @@ public class WebArticleService {
         try {
             result = new LinkedHashMap<>(aiClient.previewWebArticle(
                     url,
-                    Boolean.TRUE.equals(registry.get("allow_image_candidates"))
+                    webImageCandidatesEnabled
+                            && Boolean.TRUE.equals(registry.get("allow_image_candidates"))
             ));
         } catch (RuntimeException exception) {
             throw new BusinessException(502, safeMessage(exception, "网页暂时无法访问或解析"));
@@ -86,7 +92,8 @@ public class WebArticleService {
         result.put("authority_level", registry.get("authority_level"));
         result.put("source_registry_id", registry.get("id"));
         boolean allowImageCache = Boolean.TRUE.equals(registry.get("allow_image_cache"));
-        boolean allowImageCandidates = Boolean.TRUE.equals(registry.get("allow_image_candidates"));
+        boolean allowImageCandidates = webImageCandidatesEnabled
+                && Boolean.TRUE.equals(registry.get("allow_image_candidates"));
         result.put("allow_image_cache", allowImageCache);
         result.put("allow_image_candidates", allowImageCandidates);
         if (!allowImageCandidates) {
@@ -113,7 +120,7 @@ public class WebArticleService {
         String url = normalizeUrl(rawUrl);
         Map<String, Object> raw;
         try {
-            raw = new LinkedHashMap<>(aiClient.previewWebArticle(url, true));
+            raw = new LinkedHashMap<>(aiClient.previewWebArticle(url, webImageCandidatesEnabled));
         } catch (RuntimeException exception) {
             throw new BusinessException(502, safeMessage(exception, "网页暂时无法访问或解析"));
         }
