@@ -12,7 +12,10 @@
 - `POST /api/documents/metadata-preview`：上传 PDF/PNG/JPG 后预识别标题、来源、文号和材料内权威证据；不创建正式文档或处理任务。
 - `POST /api/documents`，`POST /api/documents/{id}/upload`
 - `GET /api/documents`，`GET /api/documents/{id}`
-- `POST /api/documents/{id}/process`
+- `POST /api/documents/{id}/process`：创建或复用后台处理任务并立即返回
+  `documentId`、`jobId`、`status`、`stage` 和 `progress`；真实 AI 在后台执行。
+- `GET /api/documents/{id}`：除材料详情外返回最近处理任务、阶段、进度、章节、Token、
+  耗时、缓存与失败信息，供处理页轮询和刷新恢复。
 - `GET /api/documents/{id}/jobs|segments|fields|generated`
 - `GET /api/documents/{id}/original-file`：需要 JWT 和文档所属机构权限；返回原始 PDF/PNG/JPG，支持 `Range`、`ETag` 和 `X-Content-SHA256`。默认 `inline` 供阅读器在线读取；传 `download=true` 时返回 `attachment` 和原始文件名。
 
@@ -77,6 +80,12 @@ v1.1 通用结构还包括：
 - `POST /api/source-registries/{id}/discover`：对单个启用来源执行一次有界发现；只返回候选 URL，不创建材料、不调用 AI。
 - `POST /api/source-registries/{id}/shadow`：抓取指定候选并返回正文、封面策略和图片候选预览；不创建材料、不调用 AI、不发布。
 - `POST /api/source-registries/{id}/collect`：确认指定候选后创建材料并进入 `WAITING_APPROVAL`；不会自动审核或发布。
+- `POST /api/source-registries/{id}/collect-batch`：请求体为已勾选的 canonical URL 列表；
+  只保存所选未重复内容并加入 AI 等待队列，不自动审核或发布。
+- `POST /api/source-registries/quick-preview`：安全预览未知官方 URL，返回 canonical、域名、
+  robots、页面标题和网站/公众号身份，不创建来源或材料。
+- `POST /api/source-registries/quick-confirm`：仅平台管理员确认官方性质、保存来源身份并按
+  选定模式继续导入；微信公众号使用账号主体、biz 和指纹，不按共享域名合并不同账号。
 - `GET /api/crawl-tasks`、`GET /api/crawl-tasks/{id}`：按状态/来源查看任务计数、阶段、错误摘要和逐条错误队列。
 - `POST /api/crawl-tasks`：创建采集任务。
 - `POST /api/crawl-tasks/{id}/cancel`：取消仍可取消的任务。
@@ -88,6 +97,13 @@ v1.1 通用结构还包括：
 - `GET /api/web-articles/{documentId}/image-candidates`：查看候选 URL、来源页、来源名、发现方式、alt、尺寸、MIME、hash、缓存、权利和审核状态。
 - `POST /api/web-articles/image-candidates/{candidateId}/approve`：请求体为 `sourceName`、`usageBasis`；二者均不能为空。
 - `POST /api/web-articles/image-candidates/{candidateId}/reject`：记录拒绝原因并安全回退分类默认图。
+- `POST /api/cover-backfill/preview`：仅平台管理员；按缺失封面、来源、内容类型、发布状态
+  和日期预览历史网页/PDF/图片范围，不修改材料。
+- `POST /api/cover-backfill/execute`：仅平台管理员；最多处理本次预览规则命中的 100 条，
+  返回扫描、公开封面更新、候选新增、策略自动确认和失败明细。网页图片只有来源明确允许
+  缓存且策略已审核时才下载公开；PDF 第一页和机构上传图片可作为本地可追溯封面。
+- `GET /api/public/items/{slug}/cover`：读取已审核本地封面，返回正确图片 MIME、ETag 和
+  30 天公开缓存头，不暴露磁盘路径。
 - `POST /api/web-articles/{documentId}/recrawl`：正文不变时返回缓存结果；已发布正文变化时创建带 `version_root_id`、`previous_version_id`、`version_no` 和 hash 变化摘要的新待审核版本，旧版本继续公开。
 
 ### Phase 9.3 AI 队列、预算与连续阅读
