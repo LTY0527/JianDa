@@ -1,13 +1,12 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { acceptanceArtifactPath } from "./support/acceptanceArtifacts";
 
 const institutionUrl =
   process.env.JIANDA_INSTITUTION_TEST_URL ?? "http://127.0.0.1:5173";
 const h5Url = process.env.JIANDA_H5_TEST_URL ?? "http://127.0.0.1:5174";
-const artifactDir = path.resolve("artifacts/phase7-3");
-fs.mkdirSync(artifactDir, { recursive: true });
 
 async function login(page: Page) {
   await page.goto(`${institutionUrl}/login`);
@@ -24,13 +23,17 @@ async function assertRendered(page: Page, heading: string | RegExp) {
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 }
 
-async function screenshot(page: Page, name: string) {
+async function screenshot(page: Page, testInfo: TestInfo, name: string) {
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path: path.join(artifactDir, name), fullPage: false });
+  const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
+  await page.screenshot({
+    path: acceptanceArtifactPath(testInfo, name, viewport),
+    fullPage: false,
+  });
 }
 
 test.describe("Phase 7.3 rendered acceptance", () => {
-  test("用户端五个一级页面在 375px 可阅读且固定导航不遮挡结尾", async ({ page }) => {
+  test("用户端五个一级页面在 375px 可阅读且固定导航不遮挡结尾", async ({ page }, testInfo) => {
     const consoleErrors: string[] = [];
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
@@ -64,12 +67,12 @@ test.describe("Phase 7.3 rendered acceptance", () => {
           });
         }, { message: `${route} 最后一块内容被底部导航遮挡` })
         .toBeFalsy();
-      await screenshot(page, file);
+      await screenshot(page, testInfo, file);
     }
     expect(consoleErrors).toEqual([]);
   });
 
-  test("用户端详情、平板和桌面视口可阅读", async ({ page }) => {
+  test("用户端详情、平板和桌面视口可阅读", async ({ page }, testInfo) => {
     const checks = [
       [375, 812, "/guide/social-security-card-renewal", "社会保障卡到期换领指南", "h5-guide-detail-375.png"],
       [375, 812, "/news/summer-heat-health", "高温天气老年人健康防护提醒", "h5-news-detail-375.png"],
@@ -80,7 +83,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
       await page.setViewportSize({ width, height });
       await page.goto(`${h5Url}${route}`);
       await assertRendered(page, heading);
-      await screenshot(page, file);
+      await screenshot(page, testInfo, file);
     }
   });
 
@@ -109,11 +112,11 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     }
   });
 
-  test("查看原文下载按钮会产生可保存的文本文件", async ({ page }) => {
+  test("查看原文下载按钮会产生可保存的文本文件", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`${h5Url}/original/social-security-card-renewal`);
     await assertRendered(page, "提取文本");
-    await screenshot(page, "h5-original-375.png");
+    await screenshot(page, testInfo, "h5-original-375.png");
     await page.evaluate(() => {
       const original = URL.createObjectURL.bind(URL);
       URL.createObjectURL = (object: Blob | MediaSource) => {
@@ -139,7 +142,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     expect(content.byteLength).toBeGreaterThan(100);
     expect(content.toString("utf8")).toContain("社会保障卡到期换领指南");
     await expect(page.getByRole("status")).toContainText("原文已开始下载");
-    await screenshot(page, "h5-original-download-success-375.png");
+    await screenshot(page, testInfo, "h5-original-download-success-375.png");
   });
 
   test("详情和原文直接访问时使用正确的站内安全返回", async ({ page }) => {
@@ -268,7 +271,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     expect(focus.outlineWidth).toBe("3px");
   });
 
-  test("机构端主要验收页面可访问并截图", async ({ page }) => {
+  test("机构端主要验收页面可访问并截图", async ({ page }, testInfo) => {
     const consoleErrors: string[] = [];
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
@@ -276,7 +279,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${institutionUrl}/login`);
     await assertRendered(page, "让公共服务信息 更清楚、更好办");
-    await screenshot(page, "admin-login-1440.png");
+    await screenshot(page, testInfo, "admin-login-1440.png");
     await login(page);
 
     const pages = [
@@ -289,7 +292,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     for (const [route, heading, file] of pages) {
       await page.goto(`${institutionUrl}${route}`);
       await assertRendered(page, heading);
-      await screenshot(page, file);
+      await screenshot(page, testInfo, file);
     }
 
     const token = await page.evaluate(() => localStorage.getItem("jianda_token"));
@@ -297,7 +300,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     const documentId = (await publicDetail.json()).data.document_id;
     await page.goto(`${institutionUrl}/documents/${documentId}/review`);
     await assertRendered(page, "原文对照审核");
-    await screenshot(page, "admin-review-1440.png");
+    await screenshot(page, testInfo, "admin-review-1440.png");
     expect(token).toBeTruthy();
     expect(consoleErrors).toEqual([]);
   });
