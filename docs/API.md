@@ -114,7 +114,8 @@ v1.1 通用结构还包括：
 - `GET /api/public/items/{slug}/original-file`：仅已发布且发布时显式设置 `allowPublicOriginal=true` 的材料可用；同样支持字节范围读取和内容 SHA-256 校验。
 - `POST|DELETE /api/public/items/{id}/favorite`
 - `GET /api/public/assistant/suggestions`：根据当前已发布分类返回稳定推荐问题。
-- `POST /api/public/assistant/chat`：仅检索 `PUBLISHED` 内容并返回回答、来源引用、安全提示和 `mode`；当前稳定降级值为 `retrieval`，预留的外部模型实现可返回 `ai`。
+- `POST /api/public/assistant/chat`：仅检索 `PUBLISHED` 内容并返回回答、行动建议、来源引用、安全提示和 `mode`。默认稳定降级值为 `retrieval`；显式启用且未超过每日次数/Token 预算时可返回 `ai`，External 失败自动降级。
+- `POST /api/public/items/{id}/view`：仅对仍为 `PUBLISHED` 的内容记录一次匿名浏览事件，不保存用户问题或身份信息。
 
 助手请求示例：
 
@@ -125,7 +126,22 @@ v1.1 通用结构还包括：
 }
 ```
 
-`contextSlug` 可省略；从办事详情提问时用于优先匹配当前材料。响应 `data` 包含 `answer`、`citations` 和 `disclaimer`。每条引用包含 `title`、`slug`、`kind`、`category`、`sourceName`、`publishedAt` 和 `quote`。找不到可靠依据时 `citations` 为空，回答不会补充未发布事实。
+`contextSlug` 可省略；从办事详情提问时用于优先匹配当前材料。响应 `data` 包含
+`answer`、`actions`、`citations`、`disclaimer` 和 `mode`。每条引用包含
+`title`、`slug`、`kind`、`category`、`sourceName`、`publishedAt` 和 `quote`。
+找不到可靠依据时 `citations` 为空并明确返回“当前已发布内容中没有可靠答案。”
+
+AI 服务内部接口：
+
+- `POST /internal/assistant/answer`：接收用户问题和编号证据，返回短句回答、1—3 条行动
+  建议、实际使用的引用编号、model、request_id、token 和耗时。仅在
+  `ASSISTANT_EXTERNAL_ENABLED=true` 时可用；自动测试使用本地 Mock HTTP Server。
+
+平台运营接口：
+
+- `GET /api/operation-metrics`：仅 `PLATFORM_ADMIN`，返回来源、发现、成功采集、去重、
+  待审核、已发布、失败、平均处理耗时、AI 次数/Token/成功率、浏览、收藏、助手提问/
+  引用率和人工修改率。读取时按日期幂等保存 `daily_operation_snapshot`，无数据返回 0。
 
 本地服务文档与健康检查：
 
