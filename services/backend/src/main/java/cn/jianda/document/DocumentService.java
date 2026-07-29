@@ -1,6 +1,7 @@
 package cn.jianda.document;
 
 import cn.jianda.ai.AiClient;
+import cn.jianda.ai.AiQueueService;
 import cn.jianda.ai.AiServiceException;
 import cn.jianda.common.BusinessException;
 import cn.jianda.security.AuthUser;
@@ -39,13 +40,16 @@ public class DocumentService {
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of("pdf", "png", "jpg", "jpeg");
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
+    private final AiQueueService aiQueueService;
     private final ObjectMapper objectMapper;
     private final Path uploadRoot;
 
-    public DocumentService(JdbcTemplate jdbc, AiClient aiClient, ObjectMapper objectMapper,
+    public DocumentService(JdbcTemplate jdbc, AiClient aiClient, AiQueueService aiQueueService,
+                           ObjectMapper objectMapper,
                            @Value("${jianda.upload-dir}") String uploadDir) throws IOException {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
+        this.aiQueueService = aiQueueService;
         this.objectMapper = objectMapper;
         this.uploadRoot = Paths.get(uploadDir).toAbsolutePath().normalize();
         Files.createDirectories(uploadRoot);
@@ -150,22 +154,39 @@ public class DocumentService {
     }
 
     @Transactional(noRollbackFor = BusinessException.class)
-    @SuppressWarnings("unchecked")
     public Map<String, Object> process(long id, AuthUser user) {
+        return processInternal(id, user, null);
+    }
+
+    @Transactional(noRollbackFor = BusinessException.class)
+    public Map<String, Object> processQueued(long queueId, AuthUser user) {
+        AiQueueService.Reservation reservation = aiQueueService.reserveQueue(queueId);
+        if (!reservation.allowed()) return waitingResult(reservation);
+        try {
+            return processInternal(reservation.documentId(), user, reservation);
+        } catch (RuntimeException exception) {
+            aiQueueService.release(reservation, "PRE_AI_FAILURE");
+            throw exception;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> processInternal(long id, AuthUser user,
+                                                AiQueueService.Reservation preReserved) {
         Map<String, Object> document = detail(id, user);
         String rawText = document.get("raw_text") == null ? "" : document.get("raw_text").toString();
         if (rawText.isBlank()) {
             throw new BusinessException(400, "材料正文为空，请先上传可提取文本的 PDF 或录入正文");
         }
         ensureTraceSegment(id, rawText);
-        jdbc.update("DELETE FROM extracted_field WHERE document_id=?", id);
-        jdbc.update("DELETE FROM generated_content WHERE document_id=?", id);
         String traceId = UUID.randomUUID().toString();
         jdbc.update("INSERT INTO processing_job(document_id,job_type,status,stage,progress,trace_id,started_at) "
                         + "VALUES (?,'FULL_PIPELINE','PROCESSING','EXTRACTING_FACTS',25,?,CURRENT_TIMESTAMP)",
                 id, traceId);
         Long jobId = jdbc.queryForObject("SELECT MAX(id) FROM processing_job WHERE document_id=?", Long.class, id);
         jdbc.update("UPDATE source_document SET processing_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+        AiQueueService.Reservation reservation = preReserved;
+        int returnedActualTokens = 0;
         try {
             boolean publicInformation = document.get("content_source_id") != null;
             List<Map<String, Object>> sourceSegments = jdbc.query(
@@ -190,11 +211,31 @@ public class DocumentService {
             if ("WEB_ARTICLE".equals(document.get("source_type"))) {
                 context.put("prompt_version", "web-v1.1");
             }
-            Map<String, Object> result = aiClient.analyze(document.get("title").toString(), rawText,
-                    publicInformation ? "public_news" : "guide",
-                    sourceName,
-                    sourceSegments,
-                    context);
+            reservation = preReserved == null
+                    ? aiQueueService.reserveForManual(id, jobId, user) : preReserved;
+            if (!reservation.allowed()) {
+                jdbc.update("UPDATE processing_job SET status='WAITING_BUDGET',stage='WAITING_BUDGET',progress=25,"
+                                + "error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                        reservation.reasonSummary(), jobId);
+                jdbc.update("UPDATE source_document SET processing_status='UPLOADED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+                log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "WAITING_BUDGET");
+                return waitingResult(reservation);
+            }
+            jdbc.update("DELETE FROM extracted_field WHERE document_id=?", id);
+            jdbc.update("DELETE FROM generated_content WHERE document_id=?", id);
+            Map<String, Object> result;
+            try {
+                aiQueueService.markExecutionStarted(reservation);
+                result = aiClient.analyze(document.get("title").toString(), rawText,
+                        publicInformation ? "public_news" : "guide",
+                        sourceName,
+                        sourceSegments,
+                        context);
+            } catch (RuntimeException exception) {
+                aiQueueService.fail(reservation, tokensFrom(exception),
+                        providerFrom(exception), modelFrom(exception), "AI_CALL_FAILED");
+                throw exception;
+            }
             jdbc.update("UPDATE processing_job SET stage='VALIDATING_TRACE',progress=60 WHERE id=?", jobId);
             List<PreparedField> fields = prepareFields(id, result);
             long persistenceStarted = System.nanoTime();
@@ -240,7 +281,10 @@ public class DocumentService {
             long persistenceMs = Math.max(0, (System.nanoTime() - persistenceStarted) / 1_000_000);
             Map<String, Object> metrics = result.get("metrics") instanceof Map<?, ?> rawMetrics
                     ? (Map<String, Object>) rawMetrics : Map.of();
+            returnedActualTokens = (int) metric(metrics, "total_tokens");
             long totalMs = metric(metrics, "total_ms") + persistenceMs;
+            aiQueueService.settle(reservation, returnedActualTokens, true,
+                    nullableString(metrics.get("provider")), nullableString(metrics.get("model")));
             jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,"
                             + "schema_version=?,cache_hit=?,text_extract_ms=?,fact_extract_ms=?,trace_validation_ms=?,"
                             + "accessible_rewrite_ms=?,persistence_ms=?,total_ms=?,prompt_tokens=?,completion_tokens=?,"
@@ -274,6 +318,10 @@ public class DocumentService {
             return Map.of("documentId", id, "status", "WAITING_REVIEW", "stage", "SUCCEEDED",
                     "progress", 100, "cacheHit", Boolean.TRUE.equals(metrics.get("cache_hit")), "totalMs", totalMs);
         } catch (RuntimeException exception) {
+            if (reservation != null && reservation.allowed()) {
+                aiQueueService.fail(reservation, returnedActualTokens, providerFrom(exception), modelFrom(exception),
+                        "AI_CALL_OR_PERSISTENCE_FAILED");
+            }
             LOGGER.error("Document processing failed for document {}", id, exception);
             String errorMessage = diagnosticMessage(exception);
             String failedStage = exception instanceof AiServiceException aiFailure
@@ -366,6 +414,33 @@ public class DocumentService {
         return message.toString();
     }
 
+    private static Map<String, Object> waitingResult(AiQueueService.Reservation reservation) {
+        Map<String, Object> waiting = new LinkedHashMap<>();
+        waiting.put("documentId", reservation.documentId());
+        waiting.put("status", "WAITING_BUDGET");
+        waiting.put("stage", "WAITING_BUDGET");
+        waiting.put("reasonCode", reservation.reasonCode());
+        waiting.put("reason", reservation.reasonSummary());
+        waiting.put("estimatedRecoveryAt", reservation.estimatedRecoveryAt());
+        waiting.put("actualTokens", 0);
+        return waiting;
+    }
+
+    private static int tokensFrom(RuntimeException exception) {
+        if (!(exception instanceof AiServiceException failure)) return 0;
+        Object value = failure.detail().get("actual_tokens");
+        if (!(value instanceof Number)) value = failure.detail().get("total_tokens");
+        return value instanceof Number number ? Math.max(0, number.intValue()) : 0;
+    }
+
+    private static String providerFrom(RuntimeException exception) {
+        return exception instanceof AiServiceException failure ? failure.stringValue("provider") : "";
+    }
+
+    private static String modelFrom(RuntimeException exception) {
+        return exception instanceof AiServiceException failure ? failure.stringValue("model") : "";
+    }
+
     private static String defaultString(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
     }
@@ -398,6 +473,15 @@ public class DocumentService {
                 id, traceId, intValue(previous.get("retry_count")) + 1);
         Long jobId = jdbc.queryForObject("SELECT MAX(id) FROM processing_job WHERE document_id=?", Long.class, id);
         jdbc.update("UPDATE source_document SET processing_status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+        AiQueueService.Reservation reservation = aiQueueService.reserveForManual(id, jobId, user);
+        if (!reservation.allowed()) {
+            jdbc.update("UPDATE processing_job SET status='WAITING_BUDGET',stage='WAITING_BUDGET',progress=60,"
+                            + "error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    reservation.reasonSummary(), jobId);
+            jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+            return waitingResult(reservation);
+        }
+        int returnedActualTokens = 0;
         try {
             List<Map<String, Object>> sourceSegments = jdbc.query(
                     "SELECT id,page_no,text FROM document_segment WHERE document_id=? ORDER BY page_no,segment_no",
@@ -409,14 +493,25 @@ public class DocumentService {
             context.put("trace_id", traceId);
             context.put("content_kind", document.get("content_kind"));
             context.put("prompt_version", "WEB_ARTICLE".equals(document.get("source_type")) ? "web-v1.1" : previous.get("prompt_version"));
-            Map<String, Object> result = aiClient.rewrite(String.valueOf(document.get("title")),
-                    String.valueOf(document.get("raw_text")),
-                    document.get("content_source_id") != null ? "public_news" : "guide",
-                    String.valueOf(document.getOrDefault("source_name", "")), sourceSegments, context, checkpoint);
+            Map<String, Object> result;
+            try {
+                aiQueueService.markExecutionStarted(reservation);
+                result = aiClient.rewrite(String.valueOf(document.get("title")),
+                        String.valueOf(document.get("raw_text")),
+                        document.get("content_source_id") != null ? "public_news" : "guide",
+                        String.valueOf(document.getOrDefault("source_name", "")), sourceSegments, context, checkpoint);
+            } catch (RuntimeException exception) {
+                aiQueueService.fail(reservation, tokensFrom(exception),
+                        providerFrom(exception), modelFrom(exception), "AI_CALL_FAILED");
+                throw exception;
+            }
             jdbc.update("DELETE FROM generated_content WHERE document_id=?", id);
             saveRewriteResult(id, result, document.get("content_source_id") != null ? document : null);
             Map<String, Object> metrics = result.get("metrics") instanceof Map<?, ?> map
                     ? (Map<String, Object>) map : Map.of();
+            returnedActualTokens = (int) metric(metrics, "total_tokens");
+            aiQueueService.settle(reservation, returnedActualTokens, true,
+                    nullableString(metrics.get("provider")), nullableString(metrics.get("model")));
             jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,accessible_rewrite_ms=?,"
                             + "prompt_tokens=?,completion_tokens=?,total_tokens=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
                     metric(metrics, "accessible_rewrite_ms"), metric(metrics, "prompt_tokens"),
@@ -424,6 +519,8 @@ public class DocumentService {
             jdbc.update("UPDATE source_document SET processing_status='WAITING_REVIEW',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             return Map.of("documentId", id, "status", "WAITING_REVIEW", "stage", "SUCCEEDED", "progress", 100);
         } catch (RuntimeException exception) {
+            aiQueueService.fail(reservation, returnedActualTokens, providerFrom(exception), modelFrom(exception),
+                    "AI_CALL_OR_PERSISTENCE_FAILED");
             String failedStage = exception instanceof AiServiceException aiFailure
                     ? defaultString(aiFailure.stringValue("stage"), "accessible_rewrite") : "accessible_rewrite";
             jdbc.update("UPDATE processing_job SET status='FAILED',stage=?,last_failed_stage=?,error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",

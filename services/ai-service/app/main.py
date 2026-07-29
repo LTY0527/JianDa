@@ -3,7 +3,7 @@ import logging
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 
 from app.extraction import ALLOWED_SUFFIXES, extract_file
 from app.metadata import detect_metadata
@@ -63,7 +63,9 @@ async def extract_text(file: UploadFile = File(...)) -> ExtractTextResult:
 
 
 @app.post("/internal/metadata-preview", response_model=MetadataPreview)
-async def metadata_preview(file: UploadFile = File(...)) -> MetadataPreview:
+async def metadata_preview(
+    file: UploadFile = File(...), no_llm: bool = Query(True)
+) -> MetadataPreview:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
         raise HTTPException(status_code=400, detail="仅支持 PDF、PNG、JPG 文件")
@@ -73,7 +75,8 @@ async def metadata_preview(file: UploadFile = File(...)) -> MetadataPreview:
     try:
         preview, preview_text = detect_metadata(path, file.filename or "")
         if (
-            preview.authority_status != "DOCUMENT_EVIDENCE"
+            not no_llm
+            and preview.authority_status != "DOCUMENT_EVIDENCE"
             and os.getenv("LLM_PROVIDER", "mock").lower() == "external"
             and preview_text.strip()
         ):

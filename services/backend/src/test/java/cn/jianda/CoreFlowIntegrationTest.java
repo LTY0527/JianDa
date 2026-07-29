@@ -37,16 +37,23 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:jianda-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "jianda.upload-dir=./target/test-uploads"
+        "jianda.upload-dir=./target/test-uploads",
+        "jianda.crawl.daily-ai-max-articles=1000",
+        "jianda.crawl.daily-ai-max-tokens=10000000"
 })
 @AutoConfigureMockMvc
 class CoreFlowIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper objectMapper;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @MockitoBean AiClient aiClient;
 
     @BeforeEach
     void configureAi() {
+        jdbc.update("DELETE FROM ai_execution_audit");
+        jdbc.update("DELETE FROM ai_budget_reservation");
+        jdbc.update("DELETE FROM ai_budget_usage");
+        jdbc.update("DELETE FROM ai_processing_queue");
         when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap())).thenReturn(Map.of(
                 "fields", List.of(
                         Map.of("field_type", "TARGET_AUDIENCE", "label", "适用对象", "value", "年满80周岁的本市户籍老人",
@@ -386,6 +393,32 @@ class CoreFlowIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
         verify(aiClient).rewrite(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap(), anyMap());
         verify(aiClient).analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap());
+    }
+
+    @Test
+    void budgetRejectionPreservesExistingFieldsAndGeneratedContent() throws Exception {
+        String auth = "Bearer " + login();
+        String created = mvc.perform(post("/api/documents").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"预算保留结果测试\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+        String source = "预算拒绝时必须保留已经审核中的结果。";
+        mvc.perform(multipart("/api/documents/{id}/upload", documentId)
+                        .file(new MockMultipartFile("file", "预算.pdf", "application/pdf", "%PDF".getBytes()))
+                        .header("Authorization", auth).param("manualText", source))
+                .andExpect(status().isOk());
+        jdbc.update("INSERT INTO extracted_field(document_id,field_type,field_label,field_value,page_no,source_quote,confidence) "
+                + "VALUES (?,'TEST','既有字段','保留',1,?,0.9)", documentId, source);
+        jdbc.update("INSERT INTO generated_content(document_id,content_type,title,plain_text) "
+                + "VALUES (?,'SUMMARY','既有摘要','必须保留')", documentId);
+        jdbc.update("INSERT INTO ai_budget_usage(budget_date,scope_type,scope_id,settled_articles) "
+                + "VALUES (CURRENT_DATE,'GLOBAL',0,1000)");
+        mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_BUDGET"));
+        org.junit.jupiter.api.Assertions.assertEquals(1,
+                jdbc.queryForObject("SELECT COUNT(*) FROM extracted_field WHERE document_id=?", Integer.class, documentId));
+        org.junit.jupiter.api.Assertions.assertEquals(1,
+                jdbc.queryForObject("SELECT COUNT(*) FROM generated_content WHERE document_id=?", Integer.class, documentId));
     }
 
     @Test

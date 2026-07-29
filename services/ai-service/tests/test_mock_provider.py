@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.extraction import extract_file
 from app.main import app
 from app.providers.external import ExternalProviderError
-from app.models import TextRequest
+from app.models import MetadataPreview, TextRequest
 from app.providers.mock import MockProvider
 
 
@@ -106,6 +106,30 @@ def test_pdf_extraction_saves_one_traceable_segment_per_page() -> None:
         assert result.text == "first page source\nsecond page source"
     finally:
         pdf_path.unlink(missing_ok=True)
+
+
+def test_metadata_preview_defaults_to_no_llm(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "external")
+    monkeypatch.setattr("app.main.detect_metadata", lambda path, filename: (
+        MetadataPreview(
+            title="待确认材料", source_name="", document_number="", source_type="",
+            authority_status="UNCONFIRMED", confidence=0.3, evidence_quote="",
+            evidence_type="FILENAME", page_no=1, warnings=[]
+        ),
+        "需要智能补充的正文",
+    ))
+
+    class ForbiddenExternal:
+        def preview_metadata(self, *args, **kwargs):
+            raise AssertionError("default metadata preview must not call external LLM")
+
+    monkeypatch.setattr("app.main.ExternalLlmProvider", ForbiddenExternal)
+    response = TestClient(app).post(
+        "/internal/metadata-preview",
+        files={"file": ("material.pdf", b"%PDF", "application/pdf")},
+    )
+    assert response.status_code == 200
+    assert response.json()["authority_status"] == "UNCONFIRMED"
 
 
 def test_health_and_unknown_analyze() -> None:

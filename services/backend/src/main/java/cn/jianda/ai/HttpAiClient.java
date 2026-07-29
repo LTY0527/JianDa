@@ -33,7 +33,7 @@ public class HttpAiClient implements AiClient {
         this.analyzeUri = URI.create(baseUrl + "/internal/analyze");
         this.rewriteUri = URI.create(baseUrl + "/internal/rewrite");
         this.extractUri = URI.create(baseUrl + "/internal/extract-text");
-        this.metadataUri = URI.create(baseUrl + "/internal/metadata-preview");
+        this.metadataUri = URI.create(baseUrl + "/internal/metadata-preview?no_llm=true");
         this.webPreviewUri = URI.create(baseUrl + "/internal/web-ingest/preview");
         this.articleDiscoveryUri = URI.create(baseUrl + "/internal/article-discovery");
     }

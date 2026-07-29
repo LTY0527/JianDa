@@ -1,8 +1,8 @@
 package cn.jianda.collector;
 
 import cn.jianda.ai.AiClient;
+import cn.jianda.ai.AiQueueService;
 import cn.jianda.common.BusinessException;
-import cn.jianda.document.DocumentService;
 import cn.jianda.security.AuthUser;
 import java.net.URI;
 import java.sql.PreparedStatement;
@@ -25,15 +25,15 @@ public class WebArticleService {
     private static final long PREVIEW_TTL_SECONDS = 15 * 60;
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
-    private final DocumentService documentService;
+    private final AiQueueService aiQueueService;
     private final ImageCandidateService imageCandidateService;
     private final Map<String, CachedPreview> previews = new ConcurrentHashMap<>();
 
-    public WebArticleService(JdbcTemplate jdbc, AiClient aiClient,
-                             DocumentService documentService, ImageCandidateService imageCandidateService) {
+    public WebArticleService(JdbcTemplate jdbc, AiClient aiClient, AiQueueService aiQueueService,
+                             ImageCandidateService imageCandidateService) {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
-        this.documentService = documentService;
+        this.aiQueueService = aiQueueService;
         this.imageCandidateService = imageCandidateService;
     }
 
@@ -196,9 +196,11 @@ public class WebArticleService {
                 registryId, documentId, text(preview.get("original_url")), jobCanonical, user.id());
         jdbc.update("UPDATE source_registry SET last_crawled_at=CURRENT_TIMESTAMP WHERE id=?", registryId);
         jdbc.update("UPDATE content_source SET last_imported_at=CURRENT_TIMESTAMP WHERE id=?", sourceId);
+        Map<String, Object> queued = aiQueueService.enqueue(documentId, registryId,
+                jdbc.queryForObject("SELECT MAX(id) FROM crawl_job WHERE document_id=?", Long.class, documentId));
         log(user, "IMPORT_WEB_ARTICLE", documentId, "SUCCESS");
         return Map.of("documentId", documentId, "status", "UPLOADED", "contentKind", contentKind,
-                "imageReviewRequired", !categoryDefault);
+                "imageReviewRequired", !categoryDefault, "aiQueueStatus", queued.get("status"));
     }
 
     @Transactional
@@ -291,25 +293,23 @@ public class WebArticleService {
                     documentId, rootId, nextVersion, oldHash, refreshedHash,
                     changeSummary(text(current.get("raw_text")), text(refreshed.get("extracted_text")), oldHash, refreshedHash),
                     newDocumentId);
-            Map<String, Object> processed = documentService.process(newDocumentId, user);
-            jdbc.update("UPDATE crawl_job SET status='WAITING_REVIEW',last_success_at=CURRENT_TIMESTAMP,"
-                            + "last_error=NULL,content_changed=TRUE,updated_at=CURRENT_TIMESTAMP WHERE document_id=?",
-                    newDocumentId);
-            jdbc.update("UPDATE crawl_job SET status='SUCCEEDED',last_error=NULL,"
-                            + "content_changed=TRUE,updated_at=CURRENT_TIMESTAMP WHERE document_id=?",
+            jdbc.update("UPDATE crawl_job SET content_changed=TRUE,last_success_at=CURRENT_TIMESTAMP,"
+                            + "last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE document_id=?",
                     documentId);
-            log(user, "CREATE_WEB_ARTICLE_VERSION", newDocumentId, "WAITING_REVIEW");
-            return Map.of(
-                    "documentId", newDocumentId,
-                    "previousDocumentId", documentId,
-                    "versionNo", nextVersion,
-                    "oldHash", oldHash,
-                    "newHash", refreshedHash,
-                    "changeSummary", changeSummary(text(current.get("raw_text")), text(refreshed.get("extracted_text")), oldHash, refreshedHash),
-                    "status", processed.get("status"),
-                    "contentKind", text(refreshed.get("content_kind")),
-                    "contentChanged", true,
-                    "cacheHit", processed.get("cacheHit"));
+            log(user, "CREATE_WEB_ARTICLE_VERSION", newDocumentId, "UPLOADED");
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("documentId", newDocumentId);
+            response.put("previousDocumentId", documentId);
+            response.put("versionNo", nextVersion);
+            response.put("oldHash", oldHash);
+            response.put("newHash", refreshedHash);
+            response.put("changeSummary", changeSummary(text(current.get("raw_text")), text(refreshed.get("extracted_text")), oldHash, refreshedHash));
+            response.put("status", "UPLOADED");
+            response.put("aiQueueStatus", created.get("aiQueueStatus"));
+            response.put("contentKind", text(refreshed.get("content_kind")));
+            response.put("contentChanged", true);
+            response.put("cacheHit", false);
+            return response;
         }
         String canonical = text(refreshed.get("canonical_url"));
         Integer duplicate = jdbc.queryForObject(

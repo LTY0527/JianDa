@@ -13,5 +13,7 @@ public record CrawlProperties(
         boolean autoAiEnabled,
         int maxFailureRetries,
         int dailyAiMaxArticles,
-        int dailyAiMaxTokens) {
+        int dailyAiMaxTokens,
+        int aiMaxInputCharacters,
+        int aiMaxArticlesPerTask) {
 }

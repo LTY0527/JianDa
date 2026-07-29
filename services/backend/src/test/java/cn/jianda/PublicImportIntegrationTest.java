@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -31,7 +32,9 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:jianda-public-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "jianda.upload-dir=./target/test-public-uploads"
+        "jianda.upload-dir=./target/test-public-uploads",
+        "jianda.crawl.daily-ai-max-articles=1000",
+        "jianda.crawl.daily-ai-max-tokens=10000000"
 })
 @AutoConfigureMockMvc
 class PublicImportIntegrationTest {
@@ -42,6 +45,10 @@ class PublicImportIntegrationTest {
 
     @BeforeEach
     void configureAi() {
+        jdbc.update("DELETE FROM ai_execution_audit");
+        jdbc.update("DELETE FROM ai_budget_reservation");
+        jdbc.update("DELETE FROM ai_budget_usage");
+        jdbc.update("DELETE FROM ai_processing_queue");
         jdbc.update("UPDATE source_registry SET allow_image_cache=FALSE WHERE domain='www.news.cn'");
         when(aiClient.previewWebArticle(anyString(), anyBoolean())).thenAnswer(invocation -> {
             String url = invocation.getArgument(0);
@@ -353,11 +360,13 @@ class PublicImportIntegrationTest {
                 Map.entry("robots_status", "ALLOWED"),
                 Map.entry("original_page_available", true),
                 Map.entry("warnings", List.of())));
+        org.mockito.Mockito.clearInvocations(aiClient);
         String versioned = mvc.perform(post("/api/web-articles/{id}/recrawl", documentId)
                         .header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.previousDocumentId").value(documentId))
-                .andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"))
+                .andExpect(jsonPath("$.data.status").value("UPLOADED"))
+                .andExpect(jsonPath("$.data.aiQueueStatus").value("WAITING_APPROVAL"))
                 .andExpect(jsonPath("$.data.contentChanged").value(true))
                 .andExpect(jsonPath("$.data.versionNo").value(2))
                 .andExpect(jsonPath("$.data.oldHash").value("c".repeat(64)))
@@ -365,6 +374,8 @@ class PublicImportIntegrationTest {
                 .andExpect(jsonPath("$.data.changeSummary").isNotEmpty())
                 .andReturn().getResponse().getContentAsString();
         long newDocumentId = objectMapper.readTree(versioned).path("data").path("documentId").asLong();
+        org.mockito.Mockito.verify(aiClient, never()).analyze(
+                anyString(), anyString(), anyString(), anyString(), anyList(), anyMap());
         org.junit.jupiter.api.Assertions.assertNotEquals(documentId, newDocumentId);
         mvc.perform(post("/api/web-articles/{id}/recrawl", newDocumentId)
                         .header("Authorization", auth))

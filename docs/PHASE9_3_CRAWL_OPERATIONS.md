@@ -53,6 +53,12 @@ Phase 9.3-A 连续阅读收尾（2026-07-29）：
 - 图片候选从 OpenGraph、JSON-LD 和正文图片统一持久化 URL、来源页、方法、alt、尺寸、MIME、hash、缓存、权利和审核状态；Logo/二维码/广告/头像/图标/追踪像素、小尺寸及异常比例继续过滤。发布前必须由人工填写来源和许可说明并确认，拒绝或无候选时回退分类默认图。
 - ai-service 图片过滤回归 7 项、institution-web 图片候选审核 typecheck/生产构建通过；未调用真实 AI，未自动审核或发布。
 - 本阶段未调用真实 DeepSeek，未读取真实 .env。
+- Phase 9.3-F 增加持久化 `ai_processing_queue`、按日期/全局/来源原子预留与结算的 `ai_budget_usage` / `ai_budget_reservation`，以及只含来源、采集任务、材料、原因、预算类型、预计/实际 token、批准标记和 provider/model 非敏感标识的 `ai_execution_audit`。
+- 所有人工 `process` 和队列执行都在 `AiClient.analyze` 前完成预算判断；不足时正文、版本和事实检查点保持不变，状态为 `WAITING_BUDGET`，实际 token 固定为 0，返回原因和次日预算恢复时间，不计文章处理失败且没有自动反复重试。
+- 网页首次导入和新内容版本都会按正文 hash 同步 AI 队列。`CRAWL_AUTO_AI_ENABLED=false` 时仅进入 `WAITING_APPROVAL`；平台管理员批准后才可执行，产物仍是候选/草稿和 `WAITING_REVIEW`，不会自动审核或发布。
+- AI 服务失败时保留正文、版本和已有事实检查点，队列标记 `FAILED/AI_UNAVAILABLE`，允许再次人工批准并重试。审计不保存 key、Authorization、prompt 或响应全文。
+- Phase 9.3-F 离线 mock/stub 集成测试覆盖默认不调用、允许、来源/全局文章与 token 耗尽、过长、正文 hash 重复、并发预留、日期切换、人工批准及 AI 失败恢复；真实模型调用为 0。
+- 自动队列消费者只有在 `CRAWL_SCHEDULER_ENABLED=true` 且 `CRAWL_AUTO_AI_ENABLED=true` 时才消费有限批次；默认两个开关均为 false。预算等待和失败任务不会自动重新入队，必须由人工在恢复日期后执行或重新批准。元数据预览固定传递 `no_llm=true`，仅执行本地提取和规则识别。
 - 数据库与配置基础、来源管理和调度锁、通用文章发现与 Fixture、任务中心与错误队列、图片候选审核、内容变化版本、首页小幅优化及全量 Docker 验收仍待后续里程碑完成。
 
 ## 阻塞问题
