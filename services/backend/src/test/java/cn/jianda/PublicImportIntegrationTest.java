@@ -49,7 +49,8 @@ class PublicImportIntegrationTest {
         jdbc.update("DELETE FROM ai_budget_reservation");
         jdbc.update("DELETE FROM ai_budget_usage");
         jdbc.update("DELETE FROM ai_processing_queue");
-        jdbc.update("UPDATE source_registry SET allow_image_cache=FALSE WHERE domain='www.news.cn'");
+        jdbc.update("UPDATE source_registry SET allow_image_cache=FALSE,allow_image_candidates=FALSE "
+                + "WHERE domain='www.news.cn'");
         when(aiClient.previewWebArticle(anyString(), anyBoolean())).thenAnswer(invocation -> {
             String url = invocation.getArgument(0);
             return Map.ofEntries(
@@ -95,6 +96,7 @@ class PublicImportIntegrationTest {
                     Map.entry("original_html", "<main><p>老年人减重应保持吃动平衡。</p></main>"),
                     Map.entry("content_hash",
                             url.contains("approved-cover") ? "c".repeat(64)
+                                    : url.contains("candidates-without-cache") ? "9".repeat(64)
                                     : url.contains("organization-import") ? "d".repeat(64)
                                     : url.contains("platform-owned") ? "e".repeat(64)
                                     : "b".repeat(64)),
@@ -247,8 +249,41 @@ class PublicImportIntegrationTest {
     }
 
     @Test
+    void imageCandidatesCanBeReviewedWhenPublicImageCacheIsDisabled() throws Exception {
+        jdbc.update("UPDATE source_registry SET allow_image_cache=FALSE,allow_image_candidates=TRUE "
+                + "WHERE domain='www.news.cn'");
+        org.mockito.Mockito.clearInvocations(aiClient);
+        String auth = "Bearer " + login("platform_admin");
+        String url = "https://www.news.cn/test/candidates-without-cache.html";
+
+        mvc.perform(post("/api/web-articles/preview").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.allow_image_candidates").value(true))
+                .andExpect(jsonPath("$.data.allow_image_cache").value(false))
+                .andExpect(jsonPath("$.data.cover_image_type").value("ORIGINAL_COVER"))
+                .andExpect(jsonPath("$.data.image_cached").value(false));
+        verify(aiClient).previewWebArticle(url, true);
+
+        String imported = mvc.perform(post("/api/web-articles/import").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.imageReviewRequired").value(true))
+                .andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(imported).path("data").path("documentId").asLong();
+        mvc.perform(get("/api/web-articles/{id}/image-candidates", documentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].image_cached").value(false));
+    }
+
+    @Test
     void permittedSourceMayUseOriginalCoverButStillRequiresManualReview() throws Exception {
-        jdbc.update("UPDATE source_registry SET allow_image_cache=TRUE WHERE domain='www.news.cn'");
+        jdbc.update("UPDATE source_registry SET allow_image_cache=TRUE,allow_image_candidates=TRUE "
+                + "WHERE domain='www.news.cn'");
         String auth = "Bearer " + login("platform_admin");
         String url = "https://www.news.cn/test/approved-cover.html";
 

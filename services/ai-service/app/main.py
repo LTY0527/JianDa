@@ -191,7 +191,9 @@ async def web_ingest_preview(request: WebArticleRequest) -> WebArticlePreview:
     try:
         return await preview_web_article(
             request.url,
-            allow_image_download=request.allow_image_download,
+            allow_image_candidates=(
+                request.allow_image_candidates or request.allow_image_download
+            ),
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

@@ -51,10 +51,10 @@ public class HttpAiClient implements AiClient {
     }
 
     @Override
-    public Map<String, Object> previewWebArticle(String url, boolean allowImageDownload) {
+    public Map<String, Object> previewWebArticle(String url, boolean allowImageCandidates) {
         return sendJson(webPreviewUri, Map.of(
                 "url", url,
-                "allow_image_download", allowImageDownload
+                "allow_image_candidates", allowImageCandidates
         ), "web article preview", 90_000);
     }
 

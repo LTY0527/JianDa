@@ -398,6 +398,8 @@ class ArticleDiscoveryResponse(BaseModel):
 
 class WebArticleRequest(BaseModel):
     url: str = Field(min_length=8, max_length=1500)
+    allow_image_candidates: bool = False
+    # Kept for rolling upgrades between backend and AI service containers.
     allow_image_download: bool = False
 
 

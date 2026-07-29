@@ -68,7 +68,7 @@ public class WebArticleService {
         try {
             result = new LinkedHashMap<>(aiClient.previewWebArticle(
                     url,
-                    Boolean.TRUE.equals(registry.get("allow_image_cache"))
+                    Boolean.TRUE.equals(registry.get("allow_image_candidates"))
             ));
         } catch (RuntimeException exception) {
             throw new BusinessException(502, safeMessage(exception, "网页暂时无法访问或解析"));
@@ -83,8 +83,10 @@ public class WebArticleService {
         result.put("authority_level", registry.get("authority_level"));
         result.put("source_registry_id", registry.get("id"));
         boolean allowImageCache = Boolean.TRUE.equals(registry.get("allow_image_cache"));
+        boolean allowImageCandidates = Boolean.TRUE.equals(registry.get("allow_image_candidates"));
         result.put("allow_image_cache", allowImageCache);
-        if (!allowImageCache) {
+        result.put("allow_image_candidates", allowImageCandidates);
+        if (!allowImageCandidates) {
             result.put("cover_image_url", "");
             result.put("cover_image_type", "CATEGORY_DEFAULT");
             result.put("image_alt_text", text(result.get("title")));
@@ -97,8 +99,8 @@ public class WebArticleService {
         result.put("image_source_name", result.get("source_name"));
         result.put("image_source_url", canonical);
         result.put("image_license_note", allowImageCache
-                ? "白名单允许缓存，仍需人工确认图片使用范围"
-                : "未获得图片下载许可，已使用简达本地分类默认图");
+                ? "白名单允许在人工确认来源和使用依据后缓存，当前候选尚未公开"
+                : "仅生成机构端审核候选，不缓存或公开第三方图片");
         result.put("external_source_verified", true);
         previews.put(url, new CachedPreview(Instant.now().plusSeconds(PREVIEW_TTL_SECONDS), result));
         return result;

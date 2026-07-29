@@ -16,7 +16,7 @@ def _run_preview(
     monkeypatch,
     html: str,
     image_status: int = 200,
-    allow_image_download: bool = True,
+    allow_image_candidates: bool = True,
     requests: list[str] | None = None,
 ):
     async def allow_public(_url: str) -> None:
@@ -44,7 +44,7 @@ def _run_preview(
     try:
         return asyncio.run(preview_web_article(
             "https://www.news.cn/article",
-            allow_image_download=allow_image_download,
+            allow_image_candidates=allow_image_candidates,
         ))
     finally:
         asyncio.run(client.aclose())
@@ -139,12 +139,60 @@ def test_source_without_image_cache_permission_does_not_download_images(monkeypa
     result = _run_preview(
         monkeypatch,
         html,
-        allow_image_download=False,
+        allow_image_candidates=False,
         requests=requests,
     )
     assert result.cover_image_url == ""
     assert result.cover_image_type == "CATEGORY_DEFAULT"
     assert "/cover.png" not in requests
+
+
+@pytest.mark.parametrize(
+    ("markup", "expected_path"),
+    [
+        ('<img src="/src.png" alt="主题图片">', "/src.png"),
+        ('<img data-src="/data-src.png" alt="主题图片">', "/data-src.png"),
+        ('<img data-original="/original.png" alt="主题图片">', "/original.png"),
+        ('<img data-lazy-src="/lazy.png" alt="主题图片">', "/lazy.png"),
+        ('<img data-echo="/echo.png" alt="主题图片">', "/echo.png"),
+        ('<img srcset="/small.png 480w, /srcset.png 1200w" alt="主题图片">', "/small.png"),
+        ('<img data-srcset="/data-srcset.png 2x" alt="主题图片">', "/data-srcset.png"),
+        ('<picture><source srcset="/picture.png 1200w"></picture>', "/picture.png"),
+        ('<video poster="/poster.png"></video>', "/poster.png"),
+    ],
+)
+def test_discovers_common_lazy_picture_and_video_image_attributes(
+    monkeypatch, markup, expected_path
+):
+    requests: list[str] = []
+    html = f"""<html><head><title>公共服务文章图片测试</title></head><body><article>
+    {markup}
+    <p>这是一篇公开公共服务文章，用于验证通用网页图片候选发现能力和机构端人工审核流程。</p>
+    <p>候选图片只供审核人员查看，未经确认不得直接发布到用户端，也不得被当作已授权缓存图片。</p>
+    <p>页面结构不依赖任何特定网站选择器，可以覆盖常见延迟加载、响应式图片和视频封面写法。</p>
+    </article></body></html>"""
+    result = _run_preview(monkeypatch, html, requests=requests)
+    assert expected_path in requests
+    assert any(image.url.endswith(expected_path) for image in result.images)
+
+
+def test_candidate_download_switch_is_independent_from_public_cache_permission(monkeypatch):
+    requests: list[str] = []
+    html = """<html><head><title>候选与缓存权限分离</title>
+    <meta property="og:image" content="/candidate.png"></head><body><main>
+    <p>机构端可以下载少量图片数据来验证尺寸、媒体类型和哈希，并生成等待人工审核的图片候选。</p>
+    <p>这一过程不表示平台已经获得公开缓存许可，也不会把未经审核的第三方图片直接展示给用户。</p>
+    <p>只有管理员确认来源和使用依据后，后续公开流程才能根据来源配置决定是否缓存图片。</p>
+    </main></body></html>"""
+    result = _run_preview(
+        monkeypatch,
+        html,
+        allow_image_candidates=True,
+        requests=requests,
+    )
+    assert "/candidate.png" in requests
+    assert result.images[0].image_cached is False
+    assert result.images[0].candidate_status == "VALID"
 
 
 def test_policy_and_health_classification_are_distinct():

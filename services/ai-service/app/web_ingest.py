@@ -138,17 +138,8 @@ class _ArticleParser(HTMLParser):
             self._meta(attr)
         elif tag == "link" and "canonical" in attr.get("rel", "").lower():
             self.page.canonical_url = urljoin(self.base_url, attr.get("href", ""))
-        elif tag == "img":
-            source = attr.get("src") or attr.get("data-src") or attr.get("data-original")
-            if source:
-                width = int(attr.get("width", "0")) if attr.get("width", "").isdigit() else None
-                height = int(attr.get("height", "0")) if attr.get("height", "").isdigit() else None
-                self.page.images.append(
-                    WebArticleImage(
-                        url=urljoin(self.base_url, source), caption=attr.get("alt", "").strip(),
-                        discovery_method="ARTICLE_IMAGE", width=width, height=height,
-                    )
-                )
+        elif tag in {"img", "source", "video"}:
+            self._image_candidates(tag, attr)
         if tag in self.BLOCK_TAGS and not self._skip_depth:
             self._block_tag = tag
             self._block_text = []
@@ -204,6 +195,43 @@ class _ArticleParser(HTMLParser):
         elif key in {"og:site_name", "source"}:
             self.page.source_name = value
 
+    def _image_candidates(self, tag: str, attr: dict[str, str]) -> None:
+        sources: list[str] = []
+        if tag == "video":
+            sources.append(attr.get("poster", ""))
+        else:
+            for key in (
+                "src",
+                "data-src",
+                "data-original",
+                "data-lazy-src",
+                "data-echo",
+            ):
+                sources.append(attr.get(key, ""))
+            for key in ("srcset", "data-srcset"):
+                sources.extend(_srcset_urls(attr.get(key, "")))
+        width = int(attr.get("width", "0")) if attr.get("width", "").isdigit() else None
+        height = int(attr.get("height", "0")) if attr.get("height", "").isdigit() else None
+        caption = (attr.get("alt") or attr.get("title") or "").strip()
+        known = {image.url for image in self.page.images}
+        for source in sources:
+            source = source.strip()
+            if not source or source.startswith(("data:", "javascript:")):
+                continue
+            resolved = urljoin(self.base_url, source)
+            if resolved in known:
+                continue
+            known.add(resolved)
+            self.page.images.append(
+                WebArticleImage(
+                    url=resolved,
+                    caption=caption,
+                    discovery_method="ARTICLE_IMAGE",
+                    width=width,
+                    height=height,
+                )
+            )
+
     def _parse_json_ld(self, value: str) -> None:
         try:
             parsed = json.loads(value)
@@ -219,6 +247,16 @@ class _ArticleParser(HTMLParser):
 
 def _clean(value: str) -> str:
     return re.sub(r"\s+", " ", unescape(value)).strip()
+
+
+def _srcset_urls(value: str) -> list[str]:
+    """Return URLs without treating srcset density/width hints as addresses."""
+    result: list[str] = []
+    for candidate in value.split(","):
+        url = candidate.strip().split(maxsplit=1)[0] if candidate.strip() else ""
+        if url:
+            result.append(url)
+    return result
 
 
 def _looks_like_chrome(value: str) -> bool:
@@ -328,12 +366,12 @@ async def _validated_cover(
     page: _ParsedPage,
     domain: str,
     interval_seconds: int,
-    allow_image_download: bool,
+    allow_image_candidates: bool,
 ) -> tuple[str, str, str, int | None, int | None, str, bool]:
     # A dimension/content check requires downloading the candidate. When the
     # source registry does not explicitly allow that, fail closed and let the
     # clients use JianDa's local category artwork.
-    if not allow_image_download:
+    if not allow_image_candidates:
         return "", "CATEGORY_DEFAULT", page.title, None, None, "", False
     candidates: list[tuple[str, str, str, str]] = []
     if page.cover_image_url:
@@ -390,9 +428,9 @@ async def _validated_cover(
 async def preview_web_article(
     url: str,
     rate_limit_seconds: int = 3,
-    allow_image_download: bool = False,
+    allow_image_candidates: bool = False,
 ) -> WebArticlePreview:
-    cache_key = f"{url}|image-download={allow_image_download}"
+    cache_key = f"{url}|image-candidates={allow_image_candidates}"
     cached = _CACHE.get(cache_key)
     if cached and time.monotonic() - cached[0] < 600:
         return cached[1]
@@ -426,7 +464,7 @@ async def preview_web_article(
             page,
             parsed_url.hostname or "",
             rate_limit_seconds,
-            allow_image_download,
+            allow_image_candidates,
         )
     )
     digest = hashlib.sha256(re.sub(r"\s+", "", text).encode("utf-8")).hexdigest()
