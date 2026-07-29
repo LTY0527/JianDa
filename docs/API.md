@@ -67,6 +67,36 @@ v1.1 通用结构还包括：
 - `POST /api/web-articles/{documentId}/cover/confirm`：`PLATFORM_ADMIN`、`ORG_ADMIN`、`REVIEWER`；人工确认当前第三方封面及来源。
 - `POST /api/web-articles/{documentId}/cover/category-default`：`PLATFORM_ADMIN`、`ORG_ADMIN`、`REVIEWER`；更换为简达本地分类默认图。
 
+### Phase 9.3 来源运营与采集任务
+
+以下运营接口仅允许 `PLATFORM_ADMIN`：
+
+- `GET /api/source-registries`、`GET /api/source-registries/{id}`：查看来源域名、发现方式、调度时间、每轮上限、安全默认值、文章/Token 预算和最近运行状态。
+- `POST /api/source-registries`、`PUT /api/source-registries/{id}`：新增或更新来源。新来源固定为停用、禁止原图缓存、禁止自动采集、要求人工审核；启用由独立接口完成。
+- `PUT /api/source-registries/{id}/enabled`：显式启用或停用来源。
+- `POST /api/source-registries/{id}/discover`：对单个启用来源执行一次有界发现；请求包含 `method` 和同源 `entryUrl`。
+- `GET /api/crawl-tasks`、`GET /api/crawl-tasks/{id}`：按状态/来源查看任务计数、阶段、错误摘要和逐条错误队列。
+- `POST /api/crawl-tasks`：创建采集任务。
+- `POST /api/crawl-tasks/{id}/cancel`：取消仍可取消的任务。
+- `POST /api/crawl-tasks/errors/{errorId}/retry`：只重试指定、未解决且可重试的错误。
+- `POST /api/crawl-tasks/{id}/retry-failures`：确认后批量重试该任务仍可重试的失败项。
+
+### Phase 9.3 图片候选与内容版本
+
+- `GET /api/web-articles/{documentId}/image-candidates`：查看候选 URL、来源页、来源名、发现方式、alt、尺寸、MIME、hash、缓存、权利和审核状态。
+- `POST /api/web-articles/image-candidates/{candidateId}/approve`：请求体为 `sourceName`、`usageBasis`；二者均不能为空。
+- `POST /api/web-articles/image-candidates/{candidateId}/reject`：记录拒绝原因并安全回退分类默认图。
+- `POST /api/web-articles/{documentId}/recrawl`：正文不变时返回缓存结果；已发布正文变化时创建带 `version_root_id`、`previous_version_id`、`version_no` 和 hash 变化摘要的新待审核版本，旧版本继续公开。
+
+### Phase 9.3 AI 队列、预算与连续阅读
+
+- `GET /api/ai-queue?status=`：查看 `WAITING_APPROVAL`、`WAITING_BUDGET` 等队列状态、原因、预计 Token 和恢复时间。
+- `POST /api/ai-queue/{queueId}/approve`：平台管理员人工批准待处理内容。
+- `POST /api/ai-queue/{queueId}/execute`：执行已批准且预算预留成功的任务；产物仍进入人工审核，不自动发布。
+- `GET /api/public/items/{slug}/neighbors`：返回 `previous` 与 `next`，按置顶、重要度、发布时间和 ID 稳定排序；优先同分类，再回退全局已发布内容，首尾返回 `null`。
+
+预算等待不会调用 AI，实际 Token 为 0，并返回自然语言原因和预计恢复时间。API 不返回 API Key、Authorization、Cookie、内部堆栈、完整提示词或模型响应。
+
 请求体为 `{ "url": "https://白名单域名/官方文章" }`。只有来源注册表明确设置
 `allow_image_cache=true` 时，AI 服务才会下载候选图片并校验 HTTP 状态、媒体类型、
 尺寸、比例和哈希；否则不下载原图，直接使用本地分类默认图。第三方封面未经人工确认
