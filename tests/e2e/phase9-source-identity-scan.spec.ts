@@ -173,3 +173,44 @@ test("扫描筛选和批量保存只提交所选未导入 URL", async ({ page })
   expect(batchPayload).toEqual({ urls: ["https://health.example.gov.cn/news/new"] });
   await expect(page.getByText(/新增 1 篇，失败 0 篇/)).toBeVisible();
 });
+
+test("历史补图必须先预览再确认执行", async ({ page }) => {
+  await prepare(page);
+  let executePayload: Record<string, unknown> | undefined;
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/public-sources") return fulfill(route, []);
+    if (path === "/api/source-registries" && request.method() === "GET") return fulfill(route, [registry]);
+    if (path === "/api/crawl-tasks" || path === "/api/ai-queue") return fulfill(route, []);
+    if (path === "/api/cover-backfill/preview") {
+      return fulfill(route, {
+        total: 8,
+        byType: { WEB_ARTICLE: 3, PDF: 4, IMAGE: 1 },
+        items: [],
+      });
+    }
+    if (path === "/api/cover-backfill/execute") {
+      executePayload = request.postDataJSON();
+      return fulfill(route, {
+        scanned: 8,
+        updated: 5,
+        candidatesCreated: 3,
+        autoApproved: 1,
+        failed: 0,
+        errors: [],
+      });
+    }
+    return fulfill(route, null);
+  });
+
+  await page.goto(`${institutionUrl}/public-sources`);
+  await page.getByRole("button", { name: "高级自动采集设置" }).click();
+  await expect(page.getByRole("button", { name: "执行历史补图" })).toBeDisabled();
+  await page.getByRole("button", { name: "预览补图范围" }).click();
+  await expect(page.getByText(/网页 3， PDF 4， 图片 1/)).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "执行历史补图" }).click();
+  expect(executePayload).toMatchObject({ onlyMissing: true });
+  await expect(page.getByText(/公开封面更新 5/)).toBeVisible();
+});

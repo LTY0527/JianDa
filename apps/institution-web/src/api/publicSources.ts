@@ -222,6 +222,15 @@ export interface QuickSourcePreview {
   registered_source?: Pick<WebSourceRegistry, "id" | "source_name" | "source_type" | "enabled">;
 }
 
+export interface CoverBackfillResult {
+  scanned: number;
+  updated: number;
+  candidatesCreated: number;
+  autoApproved: number;
+  failed: number;
+  errors: Array<{ documentId: number; message: string }>;
+}
+
 export interface ArticleDiscoveryResult {
   sourceId: number;
   method: string;
@@ -383,6 +392,26 @@ export const publicSourceApi = {
     source: WebSourceRegistry;
     imported?: { documentId: number; aiQueueStatus: string };
   }>>("/source-registries/quick-confirm", payload),
+  previewCoverBackfill: (payload: {
+    onlyMissing: boolean;
+    sourceId?: number;
+    contentKind?: string;
+    publishStatus?: string;
+    fromDate?: string;
+    toDate?: string;
+  }) => http.post<ApiResponse<{
+    total: number;
+    byType: Record<string, number>;
+    items: Array<Record<string, unknown>>;
+  }>>("/cover-backfill/preview", payload),
+  executeCoverBackfill: (payload: {
+    onlyMissing: boolean;
+    sourceId?: number;
+    contentKind?: string;
+    publishStatus?: string;
+    fromDate?: string;
+    toDate?: string;
+  }) => http.post<ApiResponse<CoverBackfillResult>>("/cover-backfill/execute", payload),
   crawlJobs: (params?: { status?: string; sourceId?: number }) =>
     http.get<ApiResponse<CrawlJob[]>>("/crawl-tasks", { params }),
   crawlJob: (jobId: number) =>

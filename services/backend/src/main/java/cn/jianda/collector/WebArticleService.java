@@ -176,6 +176,29 @@ public class WebArticleService {
     }
 
     @Transactional
+    public int rescanImageCandidates(long documentId, AuthUser user) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT organization_id,source_type,original_url,canonical_url FROM source_document WHERE id=?",
+                documentId);
+        if (rows.isEmpty() || !"WEB_ARTICLE".equals(rows.get(0).get("source_type"))) {
+            throw new BusinessException(404, "网页文章不存在");
+        }
+        Number organization = (Number) rows.get(0).get("organization_id");
+        if (!"PLATFORM_ADMIN".equals(user.role())
+                && (organization == null || organization.longValue() != user.organizationId())) {
+            throw new BusinessException(403, "当前机构无权访问该材料");
+        }
+        String original = text(rows.get(0).get("original_url"));
+        if (original.isBlank()) original = text(rows.get(0).get("canonical_url"));
+        Map<String, Object> refreshed = preview(original);
+        imageCandidateService.persist(documentId, text(refreshed.get("canonical_url")), refreshed.get("images"));
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM image_candidate WHERE document_id=? AND review_status='PENDING'",
+                Integer.class, documentId);
+        return count == null ? 0 : count;
+    }
+
+    @Transactional
     public Map<String, Object> importApprovedArticle(String rawUrl, long registryId, AuthUser user) {
         Map<String, Object> registry = jdbc.queryForMap("SELECT * FROM source_registry WHERE id=?", registryId);
         String url = normalizeUrl(rawUrl);
@@ -346,6 +369,14 @@ public class WebArticleService {
     @Transactional
     public void confirmCover(long documentId, AuthUser user) {
         assertAccess(documentId, user);
+        Integer cached = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_document WHERE id=? AND source_type='WEB_ARTICLE' "
+                        + "AND image_reviewed=TRUE AND custom_cover_path IS NOT NULL",
+                Integer.class, documentId);
+        if (cached != null && cached > 0) {
+            log(user, "CONFIRM_WEB_COVER", documentId, "SUCCESS");
+            return;
+        }
         Integer approved = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM image_candidate WHERE document_id=? AND candidate_url=("
                         + "SELECT cover_image_url FROM source_document WHERE id=?) AND review_status='APPROVED' "

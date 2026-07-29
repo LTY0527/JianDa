@@ -535,3 +535,25 @@ async def preview_web_article(
     )
     _CACHE[cache_key] = (time.monotonic(), preview)
     return preview
+
+
+async def download_validated_image(url: str) -> tuple[bytes, str, int, int]:
+    await _assert_public_host(url)
+    parsed = urlparse(url)
+    await _rate_limit(parsed.hostname or "", 1)
+    response = await _client().get(url)
+    response.raise_for_status()
+    await _assert_public_host(str(response.url))
+    content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+    if not content_type.startswith("image/"):
+        raise ValueError("目标地址未返回图片")
+    data = response.content
+    if not data or len(data) > MAX_IMAGE_BYTES:
+        raise ValueError("图片大小不符合缓存限制")
+    width, height = _image_dimensions(data, content_type)
+    if width is None or height is None or width < 600 or height < 250:
+        raise ValueError("图片尺寸不符合公开封面要求")
+    ratio = width / height
+    if ratio < 0.75 or ratio > 2.4:
+        raise ValueError("图片比例不符合公开封面要求")
+    return data, content_type, width, height

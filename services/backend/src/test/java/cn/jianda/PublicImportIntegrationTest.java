@@ -50,8 +50,12 @@ class PublicImportIntegrationTest {
         jdbc.update("DELETE FROM ai_budget_reservation");
         jdbc.update("DELETE FROM ai_budget_usage");
         jdbc.update("DELETE FROM ai_processing_queue");
-        jdbc.update("UPDATE source_registry SET allow_image_cache=FALSE,allow_image_candidates=FALSE "
+        jdbc.update("UPDATE source_registry SET allow_image_cache=FALSE,image_cache_allowed=FALSE,"
+                + "allow_image_candidates=FALSE "
                 + "WHERE domain='www.news.cn'");
+        when(aiClient.fetchImage(anyString())).thenReturn(
+                new AiClient.ImageAsset(new byte[] {(byte) 0x89, 0x50, 0x4e, 0x47},
+                        "image/png", 1200, 675));
         when(aiClient.previewWebArticle(anyString(), anyBoolean())).thenAnswer(invocation -> {
             String url = invocation.getArgument(0);
             return Map.ofEntries(
@@ -251,7 +255,8 @@ class PublicImportIntegrationTest {
 
     @Test
     void imageCandidatesCanBeReviewedWhenPublicImageCacheIsDisabled() throws Exception {
-        jdbc.update("UPDATE source_registry SET allow_image_cache=FALSE,allow_image_candidates=TRUE "
+        jdbc.update("UPDATE source_registry SET allow_image_cache=FALSE,image_cache_allowed=FALSE,"
+                + "allow_image_candidates=TRUE "
                 + "WHERE domain='www.news.cn'");
         org.mockito.Mockito.clearInvocations(aiClient);
         String auth = "Bearer " + login("platform_admin");
@@ -274,16 +279,29 @@ class PublicImportIntegrationTest {
                 .andExpect(jsonPath("$.data.imageReviewRequired").value(true))
                 .andReturn().getResponse().getContentAsString();
         long documentId = objectMapper.readTree(imported).path("data").path("documentId").asLong();
-        mvc.perform(get("/api/web-articles/{id}/image-candidates", documentId)
+        String candidates = mvc.perform(get("/api/web-articles/{id}/image-candidates", documentId)
                         .header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(2))
-                .andExpect(jsonPath("$.data[0].image_cached").value(false));
+                .andExpect(jsonPath("$.data[0].image_cached").value(false))
+                .andReturn().getResponse().getContentAsString();
+        long candidateId = objectMapper.readTree(candidates).path("data").get(0).path("id").asLong();
+        mvc.perform(post("/api/web-articles/image-candidates/{id}/approve", candidateId)
+                        .header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sourceName\":\"新华网原网页\",\"usageBasis\":\"仅确认来源，不允许本地缓存\"}"))
+                .andExpect(status().isOk());
+        verify(aiClient, never()).fetchImage(anyString());
+        mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.cover_image_type").value("CATEGORY_DEFAULT"))
+                .andExpect(jsonPath("$.data.image_reviewed").value(true))
+                .andExpect(jsonPath("$.data.image_cached").value(false));
     }
 
     @Test
     void permittedSourceMayUseOriginalCoverButStillRequiresManualReview() throws Exception {
-        jdbc.update("UPDATE source_registry SET allow_image_cache=TRUE,allow_image_candidates=TRUE "
+        jdbc.update("UPDATE source_registry SET allow_image_cache=TRUE,image_cache_allowed=TRUE,"
+                + "allow_image_candidates=TRUE "
                 + "WHERE domain='www.news.cn'");
         String auth = "Bearer " + login("platform_admin");
         String url = "https://www.news.cn/test/approved-cover.html";
@@ -362,7 +380,13 @@ class PublicImportIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.source_url").value(url))
                 .andExpect(jsonPath("$.data.image_source_url").value(url))
+                .andExpect(jsonPath("$.data.cover_image_url")
+                        .value("/api/public/items/" + slug + "/cover"))
                 .andExpect(jsonPath("$.data.original_file_available").value(false));
+        mvc.perform(get("/api/public/items/{slug}/cover", slug))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .content().contentTypeCompatibleWith("image/png"));
         mvc.perform(get("/api/public/items/{slug}/original-file", slug))
                 .andExpect(status().isNotFound());
 

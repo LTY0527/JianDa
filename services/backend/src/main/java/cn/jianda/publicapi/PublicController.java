@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
 import java.io.IOException;
 
 @RestController
@@ -186,7 +187,12 @@ public class PublicController {
 
     @GetMapping("/items/{slug}/cover")
     public ResponseEntity<byte[]> cover(@PathVariable String slug) throws IOException {
-        return OriginalFileHttp.response(documentService.publicCover(slug), null, false);
+        ResponseEntity<byte[]> response =
+                OriginalFileHttp.response(documentService.publicCover(slug), null, false);
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.putAll(response.getHeaders());
+        headers.setCacheControl(CacheControl.maxAge(java.time.Duration.ofDays(30)).cachePublic());
+        return new ResponseEntity<>(response.getBody(), headers, response.getStatusCode());
     }
 
     @DeleteMapping("/items/{id}/favorite")

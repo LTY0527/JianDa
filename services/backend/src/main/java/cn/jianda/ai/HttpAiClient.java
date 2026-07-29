@@ -24,6 +24,8 @@ public class HttpAiClient implements AiClient {
     private final URI analyzeUri;
     private final URI rewriteUri;
     private final URI extractUri;
+    private final URI pdfFirstPageUri;
+    private final URI imageCacheUri;
     private final URI metadataUri;
     private final URI webPreviewUri;
     private final URI articleDiscoveryUri;
@@ -35,6 +37,8 @@ public class HttpAiClient implements AiClient {
         this.analyzeUri = URI.create(baseUrl + "/internal/analyze");
         this.rewriteUri = URI.create(baseUrl + "/internal/rewrite");
         this.extractUri = URI.create(baseUrl + "/internal/extract-text");
+        this.pdfFirstPageUri = URI.create(baseUrl + "/internal/pdf-first-page");
+        this.imageCacheUri = URI.create(baseUrl + "/internal/image-cache");
         this.metadataUri = URI.create(baseUrl + "/internal/metadata-preview?no_llm=true");
         this.webPreviewUri = URI.create(baseUrl + "/internal/web-ingest/preview");
         this.articleDiscoveryUri = URI.create(baseUrl + "/internal/article-discovery");
@@ -45,6 +49,21 @@ public class HttpAiClient implements AiClient {
     @Override
     public Map<String, Object> extractText(Path file, String fileName, String contentType) {
         return sendFile(extractUri, file, fileName, contentType, "AI extraction");
+    }
+
+    @Override
+    public byte[] renderPdfFirstPage(Path file, String fileName) {
+        return sendFileBytes(pdfFirstPageUri, file, fileName, "application/pdf", "PDF cover rendering");
+    }
+
+    @Override
+    public ImageAsset fetchImage(String url) {
+        BinaryResponse response = sendJsonBytes(
+                imageCacheUri, Map.of("url", url, "allow_image_candidates", true),
+                "image caching", 60_000);
+        return new ImageAsset(
+                response.bytes(), response.contentType(),
+                response.width(), response.height());
     }
 
     @Override
@@ -102,6 +121,56 @@ public class HttpAiClient implements AiClient {
         } finally {
             if (connection != null) connection.disconnect();
         }
+    }
+
+    private byte[] sendFileBytes(URI uri, Path file, String fileName,
+                                 String contentType, String operation) {
+        HttpURLConnection connection = null;
+        String boundary = "----JianDa" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            ByteArrayOutputStream payload = multipartPayload(
+                    boundary, file, fileName, contentType);
+            connection = (HttpURLConnection) uri.toURL().openConnection(Proxy.NO_PROXY);
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(60_000);
+            connection.setDoOutput(true);
+            connection.setFixedLengthStreamingMode(payload.size());
+            payload.writeTo(connection.getOutputStream());
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) {
+                throw new IllegalStateException(operation + " service returned HTTP " + status);
+            }
+            String mime = connection.getContentType();
+            if (mime == null || !mime.toLowerCase(java.util.Locale.ROOT).startsWith("image/")) {
+                throw new IllegalStateException(operation + " returned a non-image response");
+            }
+            byte[] bytes = connection.getInputStream().readNBytes(10 * 1024 * 1024 + 1);
+            if (bytes.length == 0 || bytes.length > 10 * 1024 * 1024) {
+                throw new IllegalStateException(operation + " returned an invalid image size");
+            }
+            return bytes;
+        } catch (IOException exception) {
+            throw new IllegalStateException(operation + " service connection failed", exception);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private static ByteArrayOutputStream multipartPayload(
+            String boundary, Path file, String fileName, String contentType) throws IOException {
+        String extension = fileName.contains(".") ? fileName.substring(fileName.lastIndexOf('.')) : "";
+        String safeName = "upload" + extension;
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        payload.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+        payload.write(("Content-Disposition: form-data; name=\"file\"; filename=\"" + safeName + "\"\r\n")
+                .getBytes(StandardCharsets.UTF_8));
+        payload.write(("Content-Type: " + (contentType == null ? "application/octet-stream" : contentType)
+                + "\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+        Files.copy(file, payload);
+        payload.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        return payload;
     }
 
     @Override
@@ -180,6 +249,54 @@ public class HttpAiClient implements AiClient {
             if (connection != null) connection.disconnect();
         }
     }
+
+    private BinaryResponse sendJsonBytes(
+            URI uri, Map<String, Object> request, String operation, int readTimeout) {
+        HttpURLConnection connection = null;
+        try {
+            byte[] payload = objectMapper.writeValueAsBytes(request);
+            connection = (HttpURLConnection) uri.toURL().openConnection(Proxy.NO_PROXY);
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(readTimeout);
+            connection.setDoOutput(true);
+            connection.setFixedLengthStreamingMode(payload.length);
+            connection.getOutputStream().write(payload);
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) {
+                throw new IllegalStateException(operation + " service returned HTTP " + status);
+            }
+            String mime = connection.getContentType();
+            if (mime == null || !mime.toLowerCase(java.util.Locale.ROOT).startsWith("image/")) {
+                throw new IllegalStateException(operation + " returned a non-image response");
+            }
+            byte[] bytes = connection.getInputStream().readNBytes(10 * 1024 * 1024 + 1);
+            if (bytes.length == 0 || bytes.length > 10 * 1024 * 1024) {
+                throw new IllegalStateException(operation + " returned an invalid image size");
+            }
+            return new BinaryResponse(bytes, mime.split(";", 2)[0],
+                    integerHeader(connection, "X-Image-Width"),
+                    integerHeader(connection, "X-Image-Height"));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException(operation + " JSON processing failed", exception);
+        } catch (IOException exception) {
+            throw new IllegalStateException(operation + " service connection failed", exception);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private static Integer integerHeader(HttpURLConnection connection, String name) {
+        try {
+            String value = connection.getHeaderField(name);
+            return value == null ? null : Integer.valueOf(value);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private record BinaryResponse(byte[] bytes, String contentType, Integer width, Integer height) {}
 
     private Map<String, Object> readResponse(HttpURLConnection connection, String operation) throws IOException {
         int status = connection.getResponseCode();

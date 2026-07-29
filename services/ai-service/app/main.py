@@ -3,9 +3,10 @@ import logging
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+import httpx
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Response
 
-from app.extraction import ALLOWED_SUFFIXES, extract_file
+from app.extraction import ALLOWED_SUFFIXES, extract_file, render_pdf_first_page
 from app.metadata import detect_metadata
 from app.models import (
     AnalyzeResult,
@@ -25,7 +26,7 @@ from app.models import (
 from app.providers import ExternalLlmProvider, LlmProvider, MockProvider
 from app.providers.external import ExternalProviderError
 from app.article_discovery import DiscoverySource, discover_articles
-from app.web_ingest import preview_web_article
+from app.web_ingest import preview_web_article, download_validated_image
 
 app = FastAPI(title="简达 AI 服务", version="0.1.0")
 
@@ -64,6 +65,42 @@ async def extract_text(file: UploadFile = File(...)) -> ExtractTextResult:
         return extract_file(path)
     finally:
         path.unlink(missing_ok=True)
+
+
+@app.post("/internal/pdf-first-page")
+async def pdf_first_page(file: UploadFile = File(...)) -> Response:
+    if Path(file.filename or "").suffix.lower() != ".pdf":
+        raise HTTPException(status_code=400, detail="仅支持 PDF 文件")
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp:
+        temp.write(await file.read())
+        path = Path(temp.name)
+    try:
+        return Response(
+            content=render_pdf_first_page(path),
+            media_type="image/png",
+            headers={"Cache-Control": "no-store"},
+        )
+    except (ValueError, RuntimeError) as exception:
+        raise HTTPException(status_code=422, detail=str(exception)) from exception
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@app.post("/internal/image-cache")
+async def image_cache(request: WebArticleRequest) -> Response:
+    try:
+        data, content_type, width, height = await download_validated_image(str(request.url))
+        return Response(
+            content=data,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "no-store",
+                "X-Image-Width": str(width),
+                "X-Image-Height": str(height),
+            },
+        )
+    except (ValueError, httpx.HTTPError) as exception:
+        raise HTTPException(status_code=422, detail=str(exception)) from exception
 
 
 @app.post("/internal/metadata-preview", response_model=MetadataPreview)

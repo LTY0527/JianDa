@@ -3,7 +3,7 @@ from pathlib import Path
 import fitz
 from fastapi.testclient import TestClient
 
-from app.extraction import extract_file
+from app.extraction import extract_file, render_pdf_first_page
 from app.main import app
 from app.providers.external import ExternalProviderError
 from app.models import MetadataPreview, TextRequest
@@ -104,6 +104,22 @@ def test_pdf_extraction_saves_one_traceable_segment_per_page() -> None:
         assert result.segments[0].text == "first page source"
         assert result.segments[1].text == "second page source"
         assert result.text == "first page source\nsecond page source"
+    finally:
+        pdf_path.unlink(missing_ok=True)
+
+
+def test_pdf_first_page_cover_is_real_png() -> None:
+    pdf_path = Path(__file__).with_name("_generated-cover.pdf")
+    try:
+        document = fitz.open()
+        page = document.new_page(width=595, height=842)
+        page.insert_text((72, 100), "JianDa public service document")
+        document.save(pdf_path)
+        document.close()
+
+        image = render_pdf_first_page(pdf_path, target_width=900)
+        assert image.startswith(b"\x89PNG\r\n\x1a\n")
+        assert len(image) > 1000
     finally:
         pdf_path.unlink(missing_ok=True)
 

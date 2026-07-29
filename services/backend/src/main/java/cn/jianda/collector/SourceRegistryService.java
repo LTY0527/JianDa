@@ -103,7 +103,7 @@ public class SourceRegistryService {
                         + "max_articles_per_run=?,allow_image_candidates=?,allow_auto_ai=?,daily_article_budget=?,daily_token_budget=?,"
                         + "schedule_mode=?,interval_hours=?,schedule_timezone=?,recent_days=?,include_keywords=?,exclude_keywords=?,"
                         + "auto_save_draft=?,duplicate_strategy=?,max_retries=?,image_usage_policy=?,image_usage_basis=?,"
-                        + "auto_approve_images=?,image_cache_allowed=?,image_policy_reviewed_by=?,image_policy_reviewed_at=?,"
+                        + "auto_approve_images=?,image_cache_allowed=?,allow_image_cache=?,image_policy_reviewed_by=?,image_policy_reviewed_at=?,"
                         + "operator_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 value.domain(), value.name(), value.type(), value.authorityLevel(), value.discoveryMode(),
                 value.homepageUrl(), value.rssUrl(), value.sitemapUrl(), value.sectionUrl(), value.dailyCrawlTime(),
@@ -111,7 +111,7 @@ public class SourceRegistryService {
                 value.dailyTokenBudget(), value.scheduleMode(), value.intervalHours(), value.scheduleTimezone(),
                 value.recentDays(), value.includeKeywords(), value.excludeKeywords(), value.autoSaveDraft(),
                 value.duplicateStrategy(), value.maxRetries(), value.imageUsagePolicy(), value.imageUsageBasis(),
-                value.autoApproveImages(), value.imageCacheAllowed(),
+                value.autoApproveImages(), value.imageCacheAllowed(), value.imageCacheAllowed(),
                 value.autoApproveImages() ? user.id() : null,
                 value.autoApproveImages() ? Timestamp.valueOf(LocalDateTime.now()) : null,
                 user.id(), id);
@@ -344,11 +344,11 @@ public class SourceRegistryService {
         jdbc.update("UPDATE source_registry SET schedule_mode=?,interval_hours=?,schedule_timezone=?,recent_days=?,"
                         + "include_keywords=?,exclude_keywords=?,auto_save_draft=?,duplicate_strategy=?,max_retries=?,"
                         + "image_usage_policy=?,image_usage_basis=?,auto_approve_images=?,image_cache_allowed=?,"
-                        + "image_policy_reviewed_by=?,image_policy_reviewed_at=? WHERE id=?",
+                        + "allow_image_cache=?,image_policy_reviewed_by=?,image_policy_reviewed_at=? WHERE id=?",
                 value.scheduleMode(), value.intervalHours(), value.scheduleTimezone(), value.recentDays(),
                 value.includeKeywords(), value.excludeKeywords(), value.autoSaveDraft(), value.duplicateStrategy(),
                 value.maxRetries(), value.imageUsagePolicy(), value.imageUsageBasis(), value.autoApproveImages(),
-                value.imageCacheAllowed(), value.autoApproveImages() ? operatorId : null,
+                value.imageCacheAllowed(), value.imageCacheAllowed(), value.autoApproveImages() ? operatorId : null,
                 value.autoApproveImages() ? Timestamp.valueOf(LocalDateTime.now()) : null, id);
     }
 

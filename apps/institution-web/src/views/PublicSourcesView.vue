@@ -71,6 +71,15 @@ const scanForm = reactive({
   excludeKeywords: "",
   onlyUnimported: true,
 });
+const backfillForm = reactive({
+  onlyMissing: true,
+  sourceId: undefined as number | undefined,
+  contentKind: "",
+  publishStatus: "",
+  fromDate: "",
+  toDate: "",
+});
+const backfillPreview = ref<{ total: number; byType: Record<string, number> } | null>(null);
 const form = reactive({ name: "", type: "GOVERNMENT", url: "https://", publisher: "", notes: "" });
 const registryForm = reactive<SourceRegistryPayload>({
   name: "", domain: "", type: "PUBLIC_INSTITUTION", authorityLevel: "B",
@@ -357,6 +366,39 @@ async function confirmQuickSource() {
   }
 }
 
+async function previewBackfill() {
+  saving.value = true;
+  error.value = "";
+  try {
+    const response = await publicSourceApi.previewCoverBackfill(backfillForm);
+    backfillPreview.value = response.data.data;
+    operationMessage.value = `预览完成：共 ${response.data.data.total} 条历史内容符合补图条件，尚未修改数据。`;
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function executeBackfill() {
+  if (!backfillPreview.value || !window.confirm(
+    `确认处理 ${backfillPreview.value.total} 条历史内容吗？第三方图片仍按来源策略决定自动确认或进入人工审核。`,
+  )) return;
+  saving.value = true;
+  error.value = "";
+  try {
+    const response = await publicSourceApi.executeCoverBackfill(backfillForm);
+    const result = response.data.data;
+    operationMessage.value = `历史补图完成：扫描 ${result.scanned}，公开封面更新 ${result.updated}，新增候选 ${result.candidatesCreated}，策略自动确认 ${result.autoApproved}，失败 ${result.failed}。`;
+    backfillPreview.value = null;
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function shadowArticle(source: WebSourceRegistry, article: ArticleDiscoveryCandidate) {
   operatingSourceId.value = source.id;
   error.value = "";
@@ -537,6 +579,31 @@ onMounted(load);
         </fieldset>
         <div class="form-actions"><button v-if="editingRegistryId" type="button" class="btn secondary" @click="editingRegistryId = null">取消编辑</button><button class="btn primary" :disabled="saving">{{ saving ? "正在保存…" : editingRegistryId ? "保存修改" : "新增运营来源" }}</button></div>
       </form>
+      <section v-if="activeSection === 'advanced'" class="backfill-panel">
+        <div class="panel-title">
+          <div><h2>历史封面补齐</h2><p>先预览范围，再批量执行；PDF 第一页和已上传原图可自动确认，第三方网页图片遵循来源策略。</p></div>
+        </div>
+        <div class="form-row">
+          <label class="field">来源<select v-model="backfillForm.sourceId"><option :value="undefined">全部来源</option><option v-for="source in registries" :key="source.id" :value="source.id">{{ source.source_name }}</option></select></label>
+          <label class="field">内容类型<input v-model="backfillForm.contentKind" placeholder="留空表示全部" /></label>
+          <label class="field">发布状态<select v-model="backfillForm.publishStatus"><option value="">全部状态</option><option value="PUBLISHED">已发布</option><option value="DRAFT">草稿</option></select></label>
+        </div>
+        <div class="form-row">
+          <label class="field">开始日期<input v-model="backfillForm.fromDate" type="date" /></label>
+          <label class="field">结束日期<input v-model="backfillForm.toDate" type="date" /></label>
+        </div>
+        <label class="check-line"><input v-model="backfillForm.onlyMissing" type="checkbox" /> 仅处理无封面或仍使用分类默认图的内容</label>
+        <div v-if="backfillPreview" class="safe-note">
+          待处理 {{ backfillPreview.total }} 条：
+          网页 {{ backfillPreview.byType.WEB_ARTICLE || 0 }}，
+          PDF {{ backfillPreview.byType.PDF || 0 }}，
+          图片 {{ backfillPreview.byType.IMAGE || 0 }}。
+        </div>
+        <div class="form-actions">
+          <button class="btn secondary" type="button" :disabled="saving" @click="previewBackfill">预览补图范围</button>
+          <button class="btn primary" type="button" :disabled="saving || !backfillPreview" @click="executeBackfill">执行历史补图</button>
+        </div>
+      </section>
       <div v-if="activeSection === 'scan'" class="scan-settings">
         <div class="form-row">
           <label class="field">最近范围<select v-model.number="scanForm.recentDays"><option :value="1">1 天</option><option :value="3">3 天</option><option :value="7">7 天</option><option :value="30">30 天</option></select></label>
@@ -696,7 +763,8 @@ onMounted(load);
 
 .identity-review,
 .scan-settings,
-.advanced-settings {
+.advanced-settings,
+.backfill-panel {
   margin-top: 18px;
   padding: 18px;
   border: 1px solid #d9e0e7;
