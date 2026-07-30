@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, onUnmounted, reactive, ref } from "vue";
 import { Plus, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import { apiMessage } from "../api/http";
@@ -9,8 +9,10 @@ import {
   type ArticleDiscoveryCandidate,
   type ArticleDiscoveryResult,
   type CrawlJob,
+  type CoverBackfillJob,
   type PublicSource,
   type QuickSourcePreview,
+  type RuntimeCapabilities,
   type SourceRegistryPayload,
   type WebArticlePreview,
   type WebSourceRegistry,
@@ -24,6 +26,7 @@ const sources = ref<PublicSource[]>([]);
 const registries = ref<WebSourceRegistry[]>([]);
 const jobs = ref<CrawlJob[]>([]);
 const aiQueue = ref<AiQueueItem[]>([]);
+const runtime = ref<RuntimeCapabilities | null>(null);
 const selectedJob = ref<CrawlJob | null>(null);
 const taskStatus = ref("");
 const taskSourceId = ref<number | undefined>();
@@ -80,9 +83,11 @@ const backfillForm = reactive({
   toDate: "",
 });
 const backfillPreview = ref<{ total: number; byType: Record<string, number> } | null>(null);
+const backfillJob = ref<CoverBackfillJob | null>(null);
+let backfillTimer: ReturnType<typeof setTimeout> | null = null;
 const form = reactive({ name: "", type: "GOVERNMENT", url: "https://", publisher: "", notes: "" });
 const registryForm = reactive<SourceRegistryPayload>({
-  name: "", domain: "", type: "PUBLIC_INSTITUTION", authorityLevel: "B",
+  name: "", domain: "", allowedHosts: "", type: "PUBLIC_INSTITUTION", authorityLevel: "B",
   homepageUrl: "https://", rssUrl: "", sitemapUrl: "", sectionUrl: "",
   discoveryMode: "MANUAL", dailyCrawlTime: "03:30", maxArticlesPerRun: 5,
   allowImageCandidates: false, allowAutoAi: false, dailyArticleBudget: 0, dailyTokenBudget: 0,
@@ -112,16 +117,18 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [sourceResponse, registryResponse, jobResponse, aiQueueResponse] = await Promise.all([
+    const [sourceResponse, registryResponse, jobResponse, aiQueueResponse, runtimeResponse] = await Promise.all([
       publicSourceApi.sources(),
       publicSourceApi.webRegistries(),
       publicSourceApi.crawlJobs({ status: taskStatus.value || undefined, sourceId: taskSourceId.value }),
       publicSourceApi.aiQueue(),
+      publicSourceApi.runtimeCapabilities(),
     ]);
     sources.value = sourceResponse.data.data;
     registries.value = registryResponse.data.data;
     jobs.value = jobResponse.data.data;
     aiQueue.value = aiQueueResponse.data.data;
+    runtime.value = runtimeResponse.data.data;
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -161,7 +168,7 @@ async function saveRegistry() {
     else await publicSourceApi.createWebRegistry(registryForm);
     editingRegistryId.value = null;
     Object.assign(registryForm, {
-      name: "", domain: "", type: "PUBLIC_INSTITUTION", authorityLevel: "B", homepageUrl: "https://",
+      name: "", domain: "", allowedHosts: "", type: "PUBLIC_INSTITUTION", authorityLevel: "B", homepageUrl: "https://",
       rssUrl: "", sitemapUrl: "", sectionUrl: "", discoveryMode: "MANUAL", dailyCrawlTime: "03:30",
       maxArticlesPerRun: 5, allowImageCandidates: false, dailyArticleBudget: 0, dailyTokenBudget: 0,
       allowAutoAi: false, scheduleMode: "DAILY", intervalHours: 24, scheduleTimezone: "Asia/Shanghai",
@@ -180,7 +187,7 @@ async function saveRegistry() {
 function editRegistry(source: WebSourceRegistry) {
   editingRegistryId.value = source.id;
   Object.assign(registryForm, {
-    name: source.source_name, domain: source.domain, type: source.source_type,
+    name: source.source_name, domain: source.domain, allowedHosts: source.allowed_hosts || "", type: source.source_type,
     authorityLevel: source.authority_level, homepageUrl: source.homepage_url,
     rssUrl: source.rss_url || "", sitemapUrl: source.sitemap_url || "", sectionUrl: source.section_url || "",
     discoveryMode: source.discovery_mode, dailyCrawlTime: source.daily_crawl_time,
@@ -260,6 +267,29 @@ async function approveQueue(item: AiQueueItem) {
   } catch (cause) {
     error.value = apiMessage(cause);
   }
+}
+
+async function retryQueue(item: AiQueueItem) {
+  try {
+    await publicSourceApi.retryAiQueue(item.id);
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
+async function reconcileQueue() {
+  try {
+    const response = await publicSourceApi.reconcileAiQueue();
+    operationMessage.value = `队列重新评估完成：重新排队 ${response.data.data.requeued} 项，保持原状态 ${response.data.data.unchanged} 项。`;
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
+function budgetText(value: number | undefined, unit: string) {
+  return !value ? "不限" : `${value.toLocaleString()} ${unit}`;
 }
 
 function discoveryEntry(source: WebSourceRegistry) {
@@ -387,15 +417,52 @@ async function executeBackfill() {
   saving.value = true;
   error.value = "";
   try {
-    const response = await publicSourceApi.executeCoverBackfill(backfillForm);
-    const result = response.data.data;
-    operationMessage.value = `历史补图完成：扫描 ${result.scanned}，公开封面更新 ${result.updated}，新增候选 ${result.candidatesCreated}，策略自动确认 ${result.autoApproved}，失败 ${result.failed}。`;
+    const response = await publicSourceApi.startCoverBackfillJob(backfillForm);
+    backfillJob.value = response.data.data;
+    operationMessage.value = `历史补图任务 #${backfillJob.value.jobId} 已启动。`;
     backfillPreview.value = null;
-    await load();
+    scheduleBackfillPoll();
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
     saving.value = false;
+  }
+}
+
+function scheduleBackfillPoll() {
+  if (backfillTimer) clearTimeout(backfillTimer);
+  if (!backfillJob.value || !["PENDING", "RUNNING"].includes(backfillJob.value.status)) {
+    return;
+  }
+  backfillTimer = setTimeout(async () => {
+    if (!backfillJob.value) return;
+    try {
+      backfillJob.value = (
+        await publicSourceApi.coverBackfillJob(backfillJob.value.jobId)
+      ).data.data;
+      if (["PENDING", "RUNNING"].includes(backfillJob.value.status)) {
+        scheduleBackfillPoll();
+      } else {
+        await load();
+      }
+    } catch (cause) {
+      error.value = apiMessage(cause);
+    }
+  }, 1500);
+}
+
+async function retryBackfillItem(documentId: number) {
+  if (!backfillJob.value) return;
+  try {
+    backfillJob.value = (
+      await publicSourceApi.retryCoverBackfillItem(
+        backfillJob.value.jobId,
+        documentId,
+      )
+    ).data.data;
+    scheduleBackfillPoll();
+  } catch (cause) {
+    error.value = apiMessage(cause);
   }
 }
 
@@ -432,6 +499,9 @@ async function collectArticle(source: WebSourceRegistry, article: ArticleDiscove
 }
 
 onMounted(load);
+onUnmounted(() => {
+  if (backfillTimer) clearTimeout(backfillTimer);
+});
 </script>
 
 <template>
@@ -542,6 +612,13 @@ onMounted(load);
           <label class="field">来源名称<input v-model="registryForm.name" required /></label>
           <label class="field">完整域名<input v-model="registryForm.domain" required placeholder="www.example.gov.cn" /></label>
         </div>
+        <label class="field">
+          附加允许域名
+          <input
+            v-model="registryForm.allowedHosts"
+            placeholder="多个域名用逗号分隔；仅填写明确属于该来源的域名"
+          />
+        </label>
         <div class="form-row">
           <label class="field">来源类型<select v-model="registryForm.type"><option v-for="(label, value) in typeText" :key="value" :value="value">{{ label }}</option></select></label>
           <label class="field">发现方式<select v-model="registryForm.discoveryMode"><option value="MANUAL">手动</option><option value="RSS">RSS</option><option value="ATOM">Atom</option><option value="SITEMAP">Sitemap</option><option value="SECTION">栏目页</option><option value="MIXED">混合</option></select></label>
@@ -599,6 +676,35 @@ onMounted(load);
           PDF {{ backfillPreview.byType.PDF || 0 }}，
           图片 {{ backfillPreview.byType.IMAGE || 0 }}。
         </div>
+        <div v-if="backfillJob" class="backfill-progress" role="status">
+          <b>任务 #{{ backfillJob.jobId }} · {{ statusLabel(backfillJob.status) }}</b>
+          <progress
+            :max="Math.max(1, backfillJob.total)"
+            :value="backfillJob.processed"
+          />
+          <p>
+            已处理 {{ backfillJob.processed }}/{{ backfillJob.total }} ·
+            更新 {{ backfillJob.updated }} · 新增候选
+            {{ backfillJob.candidatesCreated }} · 自动确认
+            {{ backfillJob.autoApproved }} · 失败 {{ backfillJob.failed }}
+          </p>
+          <small v-if="backfillJob.currentDocumentId">
+            当前：#{{ backfillJob.currentDocumentId }}
+            {{ backfillJob.currentDocumentTitle }}
+          </small>
+          <ul v-if="backfillJob.errors.length">
+            <li v-for="item in backfillJob.errors" :key="item.documentId">
+              #{{ item.documentId }} {{ item.message }}
+              <button
+                class="text-action"
+                type="button"
+                @click="retryBackfillItem(item.documentId)"
+              >
+                单条重试
+              </button>
+            </li>
+          </ul>
+        </div>
         <div class="form-actions">
           <button class="btn secondary" type="button" :disabled="saving" @click="previewBackfill">预览补图范围</button>
           <button class="btn primary" type="button" :disabled="saving || !backfillPreview" @click="executeBackfill">执行历史补图</button>
@@ -619,7 +725,7 @@ onMounted(load);
           <tr v-for="source in registries" :key="source.id">
             <td><b>{{source.source_name}}</b><small>{{source.domain}} · {{typeText[source.source_type] || source.source_type}}</small></td>
             <td>{{source.enabled ? "已启用" : "已停用"}} · {{source.discovery_mode}}<small>{{source.daily_crawl_time}} / 每轮 {{source.max_articles_per_run}} 篇</small></td>
-            <td>每日 {{source.daily_article_budget}} 篇<small>{{source.daily_token_budget.toLocaleString()}} Token · 自动 AI {{source.allow_auto_ai ? "开启" : "关闭"}}</small></td>
+            <td>每日文章 {{budgetText(source.daily_article_budget, "篇")}}<small>Token {{budgetText(source.daily_token_budget, "Token")}} · 当前来源自动 AI {{source.allow_auto_ai ? "允许" : "未允许"}}</small></td>
             <td>{{statusLabel(source.last_status)}}<small>最近 {{formatDisplayDateTime(source.last_crawled_at)}} · 下次 {{formatDisplayDateTime(source.next_run_at)}}</small></td>
             <td>{{source.last_error||"无"}}</td>
             <td>
@@ -643,6 +749,13 @@ onMounted(load);
         </div>
         <div v-if="discoveryResult.data.errors.length" class="inline-error">
           {{ discoveryResult.data.errors.join("；") }}
+        </div>
+        <div
+          v-if="discoveryResult.data.filtered_external_count"
+          class="safe-note"
+        >
+          已过滤 {{ discoveryResult.data.filtered_external_count }}
+          个不属于当前来源范围的外部链接。
         </div>
         <table class="data-table">
           <thead><tr><th>选择</th><th>发现文章</th><th>方式</th><th>状态</th><th>受控操作</th></tr></thead>
@@ -676,7 +789,24 @@ onMounted(load);
       </section>
     </section>
     <section v-show="activeSection === 'ai'" class="panel">
-      <div class="panel-title"><div><h2>AI 处理队列与预算</h2><p>自动 AI 默认关闭；等待预算的任务不会自动执行，也不会被标记为已自动处理。</p></div></div>
+      <div class="panel-title">
+        <div>
+          <h2>AI 处理队列与预算</h2>
+          <p v-if="runtime">
+            全局自动 AI {{ runtime.crawlAutoAiEnabled ? "已开启" : "已关闭" }} ·
+            调度器 {{ runtime.crawlSchedulerEnabled ? "已开启" : "已关闭" }} ·
+            Provider {{ runtime.llmProvider }} {{ runtime.externalModel }}
+          </p>
+          <p v-else>正在读取当前运行能力…</p>
+          <small v-if="runtime">
+            自动采集每日文章 {{ budgetText(runtime.dailyArticleLimit, "篇") }} ·
+            Token {{ budgetText(runtime.dailyTokenLimit, "Token") }}
+          </small>
+        </div>
+        <button class="btn secondary" @click="reconcileQueue">
+          重新评估等待任务
+        </button>
+      </div>
       <table class="data-table">
         <thead><tr><th>材料 / 来源</th><th>状态</th><th>预算说明</th><th>预计恢复</th><th>操作</th></tr></thead>
         <tbody>
@@ -688,6 +818,7 @@ onMounted(load);
             <td>
               <button v-if="item.status === 'WAITING_APPROVAL'" class="text-action strong" @click="approveQueue(item)">人工批准</button>
               <button v-else-if="item.status === 'WAITING_BUDGET'" class="text-action" disabled>等待预算恢复</button>
+              <button v-else-if="item.status === 'FAILED'" class="text-action" @click="retryQueue(item)">重试</button>
               <span v-else>无需操作</span>
             </td>
           </tr>

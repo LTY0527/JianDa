@@ -197,7 +197,7 @@ public class DocumentService {
                 "documentId", id,
                 "jobId", jobId,
                 "status", "PROCESSING",
-                "stage", "EXTRACTING_FACTS",
+                "stage", "PREPARING",
                 "progress", 25);
     }
 
@@ -239,6 +239,11 @@ public class DocumentService {
         }
         AiQueueService.Reservation reservation = preReserved;
         int returnedActualTokens = 0;
+        String diagnosticProvider = "";
+        String diagnosticModel = "";
+        String diagnosticRequestId = "";
+        String diagnosticFingerprint = "";
+        boolean crossedProviderBoundary = false;
         try {
             boolean publicInformation = document.get("content_source_id") != null;
             List<Map<String, Object>> sourceSegments = jdbc.query(
@@ -283,6 +288,17 @@ public class DocumentService {
                         sourceName,
                         sourceSegments,
                         context);
+                crossedProviderBoundary = true;
+                Map<String, Object> resultMetrics = result.get("metrics") instanceof Map<?, ?> rawMetrics
+                        ? (Map<String, Object>) rawMetrics : Map.of();
+                diagnosticProvider = nullableString(resultMetrics.get("provider"));
+                diagnosticModel = nullableString(resultMetrics.get("model"));
+                diagnosticRequestId = nullableString(resultMetrics.get("request_id"));
+                diagnosticFingerprint = nullableString(resultMetrics.get("response_fingerprint"));
+                jdbc.update("UPDATE processing_job SET provider_id=?,model_id=?,provider_request_id=?,"
+                                + "response_fingerprint=?,crossed_provider_boundary=TRUE WHERE id=?",
+                        nullableString(diagnosticProvider), nullableString(diagnosticModel),
+                        nullableString(diagnosticRequestId), nullableString(diagnosticFingerprint), jobId);
             } catch (RuntimeException exception) {
                 aiQueueService.fail(reservation, tokensFrom(exception),
                         providerFrom(exception), modelFrom(exception), "AI_CALL_FAILED");
@@ -391,12 +407,37 @@ public class DocumentService {
             String errorMessage = diagnosticMessage(exception);
             String failedStage = exception instanceof AiServiceException aiFailure
                     ? defaultString(aiFailure.stringValue("stage"), "FAILED") : "FAILED";
+            String reasonCode = "PROCESSING_FAILED";
+            if (exception instanceof AiResultValidationException) {
+                failedStage = "fact_validation";
+                reasonCode = "NO_TRACEABLE_REVIEW_CONTENT";
+            }
+            if (exception instanceof AiServiceException aiFailure) {
+                diagnosticProvider = defaultString(
+                        aiFailure.stringValue("provider"), diagnosticProvider);
+                diagnosticModel = defaultString(
+                        aiFailure.stringValue("model"), diagnosticModel);
+                diagnosticRequestId = defaultString(
+                        aiFailure.stringValue("request_id"), diagnosticRequestId);
+                diagnosticFingerprint = defaultString(
+                        aiFailure.stringValue("response_fingerprint"),
+                        diagnosticFingerprint);
+                crossedProviderBoundary = crossedProviderBoundary
+                        || !diagnosticRequestId.isBlank();
+                reasonCode = defaultString(
+                        aiFailure.stringValue("reason_code"), "AI_SERVICE_FAILED");
+            }
             if (exception instanceof AiServiceException aiFailure
                     && aiFailure.detail().get("fact_checkpoint") instanceof Map<?, ?> checkpoint) {
                 persistFactCheckpoint(id, jobId, checkpoint, aiFailure);
             }
-            jdbc.update("UPDATE processing_job SET status='FAILED',stage=?,last_failed_stage=?,error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                    failedStage, failedStage, errorMessage, jobId);
+            jdbc.update("UPDATE processing_job SET status='FAILED',stage=?,last_failed_stage=?,reason_code=?,"
+                            + "provider_id=?,model_id=?,provider_request_id=?,response_fingerprint=?,"
+                            + "crossed_provider_boundary=?,error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    failedStage, failedStage, reasonCode,
+                    nullableString(diagnosticProvider), nullableString(diagnosticModel),
+                    nullableString(diagnosticRequestId), nullableString(diagnosticFingerprint),
+                    crossedProviderBoundary, errorMessage, jobId);
             jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "FAILED");
             throw new BusinessException(503, publicFailureMessage(exception));
@@ -408,7 +449,7 @@ public class DocumentService {
         jdbc.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
                     "INSERT INTO processing_job(document_id,job_type,status,stage,progress,trace_id,started_at) "
-                            + "VALUES (?,'FULL_PIPELINE','PROCESSING','EXTRACTING_FACTS',25,?,CURRENT_TIMESTAMP)",
+                            + "VALUES (?,'FULL_PIPELINE','PROCESSING','PREPARING',25,?,CURRENT_TIMESTAMP)",
                     new String[] {"id"});
             statement.setLong(1, documentId);
             statement.setString(2, traceId);

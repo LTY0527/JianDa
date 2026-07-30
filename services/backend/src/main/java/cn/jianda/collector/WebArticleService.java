@@ -86,7 +86,13 @@ public class WebArticleService {
         registryFor(canonical);
         result.put("original_url", url);
         result.put("canonical_url", canonical);
-        result.put("source_domain", URI.create(canonical).getHost().toLowerCase(Locale.ROOT));
+        String originalDomain = URI.create(url).getHost().toLowerCase(Locale.ROOT);
+        String canonicalDomain = URI.create(canonical).getHost().toLowerCase(Locale.ROOT);
+        result.put("source_domain", canonicalDomain);
+        result.put("original_domain", originalDomain);
+        result.put("canonical_domain", canonicalDomain);
+        result.put("canonical_cross_domain", !originalDomain.equals(canonicalDomain));
+        result.put("canonical_confirmation_required", false);
         result.put("source_name", text(result.get("source_name")).isBlank()
                 ? registry.get("source_name") : text(result.get("source_name")));
         result.put("authority_level", registry.get("authority_level"));
@@ -112,6 +118,7 @@ public class WebArticleService {
                 ? "白名单允许在人工确认来源和使用依据后缓存，当前候选尚未公开"
                 : "仅生成机构端审核候选，不缓存或公开第三方图片");
         result.put("external_source_verified", true);
+        result.put("trust_status", "VERIFIED");
         previews.put(url, new CachedPreview(Instant.now().plusSeconds(PREVIEW_TTL_SECONDS), result));
         return result;
     }
@@ -127,9 +134,8 @@ public class WebArticleService {
         String canonical = normalizeUrl(String.valueOf(raw.getOrDefault("canonical_url", url)));
         URI originalUri = URI.create(url);
         URI canonicalUri = URI.create(canonical);
-        if (!originalUri.getHost().equalsIgnoreCase(canonicalUri.getHost())) {
-            throw new BusinessException(400, "canonical 地址与粘贴地址不同源，请先人工核对");
-        }
+        boolean canonicalCrossDomain =
+                !originalUri.getHost().equalsIgnoreCase(canonicalUri.getHost());
         String domain = canonicalUri.getHost().toLowerCase(Locale.ROOT);
         String accountName = text(raw.get("wechat_account_name"));
         String accountSubject = text(raw.get("account_subject"));
@@ -142,10 +148,14 @@ public class WebArticleService {
                 "SELECT i.id,i.source_registry_id,i.official_verified,i.verification_note "
                         + "FROM source_registry_identity i WHERE i.source_identity_fingerprint=?",
                 sha256(identitySeed));
-        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> result = new LinkedHashMap<>(raw);
         result.put("original_url", url);
         result.put("canonical_url", canonical);
         result.put("domain", domain);
+        result.put("original_domain", originalUri.getHost().toLowerCase(Locale.ROOT));
+        result.put("canonical_domain", domain);
+        result.put("canonical_cross_domain", canonicalCrossDomain);
+        result.put("canonical_confirmation_required", canonicalCrossDomain);
         result.put("https", "https".equalsIgnoreCase(canonicalUri.getScheme()));
         result.put("page_title", text(raw.get("title")));
         result.put("source_name", text(raw.get("source_name")));
@@ -165,7 +175,30 @@ public class WebArticleService {
         result.put("verified_identity", identities.isEmpty() ? null : identities.get(0));
         result.put("official_verified", !identities.isEmpty()
                 && Boolean.TRUE.equals(identities.get(0).get("official_verified")));
+        result.put("authority_level", "UNVERIFIED");
+        result.put("external_source_verified", false);
+        result.put("allow_image_cache", false);
+        result.put("allow_image_candidates", webImageCandidatesEnabled);
+        result.put("image_cached", false);
+        result.put("image_reviewed", false);
+        result.put("image_source_name", text(raw.get("source_name")));
+        result.put("image_source_url", canonical);
+        result.put("image_license_note", "未核验网页图片仅作为机构端候选，人工确认前不得公开");
+        result.put("trust_status", "UNVERIFIED");
+        result.put("content_preview", text(raw.get("content_preview")).isBlank()
+                ? abbreviate(text(raw.get("extracted_text")), 500)
+                : text(raw.get("content_preview")));
+        previews.put(url, new CachedPreview(Instant.now().plusSeconds(PREVIEW_TTL_SECONDS), result));
         return result;
+    }
+
+    public Map<String, Object> previewAny(String rawUrl) {
+        String url = normalizeUrl(rawUrl);
+        URI uri = URI.create(url);
+        Integer enabled = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_registry WHERE LOWER(domain)=? AND enabled=TRUE",
+                Integer.class, uri.getHost().toLowerCase(Locale.ROOT));
+        return enabled != null && enabled > 0 ? preview(url) : previewUnregistered(url);
     }
 
     @Transactional
@@ -179,13 +212,76 @@ public class WebArticleService {
         if (duplicate != null && duplicate > 0) {
             throw new BusinessException(409, "该网页或相同正文已经导入，请勿重复操作");
         }
-        return persistArticle(preview, user);
+        return persistRegisteredArticle(preview, user);
+    }
+
+    @Transactional
+    public Map<String, Object> importOneOffArticle(
+            String rawUrl, boolean canonicalConfirmed, AuthUser user) {
+        Map<String, Object> preview = previewUnregistered(rawUrl);
+        if (Boolean.TRUE.equals(preview.get("canonical_confirmation_required"))
+                && !canonicalConfirmed) {
+            throw new BusinessException(409, "网页最终域名与输入域名不同，请人工确认后仅本次导入");
+        }
+        String canonical = text(preview.get("canonical_url"));
+        String contentHash = text(preview.get("content_hash"));
+        Integer duplicate = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_document WHERE canonical_url=? OR content_hash=?",
+                Integer.class, canonical, contentHash);
+        if (duplicate != null && duplicate > 0) {
+            throw new BusinessException(409, "该网页或相同正文已经导入，请勿重复操作");
+        }
+        return persistOneOffArticle(preview, user);
+    }
+
+    @Transactional
+    public Map<String, Object> importPastedArticle(
+            String rawUrl, String rawTitle, String rawSourceName,
+            String rawBody, String rawContentKind, AuthUser user) {
+        String url = normalizeUrl(rawUrl);
+        String title = text(rawTitle).trim();
+        String body = text(rawBody).trim();
+        if (title.isBlank() || body.isBlank()) {
+            throw new BusinessException(400, "标题和粘贴正文不能为空");
+        }
+        String contentHash = sha256(body);
+        Integer duplicate = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_document WHERE canonical_url=? OR content_hash=?",
+                Integer.class, url, contentHash);
+        if (duplicate != null && duplicate > 0) {
+            throw new BusinessException(409, "该网页地址或相同正文已经导入，请勿重复操作");
+        }
+        String domain = URI.create(url).getHost().toLowerCase(Locale.ROOT);
+        String contentKind = text(rawContentKind).trim();
+        if (!List.of("HEALTH_EDUCATION", "POLICY_NEWS", "ANTI_FRAUD",
+                "COMMUNITY_SERVICE", "SERVICE_NOTICE", "CULTURE_EDUCATION").contains(contentKind)) {
+            contentKind = "SERVICE_NOTICE";
+        }
+        Map<String, Object> preview = new LinkedHashMap<>();
+        preview.put("original_url", url);
+        preview.put("canonical_url", url);
+        preview.put("source_domain", domain);
+        preview.put("source_name", defaultString(text(rawSourceName).trim(), domain));
+        preview.put("title", title);
+        preview.put("extracted_text", body);
+        preview.put("content_hash", contentHash);
+        preview.put("content_kind", contentKind);
+        preview.put("cover_image_type", "CATEGORY_DEFAULT");
+        preview.put("images", List.of());
+        preview.put("robots_status", "MANUAL_PASTE");
+        preview.put("original_page_available", false);
+        preview.put("image_source_name", "简达分类默认图");
+        preview.put("image_source_url", url);
+        preview.put("image_alt_text", title);
+        preview.put("image_license_note", "网页正文由机构人员手工粘贴，未抓取或使用第三方图片");
+        return persistOneOffArticle(preview, user);
     }
 
     @Transactional
     public int rescanImageCandidates(long documentId, AuthUser user) {
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT organization_id,source_type,original_url,canonical_url FROM source_document WHERE id=?",
+                "SELECT organization_id,source_type,original_url,canonical_url,external_source_verified "
+                        + "FROM source_document WHERE id=?",
                 documentId);
         if (rows.isEmpty() || !"WEB_ARTICLE".equals(rows.get(0).get("source_type"))) {
             throw new BusinessException(404, "网页文章不存在");
@@ -197,7 +293,9 @@ public class WebArticleService {
         }
         String original = text(rows.get(0).get("original_url"));
         if (original.isBlank()) original = text(rows.get(0).get("canonical_url"));
-        Map<String, Object> refreshed = preview(original);
+        Map<String, Object> refreshed = Boolean.TRUE.equals(rows.get(0).get("external_source_verified"))
+                ? preview(original)
+                : previewUnregistered(original);
         imageCandidateService.persist(documentId, text(refreshed.get("canonical_url")), refreshed.get("images"));
         Integer count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM image_candidate WHERE document_id=? AND review_status='PENDING'",
@@ -256,14 +354,32 @@ public class WebArticleService {
         if (duplicate != null && duplicate > 0) {
             throw new BusinessException(409, "该网页或相同正文已经导入，请勿重复操作");
         }
-        return persistArticle(preview, user);
+        return persistRegisteredArticle(preview, user);
     }
 
-    private Map<String, Object> persistArticle(Map<String, Object> preview, AuthUser user) {
+    private Map<String, Object> persistRegisteredArticle(
+            Map<String, Object> preview, AuthUser user) {
+        return persistArticle(preview, user, number(preview.get("source_registry_id")));
+    }
+
+    private Map<String, Object> persistOneOffArticle(
+            Map<String, Object> preview, AuthUser user) {
+        preview.put("source_registry_id", null);
+        preview.put("authority_level", "UNVERIFIED");
+        preview.put("external_source_verified", false);
+        preview.put("allow_image_cache", false);
+        preview.put("image_cached", false);
+        preview.put("image_reviewed", false);
+        return persistArticle(preview, user, null);
+    }
+
+    private Map<String, Object> persistArticle(
+            Map<String, Object> preview, AuthUser user, Long registryId) {
         String canonical = text(preview.get("canonical_url"));
         String contentHash = text(preview.get("content_hash"));
-        long registryId = number(preview.get("source_registry_id"));
-        long sourceId = ensureContentSource(registryId, preview);
+        long sourceId = registryId == null
+                ? ensureOneOffContentSource(preview, user)
+                : ensureContentSource(registryId, preview);
         String body = text(preview.get("extracted_text"));
         String contentKind = text(preview.get("content_kind"));
         String category = categoryFor(contentKind);
@@ -280,7 +396,7 @@ public class WebArticleService {
                             + "extracted_text,crawl_status,robots_status,original_page_available,external_source_verified,"
                             + "content_kind,prompt_version,schema_version) "
                             + "VALUES (?,?,?,'text/html',?,1,'UPLOADED',?,?,?,?,?,?,'WEB_URL','WEB_ARTICLE',?,?,?,?,?,?,?,?,"
-                            + "?,?,?,?,?,?,?,?,?,?,?,?,?,'SUCCEEDED',?,TRUE,TRUE,?,'web-v1.1','1.1')",
+                            + "?,?,?,?,?,?,?,?,?,?,?,?,?,'SUCCEEDED',?,?,?,?,'web-v1.1','1.1')",
                     new String[] {"id"});
             int index = 1;
             statement.setLong(index++, user.organizationId());
@@ -315,6 +431,8 @@ public class WebArticleService {
             statement.setString(index++, text(preview.get("original_html")));
             statement.setString(index++, body);
             statement.setString(index++, text(preview.get("robots_status")));
+            statement.setBoolean(index++, !Boolean.FALSE.equals(preview.get("original_page_available")));
+            statement.setBoolean(index++, Boolean.TRUE.equals(preview.get("external_source_verified")));
             statement.setString(index, contentKind);
             return statement;
         }, keys);
@@ -325,20 +443,24 @@ public class WebArticleService {
         imageCandidateService.persist(documentId, canonical, preview.get("images"));
         jdbc.update("INSERT INTO document_segment(document_id,page_no,segment_no,text,start_offset,end_offset) VALUES (?,1,1,?,0,?)",
                 documentId, body, body.length());
-        Integer canonicalJobCount = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM crawl_job WHERE source_registry_id=? AND canonical_url=?",
-                Integer.class, registryId, text(preview.get("canonical_url")));
-        String jobCanonical = canonicalJobCount != null && canonicalJobCount > 0
-                ? null : text(preview.get("canonical_url"));
-        jdbc.update("INSERT INTO crawl_job(source_registry_id,document_id,original_url,canonical_url,status,trigger_type,"
-                        + "processing_stage,discovered_at,started_at,finished_at,last_success_at,discovered_count,added_count,created_by) "
-                        + "VALUES (?,?,?,?,'SUCCESS','MANUAL','IMPORT',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,"
-                        + "CURRENT_TIMESTAMP,1,1,?)",
-                registryId, documentId, text(preview.get("original_url")), jobCanonical, user.id());
-        jdbc.update("UPDATE source_registry SET last_crawled_at=CURRENT_TIMESTAMP WHERE id=?", registryId);
+        Long crawlJobId = null;
+        if (registryId != null) {
+            Integer canonicalJobCount = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM crawl_job WHERE source_registry_id=? AND canonical_url=?",
+                    Integer.class, registryId, text(preview.get("canonical_url")));
+            String jobCanonical = canonicalJobCount != null && canonicalJobCount > 0
+                    ? null : text(preview.get("canonical_url"));
+            jdbc.update("INSERT INTO crawl_job(source_registry_id,document_id,original_url,canonical_url,status,trigger_type,"
+                            + "processing_stage,discovered_at,started_at,finished_at,last_success_at,discovered_count,added_count,created_by) "
+                            + "VALUES (?,?,?,?,'SUCCESS','MANUAL','IMPORT',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,"
+                            + "CURRENT_TIMESTAMP,1,1,?)",
+                    registryId, documentId, text(preview.get("original_url")), jobCanonical, user.id());
+            crawlJobId = jdbc.queryForObject(
+                    "SELECT MAX(id) FROM crawl_job WHERE document_id=?", Long.class, documentId);
+            jdbc.update("UPDATE source_registry SET last_crawled_at=CURRENT_TIMESTAMP WHERE id=?", registryId);
+        }
         jdbc.update("UPDATE content_source SET last_imported_at=CURRENT_TIMESTAMP WHERE id=?", sourceId);
-        Map<String, Object> queued = aiQueueService.enqueue(documentId, registryId,
-                jdbc.queryForObject("SELECT MAX(id) FROM crawl_job WHERE document_id=?", Long.class, documentId));
+        Map<String, Object> queued = aiQueueService.enqueue(documentId, registryId, crawlJobId);
         log(user, "IMPORT_WEB_ARTICLE", documentId, "SUCCESS");
         return Map.of("documentId", documentId, "status", "UPLOADED", "contentKind", contentKind,
                 "imageReviewRequired", !categoryDefault, "aiQueueStatus", queued.get("status"));
@@ -433,7 +555,7 @@ public class WebArticleService {
                     "SELECT COALESCE(MAX(version_no),0)+1 FROM source_document WHERE version_root_id=?",
                     Integer.class, rootId);
             int nextVersion = nextVersionValue == null ? 2 : nextVersionValue;
-            Map<String, Object> created = persistArticle(refreshed, user);
+            Map<String, Object> created = persistRegisteredArticle(refreshed, user);
             long newDocumentId = number(created.get("documentId"));
             String oldHash = text(current.get("content_hash"));
             jdbc.update("UPDATE source_document SET previous_version_id=?,version_root_id=?,version_no=?,"
@@ -548,6 +670,33 @@ public class WebArticleService {
         return generatedSourceId.longValue();
     }
 
+    private long ensureOneOffContentSource(
+            Map<String, Object> preview, AuthUser user) {
+        String root = URI.create(text(preview.get("canonical_url"))).resolve("/").toString();
+        List<Long> ids = jdbc.query(
+                "SELECT id FROM content_source WHERE organization_id=? AND source_url=? "
+                        + "AND whitelist_status='UNVERIFIED' ORDER BY id LIMIT 1",
+                (row, index) -> row.getLong(1), user.organizationId(), root);
+        if (!ids.isEmpty()) return ids.get(0);
+        GeneratedKeyHolder keys = new GeneratedKeyHolder();
+        jdbc.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO content_source(organization_id,source_type,source_name,source_url,publisher,status,"
+                            + "whitelist_status,enabled,notes) VALUES (?,'WEB_ARTICLE',?,?,?,'ACTIVE','UNVERIFIED',TRUE,?)",
+                    new String[] {"id"});
+            statement.setLong(1, user.organizationId());
+            statement.setString(2, defaultString(text(preview.get("source_name")),
+                    URI.create(root).getHost()));
+            statement.setString(3, root);
+            statement.setString(4, defaultString(text(preview.get("source_name")), "未核验网页"));
+            statement.setString(5, "仅本次手工导入；不进入自动采集，发布前必须人工核验来源");
+            return statement;
+        }, keys);
+        Number generatedSourceId = keys.getKey();
+        if (generatedSourceId == null) throw new IllegalStateException("未取得内容来源编号");
+        return generatedSourceId.longValue();
+    }
+
     private static String normalizeUrl(String value) {
         String trimmed = value == null ? "" : value.trim();
         try {
@@ -647,6 +796,15 @@ public class WebArticleService {
         if (detail < 0) return fallback;
         String sanitized = message.substring(detail + 9).replaceAll("[{}\"\\\\]", "").trim();
         return sanitized.isBlank() ? fallback : sanitized;
+    }
+
+    private static String defaultString(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String abbreviate(String value, int max) {
+        if (value == null || value.length() <= max) return value == null ? "" : value;
+        return value.substring(0, max) + "…";
     }
 
     private void log(AuthUser user, String action, long targetId, String result) {

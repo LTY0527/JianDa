@@ -50,8 +50,10 @@ public class ArticleDiscoveryService {
             throw new BusinessException(502, "文章发现入口暂时无法访问或解析");
         }
         Object rawCandidates = response.get("candidates");
-        List<Map<String, Object>> candidates = rawCandidates instanceof List<?> list
-                ? sanitizeCandidates(sourceId, list) : List.of();
+        SanitizedCandidates sanitized = rawCandidates instanceof List<?> list
+                ? sanitizeCandidates(sourceId, source, list)
+                : new SanitizedCandidates(List.of(), 0, List.of());
+        List<Map<String, Object>> candidates = sanitized.candidates();
         candidates = filterCandidates(candidates, options);
         int duplicates = 0;
         for (Map<String, Object> candidate : candidates) {
@@ -63,6 +65,8 @@ public class ArticleDiscoveryService {
                 errors.isEmpty() ? null : safeError(errors), sourceId);
         return Map.of("sourceId", sourceId, "method", selectedMethod, "candidates", candidates,
                 "duplicateCount", duplicates,
+                "filtered_external_count", sanitized.filteredCount(),
+                "filtered_external_domains", sanitized.filteredDomains(),
                 "errors", errors.stream().limit(100).map(String::valueOf).toList());
     }
 
@@ -124,7 +128,7 @@ public class ArticleDiscoveryService {
 
     private Map<String, Object> enabledSource(long sourceId) {
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT id,domain,homepage_url,rss_url,sitemap_url,section_url,discovery_mode,rate_limit,enabled "
+                "SELECT id,domain,allowed_hosts,homepage_url,rss_url,sitemap_url,section_url,discovery_mode,rate_limit,enabled "
                         + "FROM source_registry WHERE id=? AND enabled=TRUE", sourceId);
         if (rows.isEmpty()) throw new BusinessException(403, "来源不存在或尚未启用，不能执行文章发现");
         return rows.get(0);
@@ -149,7 +153,7 @@ public class ArticleDiscoveryService {
             URI uri = URI.create(rawUrl.trim()).normalize();
             if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
                     || uri.getHost() == null || uri.getUserInfo() != null
-                    || !uri.getHost().equalsIgnoreCase(String.valueOf(source.get("domain")))) {
+                    || !hostAllowed(uri.getHost(), source)) {
                 throw new IllegalArgumentException();
             }
             return uri.toString();
@@ -158,14 +162,30 @@ public class ArticleDiscoveryService {
         }
     }
 
-    private static List<Map<String, Object>> sanitizeCandidates(long sourceId, List<?> raw) {
+    private static SanitizedCandidates sanitizeCandidates(
+            long sourceId, Map<String, Object> source, List<?> raw) {
         List<Map<String, Object>> result = new ArrayList<>();
         Set<String> seen = new java.util.HashSet<>();
+        Set<String> filteredDomains = new java.util.LinkedHashSet<>();
+        int filteredCount = 0;
         for (Object value : raw) {
             if (!(value instanceof Map<?, ?> candidate)) continue;
             String canonical = text(candidate.get("canonical_url"));
             String dedup = text(candidate.get("dedup_key"));
             if (canonical.isBlank() || dedup.isBlank() || !seen.add(dedup)) continue;
+            String host;
+            try {
+                host = URI.create(canonical).getHost();
+            } catch (IllegalArgumentException exception) {
+                host = null;
+            }
+            if (host == null || !hostAllowed(host, source)) {
+                filteredCount++;
+                if (host != null && filteredDomains.size() < 5) {
+                    filteredDomains.add(host.toLowerCase(Locale.ROOT));
+                }
+                continue;
+            }
             Map<String, Object> safe = new LinkedHashMap<>();
             safe.put("source_id", sourceId);
             for (String key : List.of("discovered_url", "canonical_url", "title", "published_time",
@@ -175,7 +195,22 @@ public class ArticleDiscoveryService {
             result.add(safe);
             if (result.size() >= 100) break;
         }
-        return result;
+        return new SanitizedCandidates(
+                result, filteredCount, List.copyOf(filteredDomains));
+    }
+
+    private static boolean hostAllowed(
+            String rawHost, Map<String, Object> source) {
+        String host = rawHost.toLowerCase(Locale.ROOT);
+        String domain = text(source.get("domain")).toLowerCase(Locale.ROOT);
+        if (host.equals(domain) || host.endsWith("." + domain)) return true;
+        return java.util.Arrays.stream(text(source.get("allowed_hosts"))
+                        .split("[,，;；\\s]+"))
+                .map(String::trim)
+                .filter(item -> !item.isBlank())
+                .map(item -> item.toLowerCase(Locale.ROOT))
+                .anyMatch(allowed ->
+                        host.equals(allowed) || host.endsWith("." + allowed));
     }
 
     private static String safeError(List<?> errors) {
@@ -189,4 +224,9 @@ public class ArticleDiscoveryService {
 
     public record DiscoveryOptions(Integer recentDays, Integer maxArticles, String includeKeywords,
             String excludeKeywords, Boolean onlyUnimported) {}
+
+    private record SanitizedCandidates(
+            List<Map<String, Object>> candidates,
+            int filteredCount,
+            List<String> filteredDomains) {}
 }

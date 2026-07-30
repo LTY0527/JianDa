@@ -102,6 +102,11 @@ export interface ProcessingJob {
   stage?: string;
   last_failed_stage?: string;
   provider_request_id?: string;
+  reason_code?: string;
+  provider_id?: string;
+  model_id?: string;
+  response_fingerprint?: string;
+  crossed_provider_boundary?: boolean;
   fact_checkpoint_json?: string;
   retry_count?: number;
   cache_hit?: boolean;

@@ -217,6 +217,11 @@ class ProcessingMetrics(BaseModel):
     trace_pass_rate: float = 0
     hallucinated_field_count: int = 0
     markdown_residue_count: int = 0
+    provider: str = "mock"
+    model: str = ""
+    http_status: int = 200
+    request_id: str = ""
+    response_fingerprint: str = ""
 
 
 class StepCard(BaseModel):

@@ -18,6 +18,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -31,6 +35,13 @@ public class CoverBackfillService {
     private final ImageCandidateService imageCandidateService;
     private final Path uploadRoot;
     private final boolean enabled;
+    private final AtomicLong jobSequence = new AtomicLong();
+    private final ConcurrentMap<Long, Map<String, Object>> jobs =
+            new ConcurrentHashMap<>();
+    private final ConcurrentMap<Long, List<Map<String, Object>>> jobItems =
+            new ConcurrentHashMap<>();
+    private final ConcurrentMap<Long, AuthUser> jobUsers =
+            new ConcurrentHashMap<>();
 
     public CoverBackfillService(
             JdbcTemplate jdbc, AiClient aiClient, WebArticleService webArticleService,
@@ -78,7 +89,8 @@ public class CoverBackfillService {
                     webArticleService.rescanImageCandidates(documentId, user);
                     int after = pendingCandidates(documentId);
                     candidatesCreated += Math.max(0, after - before);
-                    if (imageCandidateService.autoApproveFirst(documentId, user)) {
+                    if (isVerifiedWebDocument(documentId)
+                            && imageCandidateService.autoApproveFirst(documentId, user)) {
                         autoApproved++;
                         updated++;
                     }
@@ -93,6 +105,190 @@ public class CoverBackfillService {
         return Map.of("scanned", Math.min(items.size(), 100), "updated", updated,
                 "candidatesCreated", candidatesCreated, "autoApproved", autoApproved,
                 "failed", errors.size(), "errors", errors);
+    }
+
+    public Map<String, Object> startJob(BackfillFilter filter, AuthUser user) {
+        assertEnabled();
+        List<Map<String, Object>> items =
+                candidates(filter).stream().limit(100).toList();
+        long jobId = jobSequence.incrementAndGet();
+        Map<String, Object> state = initialJob(jobId, items.size());
+        jobs.put(jobId, state);
+        jobItems.put(jobId, items);
+        jobUsers.put(jobId, user);
+        CompletableFuture.runAsync(() -> runJob(jobId, items, user));
+        return new LinkedHashMap<>(state);
+    }
+
+    public Map<String, Object> job(long jobId) {
+        Map<String, Object> state = jobs.get(jobId);
+        if (state == null) throw new BusinessException(404, "历史补图任务不存在");
+        synchronized (state) {
+            return new LinkedHashMap<>(state);
+        }
+    }
+
+    public Map<String, Object> retry(long jobId, long documentId) {
+        Map<String, Object> state = jobs.get(jobId);
+        List<Map<String, Object>> items = jobItems.get(jobId);
+        AuthUser user = jobUsers.get(jobId);
+        if (state == null || items == null || user == null) {
+            throw new BusinessException(404, "历史补图任务不存在");
+        }
+        Map<String, Object> item = items.stream()
+                .filter(candidate -> ((Number) candidate.get("id")).longValue() == documentId)
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(404, "该失败材料不属于此补图任务"));
+        synchronized (state) {
+            state.put("status", "RUNNING");
+            state.put("currentDocumentId", documentId);
+            state.put("currentDocumentTitle", text(item.get("title")));
+        }
+        CompletableFuture.runAsync(() -> {
+            try {
+                ProcessResult result = processItem(item, user);
+                synchronized (state) {
+                    state.put("updated", integer(state.get("updated")) + result.updated());
+                    state.put("candidatesCreated",
+                            integer(state.get("candidatesCreated")) + result.candidatesCreated());
+                    state.put("autoApproved",
+                            integer(state.get("autoApproved")) + result.autoApproved());
+                    removeError(state, documentId);
+                    state.put("failed", errorCount(state));
+                    state.put("status", "SUCCEEDED");
+                    clearCurrent(state);
+                }
+            } catch (RuntimeException exception) {
+                synchronized (state) {
+                    replaceError(state, documentId, safeMessage(exception));
+                    state.put("failed", errorCount(state));
+                    state.put("status", "PARTIAL_SUCCESS");
+                    clearCurrent(state);
+                }
+            }
+        });
+        return job(jobId);
+    }
+
+    private void runJob(long jobId, List<Map<String, Object>> items, AuthUser user) {
+        Map<String, Object> state = jobs.get(jobId);
+        synchronized (state) {
+            state.put("status", "RUNNING");
+        }
+        for (int batchStart = 0; batchStart < items.size(); batchStart += 5) {
+            List<Map<String, Object>> batch =
+                    items.subList(batchStart, Math.min(batchStart + 5, items.size()));
+            for (Map<String, Object> item : batch) {
+                long documentId = ((Number) item.get("id")).longValue();
+                synchronized (state) {
+                    state.put("currentDocumentId", documentId);
+                    state.put("currentDocumentTitle", text(item.get("title")));
+                }
+                try {
+                    ProcessResult result = processItem(item, user);
+                    synchronized (state) {
+                        state.put("updated", integer(state.get("updated")) + result.updated());
+                        state.put("candidatesCreated",
+                                integer(state.get("candidatesCreated")) + result.candidatesCreated());
+                        state.put("autoApproved",
+                                integer(state.get("autoApproved")) + result.autoApproved());
+                    }
+                } catch (RuntimeException exception) {
+                    synchronized (state) {
+                        addError(state, documentId, safeMessage(exception));
+                        state.put("failed", integer(state.get("failed")) + 1);
+                    }
+                } finally {
+                    synchronized (state) {
+                        state.put("processed", integer(state.get("processed")) + 1);
+                    }
+                }
+            }
+        }
+        synchronized (state) {
+            state.put("status", integer(state.get("failed")) > 0
+                    ? "PARTIAL_SUCCESS" : "SUCCEEDED");
+            clearCurrent(state);
+        }
+    }
+
+    private ProcessResult processItem(Map<String, Object> item, AuthUser user) {
+        long documentId = ((Number) item.get("id")).longValue();
+        String sourceType = text(item.get("source_type"));
+        if ("PDF".equals(sourceType)) {
+            createPdfCover(item, user);
+            return new ProcessResult(1, 0, 0);
+        }
+        if ("IMAGE".equals(sourceType)) {
+            useUploadedImage(item, user);
+            return new ProcessResult(1, 0, 0);
+        }
+        if ("WEB_ARTICLE".equals(sourceType)) {
+            int before = pendingCandidates(documentId);
+            webArticleService.rescanImageCandidates(documentId, user);
+            int created = Math.max(0, pendingCandidates(documentId) - before);
+            boolean approved = isVerifiedWebDocument(documentId)
+                    && imageCandidateService.autoApproveFirst(documentId, user);
+            return new ProcessResult(approved ? 1 : 0, created, approved ? 1 : 0);
+        }
+        throw new BusinessException(400, "不支持的历史材料类型");
+    }
+
+    private boolean isVerifiedWebDocument(long documentId) {
+        Boolean verified = jdbc.queryForObject(
+                "SELECT external_source_verified FROM source_document WHERE id=?",
+                Boolean.class, documentId);
+        return Boolean.TRUE.equals(verified);
+    }
+
+    private static Map<String, Object> initialJob(long jobId, int total) {
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("jobId", jobId);
+        state.put("status", "PENDING");
+        state.put("total", total);
+        state.put("processed", 0);
+        state.put("updated", 0);
+        state.put("candidatesCreated", 0);
+        state.put("autoApproved", 0);
+        state.put("failed", 0);
+        state.put("currentDocumentId", null);
+        state.put("currentDocumentTitle", "");
+        state.put("errors", new ArrayList<Map<String, Object>>());
+        return state;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> errors(Map<String, Object> state) {
+        return (List<Map<String, Object>>) state.get("errors");
+    }
+
+    private static void addError(
+            Map<String, Object> state, long documentId, String message) {
+        errors(state).add(Map.of("documentId", documentId, "message", message));
+    }
+
+    private static void replaceError(
+            Map<String, Object> state, long documentId, String message) {
+        removeError(state, documentId);
+        addError(state, documentId, message);
+    }
+
+    private static void removeError(Map<String, Object> state, long documentId) {
+        errors(state).removeIf(error ->
+                ((Number) error.get("documentId")).longValue() == documentId);
+    }
+
+    private static int errorCount(Map<String, Object> state) {
+        return errors(state).size();
+    }
+
+    private static int integer(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private static void clearCurrent(Map<String, Object> state) {
+        state.put("currentDocumentId", null);
+        state.put("currentDocumentTitle", "");
     }
 
     private List<Map<String, Object>> candidates(BackfillFilter rawFilter) {
@@ -240,4 +436,7 @@ public class CoverBackfillService {
 
     public record BackfillFilter(Boolean onlyMissing, Long sourceId, String contentKind,
             String publishStatus, LocalDate fromDate, LocalDate toDate) {}
+
+    private record ProcessResult(
+            int updated, int candidatesCreated, int autoApproved) {}
 }

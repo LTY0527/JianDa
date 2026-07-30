@@ -69,8 +69,11 @@ async function submit() {
     const created = await documentApi.create(title.value, sourceName.value, metadata.value);
     const id = created.data.data.id;
     await documentApi.upload(id, file.value);
-    await documentApi.process(id);
-    await router.push(`/documents/${id}/process`);
+    const processing = await documentApi.process(id);
+    await router.push({
+      path: `/documents/${id}/process`,
+      query: { jobId: processing.data.data.jobId },
+    });
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -82,7 +85,7 @@ async function submit() {
   <div class="narrow">
     <PageHeader
       title="新增材料"
-      description="上传 PDF、图片，或从白名单官方来源导入网页文章。"
+      description="上传 PDF、图片，或安全导入任意无需登录的公开网页。"
     />
     <div class="import-tabs material-source-tabs" role="tablist" aria-label="材料导入方式">
       <button :class="{ active: mode === 'file' }" @click="mode = 'file'">

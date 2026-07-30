@@ -75,6 +75,15 @@ export interface WebArticlePreview {
   image_source_url?: string;
   image_cached: boolean;
   image_license_note?: string;
+  original_domain?: string;
+  canonical_domain?: string;
+  canonical_cross_domain?: boolean;
+  canonical_confirmation_required?: boolean;
+  trust_status?: "VERIFIED" | "UNVERIFIED";
+  external_source_verified?: boolean;
+  registered_source?: Pick<WebSourceRegistry, "id" | "source_name" | "source_type" | "enabled">;
+  source_type_suggestion?: string;
+  images?: Array<Record<string, unknown>>;
 }
 
 export interface ImageCandidate {
@@ -100,6 +109,7 @@ export interface ImageCandidate {
 export interface WebSourceRegistry {
   id: number;
   domain: string;
+  allowed_hosts?: string;
   source_name: string;
   source_type: string;
   authority_level: string;
@@ -158,9 +168,20 @@ export interface AiQueueItem {
   created_at?: string;
 }
 
+export interface RuntimeCapabilities {
+  llmProvider: string;
+  externalModel: string;
+  assistantExternalEnabled: boolean;
+  crawlAutoAiEnabled: boolean;
+  crawlSchedulerEnabled: boolean;
+  dailyArticleLimit: number;
+  dailyTokenLimit: number;
+}
+
 export interface SourceRegistryPayload {
   name: string;
   domain: string;
+  allowedHosts: string;
   type: string;
   authorityLevel: string;
   homepageUrl: string;
@@ -231,12 +252,28 @@ export interface CoverBackfillResult {
   errors: Array<{ documentId: number; message: string }>;
 }
 
+export interface CoverBackfillJob {
+  jobId: number;
+  status: "PENDING" | "RUNNING" | "SUCCEEDED" | "PARTIAL_SUCCESS";
+  total: number;
+  processed: number;
+  updated: number;
+  candidatesCreated: number;
+  autoApproved: number;
+  failed: number;
+  currentDocumentId?: number;
+  currentDocumentTitle?: string;
+  errors: Array<{ documentId: number; message: string }>;
+}
+
 export interface ArticleDiscoveryResult {
   sourceId: number;
   method: string;
   candidates: ArticleDiscoveryCandidate[];
   duplicateCount: number;
   errors: string[];
+  filtered_external_count?: number;
+  filtered_external_domains?: string[];
 }
 
 export interface CrawlJobError {
@@ -315,12 +352,30 @@ export const publicSourceApi = {
       `/public-sources/imports/${documentId}/process`,
     ),
   previewWebArticle: (url: string) =>
-    http.post<ApiResponse<WebArticlePreview>>("/web-articles/preview", { url }),
+    http.post<ApiResponse<WebArticlePreview>>("/web-articles/preview-any", { url }),
   importWebArticle: (url: string) =>
     http.post<ApiResponse<{ documentId: number; imageReviewRequired: boolean }>>(
       "/web-articles/import",
       { url },
     ),
+  importWebArticleOnce: (url: string, canonicalConfirmed: boolean) =>
+    http.post<ApiResponse<{
+      documentId: number;
+      imageReviewRequired: boolean;
+      aiQueueStatus: string;
+    }>>("/web-articles/import-once", { url, canonicalConfirmed }),
+  importPastedWebArticle: (payload: {
+    url: string;
+    title: string;
+    sourceName: string;
+    body: string;
+    contentKind: string;
+  }) =>
+    http.post<ApiResponse<{
+      documentId: number;
+      imageReviewRequired: boolean;
+      aiQueueStatus: string;
+    }>>("/web-articles/import-pasted", payload),
   confirmWebCover: (documentId: number) =>
     http.post<ApiResponse<null>>(`/web-articles/${documentId}/cover/confirm`),
   useCategoryDefaultCover: (documentId: number) =>
@@ -412,6 +467,20 @@ export const publicSourceApi = {
     fromDate?: string;
     toDate?: string;
   }) => http.post<ApiResponse<CoverBackfillResult>>("/cover-backfill/execute", payload),
+  startCoverBackfillJob: (payload: {
+    onlyMissing: boolean;
+    sourceId?: number;
+    contentKind?: string;
+    publishStatus?: string;
+    fromDate?: string;
+    toDate?: string;
+  }) => http.post<ApiResponse<CoverBackfillJob>>("/cover-backfill/jobs", payload),
+  coverBackfillJob: (jobId: number) =>
+    http.get<ApiResponse<CoverBackfillJob>>(`/cover-backfill/jobs/${jobId}`),
+  retryCoverBackfillItem: (jobId: number, documentId: number) =>
+    http.post<ApiResponse<CoverBackfillJob>>(
+      `/cover-backfill/jobs/${jobId}/retry/${documentId}`,
+    ),
   crawlJobs: (params?: { status?: string; sourceId?: number }) =>
     http.get<ApiResponse<CrawlJob[]>>("/crawl-tasks", { params }),
   crawlJob: (jobId: number) =>
@@ -428,4 +497,12 @@ export const publicSourceApi = {
     }),
   approveAiQueue: (queueId: number) =>
     http.post<ApiResponse<Record<string, unknown>>>(`/ai-queue/${queueId}/approve`),
+  retryAiQueue: (queueId: number) =>
+    http.post<ApiResponse<Record<string, unknown>>>(`/ai-queue/${queueId}/retry`),
+  reconcileAiQueue: () =>
+    http.post<ApiResponse<{ requeued: number; unchanged: number }>>(
+      "/ai-queue/reconcile",
+    ),
+  runtimeCapabilities: () =>
+    http.get<ApiResponse<RuntimeCapabilities>>("/runtime-capabilities"),
 };

@@ -803,6 +803,14 @@ class ExternalLlmProvider(LlmProvider):
             markdown_residue_count=len(
                 re.findall(r"#{1,6}\s|\*\*|```|<[^>]+>", rewrite.plain_text)
             ),
+            provider="external",
+            model=self.settings.model,
+            http_status=200,
+            request_id=",".join(filter(None, (
+                fact_result.request_id,
+                rewrite_result.request_id,
+            )))[:240],
+            response_fingerprint=fact_result.response_sha256[:16],
         )
         result = AnalyzeResult(
             fields=[

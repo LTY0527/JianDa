@@ -20,6 +20,7 @@ import {
 import { authorityLevelLabel, contentKindLabel } from "../utils/display";
 const route = useRoute();
 const documentId = Number(route.params.id);
+const requestedJobId = Number(route.query.jobId || 0);
 const fields = ref<any[]>([]);
 const steps = ref<[string, string][]>([]);
 const summary = ref<string[]>([]);
@@ -35,13 +36,20 @@ const lastUpdatedAt = ref<Date | null>(null);
 const elapsedSeconds = ref(0);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
-const latestJob = computed(() => jobs.value[0]);
+const latestJob = computed(
+  () =>
+    (requestedJobId
+      ? jobs.value.find((job) => job.id === requestedJobId)
+      : undefined) || jobs.value[0],
+);
 const terminalStatuses = new Set([
   "WAITING_REVIEW",
   "FAILED",
   "WAITING_BUDGET",
+  "WAITING_APPROVAL",
   "CANCELLED",
   "PUBLISHED",
+  "SUCCEEDED",
 ]);
 const terminal = computed(
   () =>
@@ -103,6 +111,8 @@ const stageText: Record<string, string> = {
   GENERATING_ACCESSIBLE_CONTENT: "正在生成通俗内容",
   SAVING_RESULT: "正在保存结果",
   WAITING_BUDGET: "等待 AI 预算恢复",
+  WAITING_APPROVAL: "等待人工批准 AI",
+  PREPARING: "正在准备材料与安全校验",
   CANCELLED: "任务已取消",
   QUEUE_REJECTED: "后台处理队列暂时已满",
   REWRITE_PENDING: "事实提取已保留，等待适老化改写",
@@ -355,9 +365,16 @@ onUnmounted(() => {
       <div>
         <h2>{{ rewriteRecoverable ? "事实提取已完成，适老化改写失败" : "本次处理没有生成可审核结果" }}</h2>
         <p>{{ failureMessage }}</p>
-        <p v-if="rewriteRecoverable" class="info-note">
-          已保留 {{ fields.length }} 个可追溯事实字段，不会再次调用事实提取。
+        <p v-if="latestJob" class="info-note">
+          <span v-if="rewriteRecoverable">
+            已保留 {{ fields.length }} 个可追溯事实字段，不会再次调用事实提取。
+          </span>
           <span v-if="latestJob?.provider_request_id">请求编号：{{ latestJob.provider_request_id }}</span>
+          <span v-if="latestJob?.reason_code">原因代码：{{ latestJob.reason_code }}</span>
+          <span v-if="latestJob?.provider_id">Provider：{{ latestJob.provider_id }}</span>
+          <span v-if="latestJob?.model_id">模型：{{ latestJob.model_id }}</span>
+          <span v-if="latestJob?.response_fingerprint">响应指纹：{{ latestJob.response_fingerprint }}</span>
+          <span>已跨过真实模型调用边界：{{ latestJob?.crossed_provider_boundary ? "是" : "否" }}</span>
           <span>重试次数：{{ latestJob?.retry_count || 0 }}</span>
         </p>
         <div>

@@ -30,7 +30,7 @@ public class SourceRegistryService {
     private static final Set<String> IMAGE_POLICIES = Set.of(
             "MANUAL_REVIEW", "ORGANIZATION_OWNED", "OFFICIAL_PUBLICITY",
             "AUTHORIZED", "LOCAL_DEMO_CONFIRMED");
-    private static final String PUBLIC_COLUMNS = "id,domain,source_name,source_type,authority_level,enabled,"
+    private static final String PUBLIC_COLUMNS = "id,domain,allowed_hosts,source_name,source_type,authority_level,enabled,"
             + "crawl_mode,discovery_mode,homepage_url,rss_url,sitemap_url,section_url,daily_crawl_time,"
             + "max_articles_per_run,allow_image_candidates,allow_auto_ai,daily_article_budget,daily_token_budget,"
             + "schedule_mode,interval_hours,schedule_timezone,recent_days,include_keywords,exclude_keywords,"
@@ -98,14 +98,14 @@ public class SourceRegistryService {
         Integer duplicate = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM source_registry WHERE domain=? AND id<>?", Integer.class, value.domain(), id);
         if (duplicate != null && duplicate > 0) throw new BusinessException(409, "该完整域名已存在");
-        int changed = jdbc.update("UPDATE source_registry SET domain=?,source_name=?,source_type=?,authority_level=?,"
+        int changed = jdbc.update("UPDATE source_registry SET domain=?,allowed_hosts=?,source_name=?,source_type=?,authority_level=?,"
                         + "discovery_mode=?,homepage_url=?,rss_url=?,sitemap_url=?,section_url=?,daily_crawl_time=?,"
                         + "max_articles_per_run=?,allow_image_candidates=?,allow_auto_ai=?,daily_article_budget=?,daily_token_budget=?,"
                         + "schedule_mode=?,interval_hours=?,schedule_timezone=?,recent_days=?,include_keywords=?,exclude_keywords=?,"
                         + "auto_save_draft=?,duplicate_strategy=?,max_retries=?,image_usage_policy=?,image_usage_basis=?,"
                         + "auto_approve_images=?,image_cache_allowed=?,allow_image_cache=?,image_policy_reviewed_by=?,image_policy_reviewed_at=?,"
                         + "operator_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                value.domain(), value.name(), value.type(), value.authorityLevel(), value.discoveryMode(),
+                value.domain(), value.allowedHosts(), value.name(), value.type(), value.authorityLevel(), value.discoveryMode(),
                 value.homepageUrl(), value.rssUrl(), value.sitemapUrl(), value.sectionUrl(), value.dailyCrawlTime(),
                 value.maxArticlesPerRun(), value.allowImageCandidates(), value.allowAutoAi(), value.dailyArticleBudget(),
                 value.dailyTokenBudget(), value.scheduleMode(), value.intervalHours(), value.scheduleTimezone(),
@@ -166,7 +166,7 @@ public class SourceRegistryService {
                     true, false, 20, 100000, "DAILY", 24, "Asia/Shanghai", 7, "", "",
                     true, "SKIP", 3, defaultNormalized(request.imageUsagePolicy(), "MANUAL_REVIEW"),
                     request.imageUsageBasis(), Boolean.TRUE.equals(request.autoApproveImages()),
-                    Boolean.TRUE.equals(request.imageCacheAllowed()));
+                    Boolean.TRUE.equals(request.imageCacheAllowed()), "");
             registryId = ((Number) create(configuration, user).get("id")).longValue();
         } else {
             registryId = existing.get(0);
@@ -282,12 +282,14 @@ public class SourceRegistryService {
         if ((autoApproveImages || imageCacheAllowed) && ("MANUAL_REVIEW".equals(imagePolicy) || imageBasis == null)) {
             throw new BusinessException(400, "自动确认或缓存图片前必须选择明确策略并填写使用依据");
         }
+        String allowedHosts = normalizeAllowedHosts(request.allowedHosts(), domain);
         return new ValidatedSource(request.name().trim(), domain, type, authority, homepage.toString(), rss, sitemap,
                 section, discoveryMode, crawlTime, maxArticles, Boolean.TRUE.equals(request.allowImageCandidates()),
                 Boolean.TRUE.equals(request.allowAutoAi()), articleBudget, tokenBudget, scheduleMode, intervalHours,
                 timezone, recentDays, optionalText(request.includeKeywords(), 1000),
                 optionalText(request.excludeKeywords(), 1000), !Boolean.FALSE.equals(request.autoSaveDraft()),
-                duplicateStrategy, maxRetries, imagePolicy, imageBasis, autoApproveImages, imageCacheAllowed);
+                duplicateStrategy, maxRetries, imagePolicy, imageBasis, autoApproveImages, imageCacheAllowed,
+                allowedHosts);
     }
 
     private static URI httpUri(String value, String label) {
@@ -323,6 +325,20 @@ public class SourceRegistryService {
         return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
     }
 
+    private static String normalizeAllowedHosts(String value, String primaryDomain) {
+        if (value == null || value.isBlank()) return null;
+        List<String> hosts = java.util.Arrays.stream(value.split("[,，;；\\s]+"))
+                .map(String::trim)
+                .filter(item -> !item.isBlank())
+                .map(item -> item.toLowerCase(Locale.ROOT))
+                .filter(item -> !item.equals(primaryDomain))
+                .filter(item -> item.matches("(?i)^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$"))
+                .distinct()
+                .limit(20)
+                .toList();
+        return hosts.isEmpty() ? null : String.join(",", hosts);
+    }
+
     private static String text(Object value) {
         return value == null ? "" : String.valueOf(value).trim();
     }
@@ -344,12 +360,13 @@ public class SourceRegistryService {
         jdbc.update("UPDATE source_registry SET schedule_mode=?,interval_hours=?,schedule_timezone=?,recent_days=?,"
                         + "include_keywords=?,exclude_keywords=?,auto_save_draft=?,duplicate_strategy=?,max_retries=?,"
                         + "image_usage_policy=?,image_usage_basis=?,auto_approve_images=?,image_cache_allowed=?,"
-                        + "allow_image_cache=?,image_policy_reviewed_by=?,image_policy_reviewed_at=? WHERE id=?",
+                        + "allow_image_cache=?,image_policy_reviewed_by=?,image_policy_reviewed_at=?,allowed_hosts=? WHERE id=?",
                 value.scheduleMode(), value.intervalHours(), value.scheduleTimezone(), value.recentDays(),
                 value.includeKeywords(), value.excludeKeywords(), value.autoSaveDraft(), value.duplicateStrategy(),
                 value.maxRetries(), value.imageUsagePolicy(), value.imageUsageBasis(), value.autoApproveImages(),
                 value.imageCacheAllowed(), value.imageCacheAllowed(), value.autoApproveImages() ? operatorId : null,
-                value.autoApproveImages() ? Timestamp.valueOf(LocalDateTime.now()) : null, id);
+                value.autoApproveImages() ? Timestamp.valueOf(LocalDateTime.now()) : null,
+                value.allowedHosts(), id);
     }
 
     private static void bind(PreparedStatement statement, ValidatedSource value, long operatorId) throws java.sql.SQLException {
@@ -383,7 +400,8 @@ public class SourceRegistryService {
             Integer dailyArticleBudget, Integer dailyTokenBudget, String scheduleMode, Integer intervalHours,
             String scheduleTimezone, Integer recentDays, String includeKeywords, String excludeKeywords,
             Boolean autoSaveDraft, String duplicateStrategy, Integer maxRetries, String imageUsagePolicy,
-            String imageUsageBasis, Boolean autoApproveImages, Boolean imageCacheAllowed) {}
+            String imageUsageBasis, Boolean autoApproveImages, Boolean imageCacheAllowed,
+            String allowedHosts) {}
 
     public record QuickSourceConfirmation(String sourceName, String sourceType, String verificationNote,
             boolean officialConfirmed, String mode, String imageUsagePolicy, String imageUsageBasis,
@@ -395,5 +413,6 @@ public class SourceRegistryService {
             int dailyArticleBudget, int dailyTokenBudget, String scheduleMode, int intervalHours,
             String scheduleTimezone, int recentDays, String includeKeywords, String excludeKeywords,
             boolean autoSaveDraft, String duplicateStrategy, int maxRetries, String imageUsagePolicy,
-            String imageUsageBasis, boolean autoApproveImages, boolean imageCacheAllowed) {}
+            String imageUsageBasis, boolean autoApproveImages, boolean imageCacheAllowed,
+            String allowedHosts) {}
 }

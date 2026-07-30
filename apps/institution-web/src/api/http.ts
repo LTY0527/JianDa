@@ -44,7 +44,9 @@ export function apiMessage(error: unknown): string {
     else if (status === 400) message = serverMessage || "材料信息不完整，请检查后重试";
     else if (status === 413) message = "文件超过 20MB，请选择较小的文件";
     else if (status === 500) message = "服务器处理失败，请稍后重试";
-    else if (status === 502 || status === 504) message = "网关暂时无法连接服务，请稍后重试";
+    else if (status === 502 || status === 504) {
+      message = serverMessage || "网关暂时无法连接服务，请稍后重试";
+    }
     else if (status === 503) message = serverMessage || "AI 服务调用失败，请稍后重试";
     return requestId ? `${message}（请求编号：${requestId}）` : message;
   }

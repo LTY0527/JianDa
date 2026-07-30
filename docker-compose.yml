@@ -52,6 +52,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-jianda-compose-development-secret-change-in-production}
       UPLOAD_DIR: ${UPLOAD_DIR:-/app/uploads}
       AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8001}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      EXTERNAL_LLM_MODEL: ${EXTERNAL_LLM_MODEL:-deepseek-v4-flash}
       ASSISTANT_EXTERNAL_ENABLED: ${ASSISTANT_EXTERNAL_ENABLED:-false}
       ASSISTANT_DAILY_CALL_LIMIT: ${ASSISTANT_DAILY_CALL_LIMIT:-30}
       ASSISTANT_DAILY_TOKEN_LIMIT: ${ASSISTANT_DAILY_TOKEN_LIMIT:-30000}

@@ -147,10 +147,67 @@ public class AiQueueService {
     }
 
     @Transactional
+    public Map<String, Integer> reconcile(AuthUser user) {
+        if (!user.isPlatformAdmin()) {
+            throw new BusinessException(403, "只有平台管理员可以重新评估 AI 队列");
+        }
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT * FROM ai_processing_queue WHERE status IN "
+                        + "('WAITING_APPROVAL','WAITING_BUDGET','FAILED') "
+                        + "ORDER BY created_at,id");
+        int requeued = 0;
+        int unchanged = 0;
+        for (Map<String, Object> row : rows) {
+            if (canQueueNow(row)) {
+                jdbc.update("UPDATE ai_processing_queue SET status='QUEUED',reason_code='RECONCILED',"
+                                + "reason_summary='按当前开关、来源权限和预算重新排队',available_at=?,"
+                                + "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        Timestamp.from(now()), id(row));
+                requeued++;
+            } else {
+                unchanged++;
+            }
+        }
+        return Map.of("requeued", requeued, "unchanged", unchanged);
+    }
+
+    @Transactional
+    public Map<String, Object> retry(long queueId, AuthUser user) {
+        if (!user.isPlatformAdmin()) {
+            throw new BusinessException(403, "只有平台管理员可以重试 AI 队列任务");
+        }
+        Map<String, Object> row = rowForUpdate(queueId);
+        if (PROCESSING.equals(row.get("status")) || SUCCEEDED.equals(row.get("status"))
+                || DUPLICATE.equals(row.get("status"))) {
+            throw new BusinessException(409, "该 AI 任务当前不能重试");
+        }
+        if (!canQueueNow(row)) {
+            throw new BusinessException(409, "当前全局开关或来源权限仍不允许该任务进入自动队列");
+        }
+        jdbc.update("UPDATE ai_processing_queue SET status='QUEUED',reason_code='MANUAL_RETRY',"
+                        + "reason_summary='平台管理员已请求重试',available_at=?,updated_at=CURRENT_TIMESTAMP "
+                        + "WHERE id=?",
+                Timestamp.from(now()), queueId);
+        return get(queueId);
+    }
+
+    private boolean canQueueNow(Map<String, Object> row) {
+        if (row.get("approved_at") != null) return true;
+        if (!autoEnabled) return false;
+        Long sourceId = longOrNull(row.get("source_registry_id"));
+        if (sourceId == null) return false;
+        Integer allowed = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_registry WHERE id=? AND enabled=TRUE "
+                        + "AND allow_auto_ai=TRUE",
+                Integer.class, sourceId);
+        return allowed != null && allowed > 0;
+    }
+
+    @Transactional
     public Reservation reserveForManual(long documentId, Long processingJobId, AuthUser user) {
         Long sourceId = sourceForDocument(documentId);
         return reserve(null, documentId, sourceId, processingJobId, true,
-                user == null ? null : user.id(), null);
+                user == null ? null : user.id(), null, false);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -167,11 +224,12 @@ public class AiQueueService {
         }
         Long taskRootId = longOrNull(queue.get("crawl_task_root_id"));
         return reserve(queueId, id(queue, "document_id"), longOrNull(queue.get("source_registry_id")), null,
-                queue.get("approved_at") != null, longOrNull(queue.get("approved_by")), taskRootId);
+                queue.get("approved_at") != null, longOrNull(queue.get("approved_by")), taskRootId, true);
     }
 
     private Reservation reserve(Long queueId, long documentId, Long sourceId, Long processingJobId,
-                                boolean approved, Long approverId, Long taskRootId) {
+                                boolean approved, Long approverId, Long taskRootId,
+                                boolean applyAutomaticBudgets) {
         Map<String, Object> document = document(documentId);
         String body = text(document.get("raw_text"));
         int estimated = estimateTokens(body);
@@ -181,8 +239,11 @@ public class AiQueueService {
         }
         String hash = contentHash(document, body);
         LocalDate date = LocalDate.now(clock.withZone(zoneId));
-        ensureUsage(date, "GLOBAL", 0);
-        Usage global = usageForUpdate(date, "GLOBAL", 0);
+        Usage global = null;
+        if (applyAutomaticBudgets) {
+            ensureUsage(date, "GLOBAL", 0);
+            global = usageForUpdate(date, "GLOBAL", 0);
+        }
         Integer duplicate = processingJobId == null
                 ? jdbc.queryForObject("SELECT COUNT(*) FROM ai_budget_reservation WHERE content_hash=? "
                         + "AND status IN ('RESERVED','SETTLED')", Integer.class, hash)
@@ -194,7 +255,7 @@ public class AiQueueService {
                     "相同正文 hash 已预留或完成 AI 处理", "DUPLICATE", estimated, approved);
         }
         jdbc.update("DELETE FROM ai_budget_reservation WHERE content_hash=? AND status='FAILED'", hash);
-        if (taskRootId != null) {
+        if (applyAutomaticBudgets && taskRootId != null) {
             Integer taskCount = jdbc.queryForObject("SELECT COUNT(*) FROM ai_budget_reservation "
                             + "WHERE crawl_task_root_id=? AND status IN ('RESERVED','SETTLED')",
                     Integer.class, taskRootId);
@@ -203,7 +264,9 @@ public class AiQueueService {
                         "单任务最大文章数已耗尽", "TASK_ARTICLES", estimated, approved);
             }
         }
-        String globalReason = exhausted(global, globalArticleLimit, globalTokenLimit, estimated);
+        String globalReason = applyAutomaticBudgets
+                ? exhausted(global, globalArticleLimit, globalTokenLimit, estimated)
+                : null;
         if (globalReason != null) {
             return block(queueId, documentId, sourceId, processingJobId, globalReason,
                     globalReason.endsWith("TOKENS") ? "全局每日 token 预算已耗尽" : "全局每日文章预算已耗尽",
@@ -212,7 +275,7 @@ public class AiQueueService {
         Usage source = null;
         int sourceArticles = 0;
         int sourceTokens = 0;
-        if (sourceId != null) {
+        if (applyAutomaticBudgets && sourceId != null) {
             Map<String, Object> sourceRow = jdbc.queryForMap(
                     "SELECT daily_article_budget,daily_token_budget,allow_auto_ai FROM source_registry WHERE id=?", sourceId);
             if (queueId != null && !approved && !Boolean.TRUE.equals(sourceRow.get("allow_auto_ai"))) {
@@ -230,9 +293,11 @@ public class AiQueueService {
                         sourceReason.endsWith("TOKENS") ? "SOURCE_TOKENS" : "SOURCE_ARTICLES", estimated, approved);
             }
         }
-        jdbc.update("UPDATE ai_budget_usage SET reserved_articles=reserved_articles+1,reserved_tokens=reserved_tokens+?,"
-                + "updated_at=CURRENT_TIMESTAMP WHERE budget_date=? AND scope_type='GLOBAL' AND scope_id=0",
-                estimated, Date.valueOf(date));
+        if (applyAutomaticBudgets) {
+            jdbc.update("UPDATE ai_budget_usage SET reserved_articles=reserved_articles+1,reserved_tokens=reserved_tokens+?,"
+                    + "updated_at=CURRENT_TIMESTAMP WHERE budget_date=? AND scope_type='GLOBAL' AND scope_id=0",
+                    estimated, Date.valueOf(date));
+        }
         if (source != null) {
             jdbc.update("UPDATE ai_budget_usage SET reserved_articles=reserved_articles+1,reserved_tokens=reserved_tokens+?,"
                     + "updated_at=CURRENT_TIMESTAMP WHERE budget_date=? AND scope_type='SOURCE' AND scope_id=?",
@@ -242,7 +307,7 @@ public class AiQueueService {
         jdbc.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
                     "INSERT INTO ai_budget_reservation(queue_id,processing_job_id,source_registry_id,crawl_task_root_id,document_id,content_hash,"
-                            + "budget_date,estimated_tokens,status) VALUES (?,?,?,?,?,?,?,?,'RESERVED')", new String[] {"id"});
+                            + "budget_date,estimated_tokens,status,budget_exempt) VALUES (?,?,?,?,?,?,?,?,'RESERVED',?)", new String[] {"id"});
             statement.setObject(1, queueId);
             statement.setObject(2, processingJobId);
             statement.setObject(3, sourceId);
@@ -251,6 +316,7 @@ public class AiQueueService {
             statement.setString(6, hash);
             statement.setDate(7, Date.valueOf(date));
             statement.setInt(8, estimated);
+            statement.setBoolean(9, !applyAutomaticBudgets);
             return statement;
         }, keys);
         if (queueId != null) jdbc.update("UPDATE ai_processing_queue SET status='PROCESSING',reason_code=NULL,"
@@ -304,12 +370,15 @@ public class AiQueueService {
         int estimated = integer(stored.get("estimated_tokens"));
         int actual = Math.max(0, actualTokens);
         LocalDate date = ((Date) stored.get("budget_date")).toLocalDate();
+        boolean budgetExempt = Boolean.TRUE.equals(stored.get("budget_exempt"));
         boolean chargeArticle = success;
-        jdbc.update("UPDATE ai_budget_usage SET reserved_articles=reserved_articles-1,reserved_tokens=reserved_tokens-?,"
-                        + "settled_articles=settled_articles+?,actual_tokens=actual_tokens+?,updated_at=CURRENT_TIMESTAMP "
-                        + "WHERE budget_date=? AND scope_type='GLOBAL' AND scope_id=0",
-                estimated, chargeArticle ? 1 : 0, actual, Date.valueOf(date));
-        if (reservation.sourceId() != null) {
+        if (!budgetExempt) {
+            jdbc.update("UPDATE ai_budget_usage SET reserved_articles=reserved_articles-1,reserved_tokens=reserved_tokens-?,"
+                            + "settled_articles=settled_articles+?,actual_tokens=actual_tokens+?,updated_at=CURRENT_TIMESTAMP "
+                            + "WHERE budget_date=? AND scope_type='GLOBAL' AND scope_id=0",
+                    estimated, chargeArticle ? 1 : 0, actual, Date.valueOf(date));
+        }
+        if (!budgetExempt && reservation.sourceId() != null) {
             jdbc.update("UPDATE ai_budget_usage SET reserved_articles=reserved_articles-1,reserved_tokens=reserved_tokens-?,"
                             + "settled_articles=settled_articles+?,actual_tokens=actual_tokens+?,updated_at=CURRENT_TIMESTAMP "
                             + "WHERE budget_date=? AND scope_type='SOURCE' AND scope_id=?",

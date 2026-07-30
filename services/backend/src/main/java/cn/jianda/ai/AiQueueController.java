@@ -39,4 +39,14 @@ public class AiQueueController {
     public ApiResponse<Map<String, Object>> execute(@PathVariable long queueId) {
         return ApiResponse.ok(documentService.processQueued(queueId, UserContext.current()));
     }
+
+    @PostMapping("/reconcile")
+    public ApiResponse<Map<String, Integer>> reconcile() {
+        return ApiResponse.ok(queueService.reconcile(UserContext.current()));
+    }
+
+    @PostMapping("/{queueId}/retry")
+    public ApiResponse<Map<String, Object>> retry(@PathVariable long queueId) {
+        return ApiResponse.ok(queueService.retry(queueId, UserContext.current()));
+    }
 }
