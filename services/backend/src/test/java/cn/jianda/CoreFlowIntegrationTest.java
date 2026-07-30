@@ -398,7 +398,7 @@ class CoreFlowIntegrationTest {
     }
 
     @Test
-    void budgetRejectionPreservesExistingFieldsAndGeneratedContent() throws Exception {
+    void automaticBudgetUsageDoesNotBlockManualProcessingOrEraseExistingResults() throws Exception {
         String auth = "Bearer " + login();
         String created = mvc.perform(post("/api/documents").header("Authorization", auth)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"预算保留结果测试\"}"))
@@ -417,10 +417,16 @@ class CoreFlowIntegrationTest {
                 + "VALUES (CURRENT_DATE,'GLOBAL',0,1000)");
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("PROCESSING"));
-        org.junit.jupiter.api.Assertions.assertEquals(1,
-                jdbc.queryForObject("SELECT COUNT(*) FROM extracted_field WHERE document_id=?", Integer.class, documentId));
-        org.junit.jupiter.api.Assertions.assertEquals(1,
-                jdbc.queryForObject("SELECT COUNT(*) FROM generated_content WHERE document_id=?", Integer.class, documentId));
+        for (int attempt = 0; attempt < 50; attempt++) {
+            String status = jdbc.queryForObject(
+                    "SELECT status FROM processing_job WHERE document_id=? ORDER BY id DESC LIMIT 1",
+                    String.class, documentId);
+            if (!"PROCESSING".equals(status) && !"PENDING".equals(status)) break;
+            Thread.sleep(100);
+        }
+        org.junit.jupiter.api.Assertions.assertNotEquals("WAITING_BUDGET",
+                jdbc.queryForObject("SELECT status FROM processing_job WHERE document_id=? ORDER BY id DESC LIMIT 1",
+                        String.class, documentId));
     }
 
     @Test

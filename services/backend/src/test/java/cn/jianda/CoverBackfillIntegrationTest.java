@@ -56,8 +56,22 @@ class CoverBackfillIntegrationTest {
                 true, null, null, null, LocalDate.now().minusDays(1), LocalDate.now()));
         assertTrue(((Number) preview.get("total")).intValue() >= 2);
 
-        Map<String, Object> result = service.execute(new CoverBackfillService.BackfillFilter(
-                true, null, null, null, null, null), platform);
+        Map<String, Object> started = service.startJob(
+                new CoverBackfillService.BackfillFilter(
+                        true, null, null, null, null, null),
+                platform);
+        long jobId = ((Number) started.get("jobId")).longValue();
+        Map<String, Object> result = service.job(jobId);
+        for (int attempt = 0;
+                attempt < 100
+                        && ("PENDING".equals(result.get("status"))
+                        || "RUNNING".equals(result.get("status")));
+                attempt++) {
+            Thread.sleep(20);
+            result = service.job(jobId);
+        }
+        assertEquals("SUCCEEDED", result.get("status"));
+        assertEquals(result.get("total"), result.get("processed"));
         assertTrue(((Number) result.get("updated")).intValue() >= 2);
         assertEquals("PDF_FIRST_PAGE", jdbc.queryForObject(
                 "SELECT cover_image_type FROM source_document WHERE id=?", String.class, pdfId));

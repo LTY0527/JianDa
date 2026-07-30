@@ -64,14 +64,13 @@ class AiQueueBudgetIntegrationTest {
 
     @Test
     void allowsThenSettlesAndBlocksArticleAndTokenBudgets() {
-        AuthUser admin = admin();
         long first = insertDocument("允许 " + sequence, "一二三四五六七八九十");
-        AiQueueService.Reservation allowed = service.reserveForManual(first, null, admin);
+        AiQueueService.Reservation allowed = reserveAutomatically(first, null);
         assertTrue(allowed.allowed());
         service.settle(allowed, 40, true, "stub", "mock-model");
 
         long second = insertDocument("token " + sequence, "甲".repeat(80));
-        AiQueueService.Reservation tokenBlocked = service.reserveForManual(second, null, admin);
+        AiQueueService.Reservation tokenBlocked = reserveAutomatically(second, null);
         assertFalse(tokenBlocked.allowed());
         assertEquals("BUDGET_TOKENS", tokenBlocked.reasonCode());
         assertFalse(jdbc.queryForObject("SELECT executed FROM ai_execution_audit ORDER BY id DESC LIMIT 1", Boolean.class));
@@ -80,7 +79,7 @@ class AiQueueBudgetIntegrationTest {
 
         jdbc.update("UPDATE ai_budget_usage SET actual_tokens=0,settled_articles=2,reserved_articles=0,reserved_tokens=0");
         long third = insertDocument("article " + sequence, "短正文");
-        AiQueueService.Reservation articleBlocked = service.reserveForManual(third, null, admin);
+        AiQueueService.Reservation articleBlocked = reserveAutomatically(third, null);
         assertFalse(articleBlocked.allowed());
         assertEquals("BUDGET_ARTICLES", articleBlocked.reasonCode());
     }
@@ -90,12 +89,12 @@ class AiQueueBudgetIntegrationTest {
         long source = source();
         jdbc.update("UPDATE source_registry SET daily_article_budget=1,daily_token_budget=20 WHERE id=?", source);
         long document = insertWebDocument("来源 " + sequence, "来源正文", source);
-        AiQueueService.Reservation allowed = service.reserveForManual(document, null, admin());
+        AiQueueService.Reservation allowed = reserveAutomatically(document, source);
         assertTrue(allowed.allowed());
         service.settle(allowed, 10, true, "stub", "mock-model");
 
         long exhausted = insertWebDocument("来源耗尽 " + sequence, "第二正文", source);
-        assertEquals("BUDGET_ARTICLES", service.reserveForManual(exhausted, null, admin()).reasonCode());
+        assertEquals("BUDGET_ARTICLES", reserveAutomatically(exhausted, source).reasonCode());
 
         long overlong = insertDocument("过长 " + sequence, "长".repeat(81));
         assertEquals("INPUT_TOO_LONG", service.reserveForManual(overlong, null, admin()).reasonCode());
@@ -114,20 +113,38 @@ class AiQueueBudgetIntegrationTest {
     @Test
     void concurrentReservationCannotOverspend() throws Exception {
         long seed = insertDocument("并发已用 " + sequence, "已用正文");
-        AiQueueService.Reservation used = service.reserveForManual(seed, null, admin());
+        AiQueueService.Reservation used = reserveAutomatically(seed, null);
         service.settle(used, 1, true, "stub", "mock-model");
         long left = insertDocument("并发左 " + sequence, "左侧正文");
         long right = insertDocument("并发右 " + sequence, "右侧正文");
+        long leftQueue = approvedQueue(left, null);
+        long rightQueue = approvedQueue(right, null);
         CountDownLatch start = new CountDownLatch(1);
         AtomicInteger allowed = new AtomicInteger();
-        Thread one = new Thread(() -> reserve(start, left, allowed));
-        Thread two = new Thread(() -> reserve(start, right, allowed));
+        Thread one = new Thread(() -> reserveQueue(start, leftQueue, allowed));
+        Thread two = new Thread(() -> reserveQueue(start, rightQueue, allowed));
         one.start();
         two.start();
         start.countDown();
         one.join();
         two.join();
         assertEquals(1, allowed.get());
+    }
+
+    @Test
+    void manualReservationIgnoresAutomaticBudgetsAndDoesNotChargeUsage() {
+        jdbc.update("INSERT INTO ai_budget_usage(budget_date,scope_type,scope_id,settled_articles,actual_tokens) "
+                + "VALUES (CURRENT_DATE,'GLOBAL',0,2,70)");
+        long document = insertDocument("手工预算豁免 " + sequence, "手工上传材料正文");
+        AiQueueService.Reservation reservation = service.reserveForManual(document, null, admin());
+        assertTrue(reservation.allowed());
+        assertTrue(jdbc.queryForObject("SELECT budget_exempt FROM ai_budget_reservation WHERE id=?",
+                Boolean.class, reservation.reservationId()));
+        service.settle(reservation, 12, true, "external", "deepseek-test");
+        Map<String, Object> usage = jdbc.queryForMap(
+                "SELECT settled_articles,actual_tokens FROM ai_budget_usage WHERE scope_type='GLOBAL' AND scope_id=0");
+        assertEquals(2, ((Number) usage.get("settled_articles")).intValue());
+        assertEquals(70L, ((Number) usage.get("actual_tokens")).longValue());
     }
 
     @Test
@@ -207,13 +224,23 @@ class AiQueueBudgetIntegrationTest {
         assertEquals("QUEUED", service.get(queueId).get("status"));
     }
 
-    private void reserve(CountDownLatch start, long document, AtomicInteger allowed) {
+    private void reserveQueue(CountDownLatch start, long queueId, AtomicInteger allowed) {
         try {
             start.await();
-            if (service.reserveForManual(document, null, admin()).allowed()) allowed.incrementAndGet();
+            if (service.reserveQueue(queueId).allowed()) allowed.incrementAndGet();
         } catch (Exception ignored) {
             // A database lock loser is also a safe non-overspend outcome.
         }
+    }
+
+    private AiQueueService.Reservation reserveAutomatically(long document, Long sourceId) {
+        return service.reserveQueue(approvedQueue(document, sourceId));
+    }
+
+    private long approvedQueue(long document, Long sourceId) {
+        long queueId = ((Number) service.enqueue(document, sourceId, null).get("id")).longValue();
+        service.approve(queueId, admin());
+        return queueId;
     }
 
     private long insertCrawlJob(long source, Long parentId, String url) {

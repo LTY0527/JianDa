@@ -62,6 +62,7 @@ test("未知官网必须先安全预览并由平台管理员确认官方身份",
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
     if (path === "/api/public-sources") return fulfill(route, []);
     if (path === "/api/source-registries" && request.method() === "GET") return fulfill(route, [registry]);
     if (path === "/api/crawl-tasks" || path === "/api/ai-queue") return fulfill(route, []);
@@ -141,12 +142,21 @@ test("扫描筛选和批量保存只提交所选未导入 URL", async ({ page })
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
     if (path === "/api/public-sources") return fulfill(route, []);
     if (path === "/api/source-registries" && request.method() === "GET") return fulfill(route, [registry]);
     if (path === "/api/crawl-tasks" || path === "/api/ai-queue") return fulfill(route, []);
     if (path.endsWith("/discover")) {
       discoverPayload = request.postDataJSON();
-      return fulfill(route, { sourceId: 31, method: "SECTION", candidates, duplicateCount: 1, errors: [] });
+      return fulfill(route, {
+        sourceId: 31,
+        method: "SECTION",
+        candidates,
+        duplicateCount: 1,
+        filtered_external_count: 12,
+        filtered_external_domains: ["outside.example"],
+        errors: [],
+      });
     }
     if (path.endsWith("/collect-batch")) {
       batchPayload = request.postDataJSON();
@@ -159,6 +169,9 @@ test("扫描筛选和批量保存只提交所选未导入 URL", async ({ page })
   await page.getByRole("button", { name: "扫描与导入" }).click();
   await page.getByLabel("关键词", { exact: true }).fill("健康");
   await page.getByRole("button", { name: "扫描最近文章" }).click();
+  await expect(
+    page.getByText("已过滤 12 个不属于当前来源范围的外部链接。"),
+  ).toHaveCount(1);
   expect(discoverPayload).toMatchObject({
     recentDays: 7,
     maxArticles: 20,
@@ -177,9 +190,11 @@ test("扫描筛选和批量保存只提交所选未导入 URL", async ({ page })
 test("历史补图必须先预览再确认执行", async ({ page }) => {
   await prepare(page);
   let executePayload: Record<string, unknown> | undefined;
+  let jobPolls = 0;
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
     if (path === "/api/public-sources") return fulfill(route, []);
     if (path === "/api/source-registries" && request.method() === "GET") return fulfill(route, [registry]);
     if (path === "/api/crawl-tasks" || path === "/api/ai-queue") return fulfill(route, []);
@@ -190,10 +205,38 @@ test("历史补图必须先预览再确认执行", async ({ page }) => {
         items: [],
       });
     }
-    if (path === "/api/cover-backfill/execute") {
+    if (path === "/api/runtime-capabilities") {
+      return fulfill(route, {
+        llmProvider: "external",
+        externalModel: "deepseek-v4-flash",
+        assistantExternalEnabled: true,
+        crawlAutoAiEnabled: true,
+        crawlSchedulerEnabled: true,
+        dailyArticleLimit: 0,
+        dailyTokenLimit: 0,
+      });
+    }
+    if (path === "/api/cover-backfill/jobs" && request.method() === "POST") {
       executePayload = request.postDataJSON();
       return fulfill(route, {
-        scanned: 8,
+        jobId: 81,
+        status: "PENDING",
+        total: 8,
+        processed: 0,
+        updated: 0,
+        candidatesCreated: 0,
+        autoApproved: 0,
+        failed: 0,
+        errors: [],
+      });
+    }
+    if (path === "/api/cover-backfill/jobs/81") {
+      jobPolls++;
+      return fulfill(route, {
+        jobId: 81,
+        status: "SUCCEEDED",
+        total: 8,
+        processed: 8,
         updated: 5,
         candidatesCreated: 3,
         autoApproved: 1,
@@ -212,5 +255,10 @@ test("历史补图必须先预览再确认执行", async ({ page }) => {
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "执行历史补图" }).click();
   expect(executePayload).toMatchObject({ onlyMissing: true });
-  await expect(page.getByText(/公开封面更新 5/)).toBeVisible();
+  await expect(page.getByText(/已处理 8\/8/)).toBeVisible();
+  await expect(page.getByText(/更新 5/)).toBeVisible();
+  expect(jobPolls).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "AI 等待队列" }).click();
+  await expect(page.getByText(/Provider external/)).toBeVisible();
+  await expect(page.getByText(/文章 不限/)).toBeVisible();
 });

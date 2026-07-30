@@ -104,6 +104,7 @@ class PublicImportIntegrationTest {
                                     : url.contains("candidates-without-cache") ? "9".repeat(64)
                                     : url.contains("organization-import") ? "d".repeat(64)
                                     : url.contains("platform-owned") ? "e".repeat(64)
+                                    : url.contains("one-off") ? "f".repeat(64)
                                     : "b".repeat(64)),
                     Map.entry("content_kind", "HEALTH_EDUCATION"),
                     Map.entry("classification_confidence", 0.96),
@@ -133,6 +134,96 @@ class PublicImportIntegrationTest {
                             "warnings", List.of("正规退款不会要求向安全账户转账。"),
                             "audio_script", "核实身份，不要转账，及时报警。");
                 });
+    }
+
+    @Test
+    void organizationCanImportOneOffUnregisteredPageWithoutTrustingDomain()
+            throws Exception {
+        String auth = "Bearer " + login("org_admin");
+        String url = "https://one-off-unregistered.example/article";
+        mvc.perform(post("/api/web-articles/preview-any")
+                        .header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.trust_status").value("UNVERIFIED"))
+                .andExpect(jsonPath("$.data.external_source_verified").value(false))
+                .andExpect(jsonPath("$.data.canonical_domain")
+                        .value("one-off-unregistered.example"));
+
+        String body = mvc.perform(post("/api/web-articles/import-once")
+                        .header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "url", url, "canonicalConfirmed", false))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("UPLOADED"))
+                .andReturn().getResponse().getContentAsString();
+        long documentId =
+                objectMapper.readTree(body).path("data").path("documentId").asLong();
+        Map<String, Object> stored = jdbc.queryForMap(
+                "SELECT external_source_verified,source_authority_level,image_reviewed "
+                        + "FROM source_document WHERE id=?",
+                documentId);
+        org.junit.jupiter.api.Assertions.assertFalse(
+                Boolean.TRUE.equals(stored.get("external_source_verified")));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "UNVERIFIED", stored.get("source_authority_level"));
+        org.junit.jupiter.api.Assertions.assertEquals(0,
+                jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM crawl_job WHERE document_id=?",
+                        Integer.class, documentId));
+        org.junit.jupiter.api.Assertions.assertEquals(0,
+                jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM source_registry "
+                                + "WHERE domain='one-off-unregistered.example'",
+                        Integer.class));
+    }
+
+    @Test
+    void organizationCanImportPastedBodyWhenPublicPageCannotBeParsed()
+            throws Exception {
+        String auth = "Bearer " + login("org_admin");
+        String url = "https://blocked-public.example/notice";
+        String body = "这是机构人员从公开页面复制并核对的完整正文，仅作为未核验材料进入人工审核。";
+        String imported = mvc.perform(post("/api/web-articles/import-pasted")
+                        .header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "url", url,
+                                "title", "无法自动抓取的公开通知",
+                                "sourceName", "待核验公开来源",
+                                "body", body,
+                                "contentKind", "SERVICE_NOTICE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("UPLOADED"))
+                .andReturn().getResponse().getContentAsString();
+        long documentId =
+                objectMapper.readTree(imported).path("data").path("documentId").asLong();
+        Map<String, Object> stored = jdbc.queryForMap(
+                "SELECT raw_text,external_source_verified,original_page_available,"
+                        + "source_authority_level,cover_image_type,image_reviewed "
+                        + "FROM source_document WHERE id=?",
+                documentId);
+        org.junit.jupiter.api.Assertions.assertEquals(body, stored.get("raw_text"));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                Boolean.TRUE.equals(stored.get("external_source_verified")));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                Boolean.TRUE.equals(stored.get("original_page_available")));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "UNVERIFIED", stored.get("source_authority_level"));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "CATEGORY_DEFAULT", stored.get("cover_image_type"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                Boolean.TRUE.equals(stored.get("image_reviewed")));
+        org.junit.jupiter.api.Assertions.assertEquals(1,
+                jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM document_segment WHERE document_id=? AND text=?",
+                        Integer.class, documentId, body));
+        org.junit.jupiter.api.Assertions.assertEquals(0,
+                jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM crawl_job WHERE document_id=?",
+                        Integer.class, documentId));
     }
 
     @Test

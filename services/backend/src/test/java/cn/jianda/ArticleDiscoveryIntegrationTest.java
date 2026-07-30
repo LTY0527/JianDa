@@ -49,6 +49,7 @@ class ArticleDiscoveryIntegrationTest {
                 + "('discovery-fixture-disabled.example','停用发现来源','GOVERNMENT','A',FALSE,"
                 + "'https://discovery-fixture-disabled.example','https://discovery-fixture-disabled.example/rss.xml','RSS',2,FALSE,TRUE)");
         enabledId = jdbc.queryForObject("SELECT id FROM source_registry WHERE domain='discovery-fixture-enabled.example'", Long.class);
+        jdbc.update("UPDATE source_registry SET allowed_hosts='approved-cdn.example' WHERE id=?", enabledId);
         disabledId = jdbc.queryForObject("SELECT id FROM source_registry WHERE domain='discovery-fixture-disabled.example'", Long.class);
         auth = "Bearer " + login("platform_admin");
         when(aiClient.discoverArticles(anyLong(), anyString(), anyString(), anyString(), anyInt()))
@@ -56,7 +57,10 @@ class ArticleDiscoveryIntegrationTest {
                         "candidates", List.of(
                                 candidate("https://discovery-fixture-enabled.example/news/one", "one"),
                                 candidate("https://discovery-fixture-enabled.example/news/one", "one"),
-                                candidate("https://discovery-fixture-enabled.example/news/two", "two")),
+                                candidate("https://discovery-fixture-enabled.example/news/two", "two"),
+                                candidate("https://news.discovery-fixture-enabled.example/three", "three"),
+                                candidate("https://approved-cdn.example/four", "four"),
+                                candidate("https://outside.example/five", "five")),
                         "errors", List.of("一个条目缺少地址")));
     }
 
@@ -67,7 +71,9 @@ class ArticleDiscoveryIntegrationTest {
                         .header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"method\":\"RSS\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.candidates.length()").value(2))
+                .andExpect(jsonPath("$.data.candidates.length()").value(4))
+                .andExpect(jsonPath("$.data.filtered_external_count").value(1))
+                .andExpect(jsonPath("$.data.filtered_external_domains[0]").value("outside.example"))
                 .andExpect(jsonPath("$.data.candidates[0].source_id").value(enabledId))
                 .andExpect(jsonPath("$.data.candidates[0].canonical_url")
                         .value("https://discovery-fixture-enabled.example/news/one"))
