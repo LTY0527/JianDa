@@ -90,6 +90,7 @@ services:
       dockerfile: Dockerfile.frontend
       args:
         VITE_H5_BASE_URL: ${VITE_H5_BASE_URL:-}
+        VITE_ENABLE_DEV_FIXTURES: ${VITE_ENABLE_DEV_FIXTURES:-false}
     depends_on:
       backend:
         condition: service_healthy
