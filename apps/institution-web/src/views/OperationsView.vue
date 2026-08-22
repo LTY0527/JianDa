@@ -51,6 +51,7 @@ onMounted(load);
 <template>
   <div>
     <PageHeader title="平台运营看板" description="查看真实采集、AI预算、图片审核和失败来源，不使用估算或随机数据。">
+      <RouterLink class="btn secondary" to="/community-moderation"><AlertTriangle :size="17"/>邻里举报</RouterLink>
       <button class="btn secondary" type="button" :disabled="loading" @click="load">
         <RefreshCw :size="17" />{{ loading ? "正在刷新…" : "刷新数据" }}
       </button>

@@ -199,6 +199,49 @@ export async function recordUsageEvent(
   await client.post(`/public/items/${id}/event/${eventType}`);
 }
 
+export interface ResidentProfile {
+  id: number; username: string; nickname: string; district: string;
+  streetOrTown: string; regionCode: string; demo: boolean;
+}
+export interface CommunityPost {
+  id: number; category: "最新" | "互助" | "活动"; content: string; region_code: string;
+  district: string; street_or_town: string; status: "VISIBLE" | "REPORTED";
+  is_demo: boolean; created_at: string; nickname: string; user_is_demo: boolean;
+  like_count: number; comment_count: number;
+}
+const residentHeaders = () => ({ "X-Resident-Token": localStorage.getItem("jianda_resident_token") || "" });
+export async function residentLogin(username: string, password: string): Promise<ResidentProfile> {
+  const response = await client.post("/public/resident/login", { username, password });
+  localStorage.setItem("jianda_resident_token", response.data.data.token);
+  localStorage.setItem("jianda_resident_profile", JSON.stringify(response.data.data.profile));
+  return response.data.data.profile;
+}
+export async function residentMe(): Promise<ResidentProfile> {
+  const response = await client.get("/public/resident/me", { headers: residentHeaders() });
+  return response.data.data;
+}
+export async function residentLogout(): Promise<void> {
+  try { await client.post("/public/resident/logout", null, { headers: residentHeaders() }); }
+  finally { localStorage.removeItem("jianda_resident_token"); localStorage.removeItem("jianda_resident_profile"); }
+}
+export async function fetchCommunityPosts(category = "最新", regionCode = "310113102"): Promise<CommunityPost[]> {
+  const response = await client.get("/public/community/posts", { params: { category, regionCode } });
+  return response.data.data;
+}
+export async function createCommunityPost(category: string, content: string): Promise<void> {
+  await client.post("/public/community/posts", { category, content }, { headers: residentHeaders() });
+}
+export async function toggleCommunityLike(id: number): Promise<boolean> {
+  const response = await client.post(`/public/community/posts/${id}/like`, null, { headers: residentHeaders() });
+  return response.data.data.liked;
+}
+export async function addCommunityComment(id: number, content: string): Promise<void> {
+  await client.post(`/public/community/posts/${id}/comments`, { content }, { headers: residentHeaders() });
+}
+export async function reportCommunityPost(id: number, reason: string): Promise<void> {
+  await client.post(`/public/community/posts/${id}/report`, { reason }, { headers: residentHeaders() });
+}
+
 export async function fetchAssistantSuggestions(): Promise<string[]> {
   const response = await client.get("/public/assistant/suggestions");
   return response.data.data;
