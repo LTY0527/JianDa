@@ -20,6 +20,13 @@ const todayCards = computed(() => metrics.value ? [
   ["图片待审核", metrics.value.pendingImageCandidateCount],
   ["AI Token", `${metrics.value.tokenUsedToday.toLocaleString()} / ${metrics.value.tokenBudgetTotal.toLocaleString()}`],
 ] : []);
+const residentCards = computed(() => metrics.value ? [
+  ["本周发布", metrics.value.weeklyPublishedCount || 0],
+  ["本周阅读", metrics.value.weeklyViewCount || 0],
+  ["语音收听", metrics.value.weeklyListenCount || 0],
+  ["新增收藏", metrics.value.weeklyFavoriteCount || 0],
+  ["提醒创建", metrics.value.weeklyReminderCount || 0],
+] : []);
 
 async function load() {
   loading.value = true;
@@ -49,6 +56,13 @@ onMounted(load);
       </button>
     </PageHeader>
     <p v-if="error" class="inline-error">{{ error }}</p>
+
+    <section v-if="metrics" class="panel resident-operation-summary">
+      <div class="panel-title"><div><h2>居民使用概览</h2><p>来自最小匿名事件记录，不使用浏览器指纹、广告 ID 或精确定位。</p></div></div>
+      <div class="metric-strip"><article v-for="card in residentCards" :key="String(card[0])"><span class="metric-icon blue"><Activity/></span><div><small>{{ card[0] }}</small><strong>{{ card[1] }}</strong></div></article></div>
+      <table v-if="metrics.popularContent?.length" class="data-table"><thead><tr><th>最受关注内容</th><th>阅读</th><th>收藏</th><th>收听</th></tr></thead><tbody><tr v-for="item in metrics.popularContent" :key="item.id"><td><b>{{ item.title }}</b><small>{{ item.category }}</small></td><td>{{ item.view_count }}</td><td>{{ item.favorite_count }}</td><td>{{ item.listen_count }}</td></tr></tbody></table>
+      <div v-else class="empty-state">暂无居民使用事件，平台不会生成假浏览量。</div>
+    </section>
 
     <section v-if="metrics" class="metric-strip operations-summary" aria-label="今日运营摘要">
       <article v-for="card in todayCards" :key="String(card[0])">

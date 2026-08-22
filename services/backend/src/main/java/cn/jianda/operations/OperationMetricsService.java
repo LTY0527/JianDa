@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -20,6 +23,7 @@ public class OperationMetricsService {
 
     public Map<String, Object> current() {
         Map<String, Object> metrics = new LinkedHashMap<>();
+        Timestamp weeklyCutoff = Timestamp.from(Instant.now().minus(7, ChronoUnit.DAYS));
         metrics.put("authoritySourceCount", count("SELECT COUNT(*) FROM source_registry"));
         metrics.put("discoveredArticleCount", count("SELECT COALESCE(SUM(discovered_count),0) FROM crawl_job"));
         metrics.put("successfulCrawlCount", count(
@@ -38,6 +42,20 @@ public class OperationMetricsService {
         metrics.put("aiSuccessRate", rate(aiSuccess, aiRequests));
         metrics.put("viewCount", count("SELECT COUNT(*) FROM content_engagement_event WHERE event_type='VIEW'"));
         metrics.put("favoriteCount", count("SELECT COUNT(*) FROM favorite"));
+        metrics.put("weeklyPublishedCount", count(
+                "SELECT COUNT(*) FROM published_item WHERE status='PUBLISHED' "
+                        + "AND published_at>=?", weeklyCutoff));
+        metrics.put("weeklyViewCount", count(
+                "SELECT COUNT(*) FROM content_engagement_event WHERE event_type='VIEW' "
+                        + "AND created_at>=?", weeklyCutoff));
+        metrics.put("weeklyListenCount", count(
+                "SELECT COUNT(*) FROM usage_event WHERE event_type='CONTENT_LISTEN' "
+                        + "AND created_at>=?", weeklyCutoff));
+        metrics.put("weeklyFavoriteCount", count(
+                "SELECT COUNT(*) FROM favorite WHERE created_at>=?", weeklyCutoff));
+        metrics.put("weeklyReminderCount", count(
+                "SELECT COUNT(*) FROM resident_reminder WHERE created_at>=?", weeklyCutoff));
+        metrics.put("popularContent", popularContent());
         int assistantQueries = count("SELECT COUNT(*) FROM assistant_query_event");
         int citedAnswers = count("SELECT COUNT(*) FROM assistant_query_event WHERE citation_count>0");
         metrics.put("assistantQueryCount", assistantQueries);
@@ -100,8 +118,23 @@ public class OperationMetricsService {
                         + "WHERE e.resolved_at IS NULL ORDER BY e.created_at DESC,e.id DESC LIMIT 10");
     }
 
+    private List<Map<String, Object>> popularContent() {
+        return jdbc.queryForList(
+                "SELECT p.id,p.title,p.category,"
+                        + "(SELECT COUNT(*) FROM content_engagement_event e WHERE e.published_item_id=p.id AND e.event_type='VIEW') view_count,"
+                        + "(SELECT COUNT(*) FROM favorite f WHERE f.published_item_id=p.id) favorite_count,"
+                        + "(SELECT COUNT(*) FROM usage_event u WHERE u.content_id=p.id AND u.event_type='CONTENT_LISTEN') listen_count "
+                        + "FROM published_item p WHERE p.status='PUBLISHED' "
+                        + "ORDER BY view_count DESC,favorite_count DESC,listen_count DESC,p.published_at DESC LIMIT 5");
+    }
+
     private int count(String sql) {
         Number value = jdbc.queryForObject(sql, Number.class);
+        return value == null ? 0 : value.intValue();
+    }
+
+    private int count(String sql, Object... parameters) {
+        Number value = jdbc.queryForObject(sql, Number.class, parameters);
         return value == null ? 0 : value.intValue();
     }
 

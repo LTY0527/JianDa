@@ -14,6 +14,12 @@ export interface OperationMetrics {
   aiSuccessRate: number;
   viewCount: number;
   favoriteCount: number;
+  weeklyPublishedCount: number;
+  weeklyViewCount: number;
+  weeklyListenCount: number;
+  weeklyFavoriteCount: number;
+  weeklyReminderCount: number;
+  popularContent: Array<{ id: number; title: string; category: string; view_count: number; favorite_count: number; listen_count: number }>;
   assistantQueryCount: number;
   citedAnswerRate: number;
   manualEditRate: number;
