@@ -49,7 +49,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
 
     for (const [route, heading, file] of pages) {
       await page.goto(`${h5Url}${route}`);
-      await assertRendered(page, route === "/" ? /今天想了解什么/ : heading);
+      await assertRendered(page, route === "/" ? /大场镇居民/ : heading);
       const navigation = page.getByRole("navigation", { name: "主要导航" });
       await expect(navigation.getByRole("link")).toHaveCount(5);
       await page.waitForLoadState("networkidle");
@@ -76,8 +76,8 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     const checks = [
       [375, 812, "/guide/social-security-card-renewal", "社会保障卡到期换领指南", "h5-guide-detail-375.png"],
       [375, 812, "/news/summer-heat-health", "高温天气老年人健康防护提醒", "h5-news-detail-375.png"],
-      [768, 1024, "/", /今天想了解什么/, "h5-home-768.png"],
-      [1440, 900, "/", /今天想了解什么/, "h5-home-1440.png"],
+      [768, 1024, "/", /大场镇居民/, "h5-home-768.png"],
+      [1440, 900, "/", /大场镇居民/, "h5-home-1440.png"],
     ] as const;
     for (const [width, height, route, heading, file] of checks) {
       await page.setViewportSize({ width, height });
@@ -213,11 +213,11 @@ test.describe("Phase 7.3 rendered acceptance", () => {
   test("网络失败、无结果、内容不存在和助手失败均显示中文降级状态", async ({
     page,
   }) => {
-    await page.route("**/api/public/items", (route) => route.abort("timedout"));
+    await page.route("**/api/public/items?*", (route) => route.abort("timedout"));
     await page.goto(h5Url);
     await expect(page.getByRole("status")).toContainText("内容暂时没有加载成功");
     await expect(page.getByRole("button", { name: "重新加载" })).toBeVisible();
-    await page.unroute("**/api/public/items");
+    await page.unroute("**/api/public/items?*");
 
     await page.goto(`${h5Url}/news`);
     await page.getByPlaceholder("搜索标题、摘要或来源").fill("不存在的验收关键词");

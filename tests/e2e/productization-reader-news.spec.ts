@@ -63,7 +63,7 @@ function api(data: unknown) {
 }
 
 test("首页清理技术文本并保持紧凑资讯布局", async ({ page }) => {
-  await page.route("**/api/public/items", (route) =>
+  await page.route("**/api/public/items?*", (route) =>
     route.fulfill(api([news, { ...news, id: 902, slug: "news-902", title: "社区服务消息", category: "社区服务" }])),
   );
   await page.setViewportSize({ width: 375, height: 812 });

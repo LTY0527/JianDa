@@ -84,12 +84,12 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(h5Url);
     const navigation = page.getByRole("navigation", { name: "主要导航" });
-    for (const label of ["首页", "听一听", "简达助手", "办事", "我的"]) {
+    for (const label of ["首页", "邻里", "简达助手", "办事", "我的"]) {
       await expect(navigation.getByRole("link", { name: label, exact: true })).toBeVisible();
     }
     await expect(navigation.getByRole("link", { name: "资讯", exact: true })).toHaveCount(0);
-    await navigation.getByRole("link", { name: "听一听", exact: true }).click();
-    await expect(page).toHaveURL(`${h5Url}/listen`);
+    await navigation.getByRole("link", { name: "邻里", exact: true }).click();
+    await expect(page).toHaveURL(`${h5Url}/neighborhood`);
     await expect(page.getByRole("button", { name: "返回" })).toHaveCount(0);
     await page.goto(`${h5Url}/news`);
     await expect(page.getByRole("button", { name: "返回" })).toBeVisible();

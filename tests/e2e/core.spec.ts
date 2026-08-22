@@ -44,7 +44,7 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(h5Url);
     const navigation = page.getByRole("navigation", { name: "主要导航" });
-    for (const label of ["首页", "听一听", "简达助手", "办事", "我的"]) {
+    for (const label of ["首页", "邻里", "简达助手", "办事", "我的"]) {
       await expect(navigation.getByRole("link", { name: label, exact: true })).toBeVisible();
     }
     await expect(page.getByRole("heading", { name: "重要提醒" })).toBeVisible();

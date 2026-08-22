@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
 
-const h5Url = process.env.H5_E2E_URL || "http://127.0.0.1:5174";
+const h5Url = process.env.JIANDA_H5_TEST_URL || process.env.H5_E2E_URL || "http://127.0.0.1:5174";
 
 const items = [
   {
@@ -54,7 +54,7 @@ const items = [
 ];
 
 test.beforeEach(async ({ page }) => {
-  await page.route("**/api/public/items", (route) =>
+  await page.route("**/api/public/items?*", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json; charset=utf-8",

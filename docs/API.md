@@ -10,7 +10,9 @@
 ## 材料与处理
 
 - `POST /api/documents/metadata-preview`：上传 PDF/PNG/JPG 后预识别标题、来源、文号和材料内权威证据；不创建正式文档或处理任务。
-- `POST /api/documents`，`POST /api/documents/{id}/upload`
+- `POST /api/documents`，`POST /api/documents/{id}/upload`：上传响应及后续详情包含
+  `extraction_method`，取值为 `pymupdf`、`ocr`、`pymupdf+ocr`、`manual`、
+  `manual_required` 或 `unknown`，机构端据此说明正文来自文本层、扫描页 OCR 或人工录入。
 - `GET /api/documents`，`GET /api/documents/{id}`
 - `POST /api/documents/{id}/process`：创建或复用后台处理任务并立即返回
   `documentId`、`jobId`、`status`、`stage` 和 `progress`；真实 AI 在后台执行。
@@ -130,6 +132,10 @@ URL，不使用图片 URL。
 ## 用户端公开接口
 
 - `GET /api/public/items|categories|search`
+- `GET /api/public/regions`：返回当前已开放的区域；试点阶段为上海市宝山区大场镇，区域
+  编码 `310113102`。
+- `GET /api/public/items?regionCode=310113102`：优先返回指定试点区域的已发布内容，并保留
+  允许公开的全局内容；不会返回未审核或未发布材料。
 - `GET /api/public/items/{slug}`
 - `GET /api/public/items/{slug}/original-file`：仅已发布且发布时显式设置 `allowPublicOriginal=true` 的材料可用；同样支持字节范围读取和内容 SHA-256 校验。
 - `POST|DELETE /api/public/items/{id}/favorite`

@@ -41,7 +41,7 @@ test.describe("H5 LAN HTTP compatibility", () => {
     page,
   }) => {
     let failOnce = true;
-    await page.route("**/api/public/items", async (route) => {
+    await page.route("**/api/public/items?*", async (route) => {
       if (failOnce) {
         failOnce = false;
         await route.abort("connectionfailed");

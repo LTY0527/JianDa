@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-const h5Url = process.env.JIANDA_H5_URL ?? "http://127.0.0.1:5174";
+const h5Url = process.env.JIANDA_H5_TEST_URL ?? process.env.JIANDA_H5_URL ?? "http://127.0.0.1:5174";
 
 function api(data: unknown) {
   return {
