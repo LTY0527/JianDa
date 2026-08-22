@@ -140,7 +140,8 @@ class DocumentProcessingAsyncIntegrationTest {
         mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(file)
                         .header("Authorization", auth)
                         .param("manualText", "适用范围：社区养老服务。"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.extraction_method").value("manual"));
         return documentId;
     }
 

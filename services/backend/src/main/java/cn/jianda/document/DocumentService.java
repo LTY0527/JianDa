@@ -157,10 +157,10 @@ public class DocumentService {
         }
         String mimeType = file.getContentType() == null ? mimeTypeFor(extension) : file.getContentType();
         jdbc.update("UPDATE source_document SET file_name=?,file_type=?,source_type=?,original_filename=?,mime_type=?,file_size=?,file_sha256=?,"
-                        + "storage_path=?,raw_text=?,page_count=?,processing_status='UPLOADED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        + "storage_path=?,raw_text=?,page_count=?,extraction_method=?,processing_status='UPLOADED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 original, mimeType, "pdf".equals(extension) ? "PDF" : "IMAGE",
                 original, mimeType, Files.size(target), sha256(target),
-                target.toString(), extracted.text(), extracted.pageCount(), id);
+                target.toString(), extracted.text(), extracted.pageCount(), extracted.method(), id);
         log(user, "UPLOAD_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
         return detail(id, user);
     }
@@ -1101,10 +1101,10 @@ public class DocumentService {
     private ExtractedDocument extractDocument(Path target, String fileName, String contentType, String manualText) {
         if (manualText != null && !manualText.isBlank()) {
             String text = manualText.trim();
-            return new ExtractedDocument(text, 1, List.of(new ExtractedSegment(1, 1, text, 0, text.length())));
+            return new ExtractedDocument(text, 1, "manual", List.of(new ExtractedSegment(1, 1, text, 0, text.length())));
         }
         if (!fileName.toLowerCase().endsWith(".pdf")) {
-            return new ExtractedDocument("", 1, List.of());
+            return new ExtractedDocument("", 1, "manual_required", List.of());
         }
         Map<String, Object> result = aiClient.extractText(target, fileName, contentType);
         String text = String.valueOf(result.getOrDefault("text", "")).trim();
@@ -1121,7 +1121,9 @@ public class DocumentService {
                     number(item.get("end_offset"))));
         }
         int pageCount = number(result.getOrDefault("page_count", segments.size()));
-        return new ExtractedDocument(text, pageCount, segments);
+        String method = String.valueOf(result.getOrDefault("extraction_method", "pymupdf"));
+        if (!Set.of("pymupdf", "ocr", "pymupdf+ocr").contains(method)) method = "unknown";
+        return new ExtractedDocument(text, pageCount, method, segments);
     }
 
     private List<PreparedField> prepareFields(long documentId, Map<String, Object> result) {
@@ -1236,7 +1238,7 @@ public class DocumentService {
         return value instanceof Number number ? number.intValue() : Integer.parseInt(String.valueOf(value));
     }
 
-    private record ExtractedDocument(String text, int pageCount, List<ExtractedSegment> segments) {}
+    private record ExtractedDocument(String text, int pageCount, String method, List<ExtractedSegment> segments) {}
 
     private record ExtractedSegment(int pageNo, int segmentNo, String text, int startOffset, int endOffset) {}
 

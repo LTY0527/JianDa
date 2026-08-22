@@ -101,6 +101,14 @@ const textLength = computed(() => (document.value?.raw_text || "").length);
 const imageCount = computed(() =>
   (document.value?.original_html?.match(/<img\b/gi) || []).length,
 );
+const extractionMethodText = computed(() => ({
+  pymupdf: "PDF 文本层提取",
+  ocr: "扫描页本地 OCR 识别",
+  "pymupdf+ocr": "文本层提取 + 扫描页 OCR",
+  manual: "人工录入正文",
+  manual_required: "等待人工录入",
+  unknown: "正文提取方式未记录",
+}[document.value?.extraction_method || "unknown"]));
 const stageText: Record<string, string> = {
   EXTRACTING_TEXT: "正在提取正文",
   DETECTING_DOCUMENT_KIND: "正在识别材料类型",
@@ -321,7 +329,7 @@ onUnmounted(() => {
           ><small
             >{{ isWebArticle
               ? `${textLength} 个字符，${segmentCount} 个段落，${imageCount} 张正文图片`
-              : `共 ${document?.page_count || 0} 页，${segmentCount} 个段落` }}</small
+              : `共 ${document?.page_count || 0} 页，${segmentCount} 个段落 · ${extractionMethodText}` }}</small
           ></span
         >
       </div>

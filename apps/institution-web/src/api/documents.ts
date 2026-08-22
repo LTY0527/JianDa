@@ -31,6 +31,7 @@ export interface DocumentDetail {
   title: string;
   raw_text?: string;
   page_count?: number;
+  extraction_method?: "pymupdf" | "ocr" | "pymupdf+ocr" | "manual" | "manual_required" | "unknown";
   category?: string;
   import_url?: string;
   source_published_at?: string;
