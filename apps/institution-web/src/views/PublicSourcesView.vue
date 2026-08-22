@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from "vue";
-import { Plus, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-vue-next";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { Plus, ShieldCheck, ToggleLeft, ToggleRight, RefreshCw, ArrowRight, Settings2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import { apiMessage } from "../api/http";
 import {
@@ -43,6 +43,7 @@ const loading = ref(true);
 const saving = ref(false);
 const error = ref("");
 const showForm = ref(false);
+const showAdvanced = ref(false);
 const editingRegistryId = ref<number | null>(null);
 const activeSection = ref<"sources" | "scan" | "ai" | "jobs" | "advanced">("sources");
 const sectionTabs = [
@@ -112,6 +113,28 @@ const typeText: Record<string, string> = {
   ELDERLY_CARE: "养老机构（历史）",
   OTHER_PUBLIC_SERVICE: "其他公共服务（历史）",
 };
+
+function latestJob(source: WebSourceRegistry) {
+  return jobs.value.find((job) => job.source_registry_id === source.id);
+}
+function sourceHealth(source: WebSourceRegistry) {
+  if (!source.enabled) return { label: "已停用", note: "管理员已暂停自动更新", tone: "off" };
+  const job = latestJob(source);
+  if (source.last_error || job?.status === "FAILED") return { label: "需要关注", note: "最近一次检查没有完成", tone: "warning" };
+  if (job?.status === "PARTIAL_SUCCESS") return { label: "需要关注", note: "部分页面暂时无法读取", tone: "warning" };
+  return { label: "正常", note: source.last_crawled_at ? "最近一次检查正常" : "等待首次检查", tone: "ok" };
+}
+const enabledSourceCount = computed(() => registries.value.filter((source) => source.enabled).length);
+async function checkNow(source: WebSourceRegistry) {
+  showAdvanced.value = true;
+  activeSection.value = "scan";
+  await discoverArticles(source);
+}
+function openNewSource() {
+  showAdvanced.value = true;
+  activeSection.value = "sources";
+  showForm.value = true;
+}
 
 async function load() {
   loading.value = true;
@@ -506,9 +529,29 @@ onUnmounted(() => {
 
 <template>
   <div>
-    <PageHeader title="权威来源管理" description="维护可导入公开信息的机构白名单和启用状态。">
-      <button class="btn primary" @click="showForm = !showForm"><Plus :size="17" />新增来源</button>
+    <PageHeader title="采集与来源" :description="`已配置 ${registries.length} 个公开来源，其中 ${enabledSourceCount} 个正在自动更新。`">
+      <button class="btn primary" @click="openNewSource"><Plus :size="17" />新增来源</button>
     </PageHeader>
+    <div v-if="error" class="inline-error">{{ error }}</div>
+
+    <section class="source-overview" aria-label="自动采集来源">
+      <article v-for="source in registries" :key="source.id" class="source-card">
+        <header><div><h2>{{ source.source_name }}</h2><p>{{ source.domain }}</p></div><span :class="sourceHealth(source).tone">{{ sourceHealth(source).label }}</span></header>
+        <dl>
+          <div><dt>上次检查</dt><dd>{{ formatDisplayDateTime(source.last_crawled_at) }}</dd></div>
+          <div><dt>发现新内容</dt><dd>{{ latestJob(source)?.added_count || 0 }} 篇</dd></div>
+          <div><dt>下次检查</dt><dd>{{ source.enabled ? formatDisplayDateTime(source.next_run_at) : "暂停中" }}</dd></div>
+        </dl>
+        <p class="source-health-note">{{ sourceHealth(source).note }}</p>
+        <footer><button class="btn secondary" type="button" :disabled="!source.enabled || operatingSourceId === source.id" @click="checkNow(source)"><RefreshCw />立即检查</button><RouterLink class="text-action strong" :to="{ path: '/documents', query: { status: 'WAITING_REVIEW' } }">查看新内容<ArrowRight /></RouterLink><label class="source-switch"><input type="checkbox" :checked="source.enabled" @change="toggleRegistry(source)" />自动更新</label></footer>
+      </article>
+      <div v-if="loading" class="empty-state">正在读取来源状态…</div>
+      <div v-else-if="!registries.length" class="empty-state"><b>还没有自动采集来源</b><p>新增并核验官方来源后，可在这里查看检查状态。</p></div>
+    </section>
+
+    <button class="advanced-toggle" type="button" :aria-expanded="showAdvanced" @click="showAdvanced = !showAdvanced"><Settings2 />{{ showAdvanced ? "收起高级设置" : "展开平台高级设置" }}<span>来源核验、扫描范围、AI 预算和任务记录</span></button>
+
+    <div v-if="showAdvanced" class="collection-advanced">
 
     <nav class="source-tabs" aria-label="来源管理分区">
       <button v-for="tab in sectionTabs" :key="tab.id" type="button" :class="{ active: activeSection === tab.id }"
@@ -530,7 +573,6 @@ onUnmounted(() => {
       <div class="form-actions"><button type="button" class="btn secondary" @click="showForm = false">取消</button><button class="btn primary" :disabled="saving">{{ saving ? "正在保存…" : "保存来源" }}</button></div>
     </form>
 
-    <div v-if="error" class="inline-error">{{ error }}</div>
     <section v-show="activeSection === 'sources'" class="panel">
       <table class="data-table source-table">
         <thead><tr><th>来源</th><th>类型</th><th>白名单</th><th>状态</th><th>最近导入</th><th>操作</th></tr></thead>
@@ -853,10 +895,73 @@ onUnmounted(() => {
         <div v-if="!selectedJob.errors?.length" class="empty-state">此任务没有单条错误记录。</div>
       </div>
     </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.source-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.source-card {
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.source-card header,
+.source-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.source-card h2,
+.source-card p {
+  margin: 0;
+}
+
+.source-card header p {
+  margin-top: 5px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.source-card header > span {
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.source-card header > span.ok { background: #e8f3eb; color: #337647; }
+.source-card header > span.warning { background: #fff1df; color: #9a5716; }
+.source-card header > span.off { background: #edf1f0; color: #66736f; }
+
+.source-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0 12px;
+}
+
+.source-card dt { color: var(--color-muted); font-size: 11px; }
+.source-card dd { margin: 5px 0 0; font-size: 13px; font-weight: 700; }
+.source-health-note { color: #52635f; font-size: 12px; }
+.source-card footer { margin-top: 18px; padding-top: 16px; border-top: 1px solid #edf1ef; }
+.source-card footer svg { width: 16px; }
+.source-switch { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; font-size: 12px; font-weight: 700; }
+.source-switch input { width: 18px; height: 18px; }
+.advanced-toggle { width: 100%; min-height: 54px; margin-bottom: 18px; padding: 0 18px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--color-border); border-radius: 9px; background: #f8faf9; color: #31524d; cursor: pointer; font-weight: 700; }
+.advanced-toggle span { margin-left: auto; color: var(--color-muted); font-size: 12px; font-weight: 400; }
+.collection-advanced { padding-top: 2px; }
+
 .source-tabs {
   display: flex;
   gap: 8px;
@@ -959,6 +1064,11 @@ onUnmounted(() => {
 }
 
 @media (max-width: 720px) {
+  .source-overview { grid-template-columns: 1fr; }
+  .source-card dl { grid-template-columns: 1fr; }
+  .source-card footer { align-items: flex-start; flex-wrap: wrap; }
+  .source-switch { margin-left: 0; }
+  .advanced-toggle span { display: none; }
   .quick-url-row,
   .identity-summary {
     grid-template-columns: 1fr;

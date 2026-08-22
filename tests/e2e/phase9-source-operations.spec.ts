@@ -58,6 +58,13 @@ async function fulfill(route: Route, data: unknown, status = 200, message = "成
 }
 
 async function prepare(page: Page) {
+  page.on("pageerror", (error) => console.error(`PAGE_ERROR: ${error.message}`));
+  page.on("response", (response) => {
+    if (response.status() >= 400) console.error(`HTTP_${response.status()}: ${response.url()}`);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") console.error(`CONSOLE_ERROR: ${message.text()}`);
+  });
   await page.addInitScript((user) => {
     localStorage.setItem("jianda_token", "isolated-platform-token");
     localStorage.setItem("jianda_user_info", JSON.stringify(user));
@@ -69,10 +76,11 @@ test("来源默认安全配置、调度预算请求和等待预算状态清晰",
   let savedPayload: Record<string, unknown> | undefined;
   let created = false;
   const enableRequests: boolean[] = [];
-  await page.route("**/api/**", async (route) => {
+  await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
+    if (!path.startsWith("/api/")) return route.continue();
     if (path === "/api/public-sources" && request.method() === "GET") return fulfill(route, []);
     if (path === "/api/source-registries" && request.method() === "GET") {
       return fulfill(route, created ? [registry] : []);
@@ -88,6 +96,7 @@ test("来源默认安全配置、调度预算请求和等待预算状态清晰",
     }
     if (path === "/api/crawl-tasks") return fulfill(route, []);
     if (path === "/api/ai-queue") return fulfill(route, [waitingBudget]);
+    if (path === "/api/runtime-capabilities") return fulfill(route, { crawlAutoAiEnabled: false, crawlSchedulerEnabled: false, llmProvider: "mock", externalModel: "", dailyArticleLimit: 5, dailyTokenLimit: 50000 });
     return fulfill(route, null, 404, "测试未配置该接口");
   });
 
@@ -95,6 +104,9 @@ test("来源默认安全配置、调度预算请求和等待预算状态清晰",
   await page.goto(`${institutionUrl}/public-sources`);
   await expect(page).toHaveTitle(/简达/);
   await expect(page.locator("#app")).not.toBeEmpty();
+  await expect(page.getByRole("heading", { name: "采集与来源" })).toBeVisible();
+  await expect(page.getByText("来源核验、扫描范围、AI 预算和任务记录")).toBeVisible();
+  await page.getByRole("button", { name: /展开平台高级设置/ }).click();
   await expect(page.getByText(/新来源保持停用/)).toBeVisible();
   await expect(page.getByText(/原图缓存和自动 AI 均关闭/)).toBeVisible();
   await expect(page.getByText(/必须人工审核后才能发布/)).toBeVisible();
@@ -123,8 +135,8 @@ test("来源默认安全配置、调度预算请求和等待预算状态清晰",
     allowAutoAi: false,
   });
   await expect(page.getByText(/已停用 · RSS/)).toBeVisible();
-  await expect(page.getByText(/每日 12 篇/)).toBeVisible();
-  await expect(page.getByText(/48,000 Token · 自动 AI 关闭/)).toBeVisible();
+  await expect(page.getByText(/每日文章 12 篇/)).toBeVisible();
+  await expect(page.getByText(/Token 48,000 Token · 当前来源自动 AI 未允许/)).toBeVisible();
   await page.getByRole("button", { name: "AI 等待队列" }).click();
   await expect(page.getByRole("cell", { name: "等待预算恢复" }).first()).toBeVisible();
   await expect(page.getByText(waitingBudget.reason_summary)).toBeVisible();
@@ -142,12 +154,14 @@ test("来源默认安全配置、调度预算请求和等待预算状态清晰",
 
 test("来源、调度和预算页面在 375px 与 1440px 均不横向溢出视口", async ({ page }) => {
   await prepare(page);
-  await page.route("**/api/**", async (route) => {
+  await page.route("**/*", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
     if (path === "/api/public-sources") return fulfill(route, []);
     if (path === "/api/source-registries") return fulfill(route, [registry]);
     if (path === "/api/crawl-tasks") return fulfill(route, []);
     if (path === "/api/ai-queue") return fulfill(route, [waitingBudget]);
+    if (path === "/api/runtime-capabilities") return fulfill(route, { crawlAutoAiEnabled: false, crawlSchedulerEnabled: false, llmProvider: "mock", externalModel: "", dailyArticleLimit: 5, dailyTokenLimit: 50000 });
     return fulfill(route, null, 404, "测试未配置该接口");
   });
   for (const viewport of [
@@ -156,7 +170,12 @@ test("来源、调度和预算页面在 375px 与 1440px 均不横向溢出视�
   ]) {
     await page.setViewportSize(viewport);
     await page.goto(`${institutionUrl}/public-sources`);
-    await expect(page.getByRole("heading", { name: "权威来源管理" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "采集与来源" })).toBeVisible();
+    await expect(page.getByText("健康权威来源")).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBeTruthy();
+    await page.getByRole("button", { name: /展开平台高级设置/ }).click();
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBeTruthy();
@@ -177,15 +196,17 @@ test("发现文章、影子采集和立即采集保持三段式人工控制", as
     dedup_key: "article-1",
   };
   const calls: string[] = [];
-  await page.route("**/api/**", async (route) => {
+  await page.route("**/*", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
     if (path === "/api/public-sources") return fulfill(route, []);
     if (path === "/api/source-registries" && request.method() === "GET") {
       return fulfill(route, [enabledRegistry]);
     }
     if (path === "/api/crawl-tasks") return fulfill(route, []);
     if (path === "/api/ai-queue") return fulfill(route, []);
+    if (path === "/api/runtime-capabilities") return fulfill(route, { crawlAutoAiEnabled: false, crawlSchedulerEnabled: false, llmProvider: "mock", externalModel: "", dailyArticleLimit: 5, dailyTokenLimit: 50000 });
     if (path.endsWith("/discover")) {
       calls.push("discover");
       return fulfill(route, {
@@ -224,7 +245,7 @@ test("发现文章、影子采集和立即采集保持三段式人工控制", as
   });
 
   await page.goto(`${institutionUrl}/public-sources`);
-  await page.getByRole("button", { name: "扫描最近文章" }).click();
+  await page.getByRole("button", { name: "立即检查" }).click();
   await expect(page.getByText(/未创建材料、未调用 AI/)).toBeVisible();
   await expect(page.getByText(candidate.title)).toBeVisible();
   expect(calls).toEqual(["discover"]);
