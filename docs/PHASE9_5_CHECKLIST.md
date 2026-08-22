@@ -7,7 +7,7 @@
 - DONE：合法文档与测试改动已独立提交，未包含历史截图或秘密。
 - DONE：封面区域查询回归单独复跑，2 passed。
 - PARTIAL：真实大场镇文章 External AI → 审核 → 发布留到最终受控验收。
-- PARTIAL：V22 容器迁移留到最终 Docker 重建验证。
+- DONE：Docker 后端启动时连续校验 25 个 migration，并从 V21 成功迁移到 V25。
 
 ## B. 管理员操作减法（P0）
 
@@ -36,7 +36,7 @@
 - DONE：首页形成今天要紧的事、大场通知、长辈常用、最近更新，内容均来自公开接口。
 - DONE：搜索覆盖标题、摘要和分类；办事页增加基于真实已发布字段的社区服务目录。
 - DONE：详情显示核验状态、原始发布与简达处理时间；原文更新时不再显示已核验。
-- TODO：375×812、390×844、768×1024、1440×900 与 24px 模式不溢出。
+- DONE：375×812、390×844、768×1024、1440×900 与 24px 模式不溢出；居民登录负边距已修复。
 
 ## F. 社区服务与提醒（P0/P1）
 
@@ -59,17 +59,17 @@
 
 ## I. 可访问性与 PWA（P1/P2）
 
-- TODO：触控区域、键盘、aria、对比度、reduced-motion 和安全区通过回归。
-- TODO：低风险增加 manifest；不缓存 Token、AI、邻里或管理数据。
+- DONE：触控区域、键盘、aria、对比度、reduced-motion 和安全区通过仓库 Playwright 回归。
+- DONE：增加 `manifest.webmanifest` 和代码生成的本地图标；未增加 Service Worker，不缓存 Token、AI、邻里或管理数据。
 
 ## J. 验证与交付
 
-- TODO：AI pytest。
-- TODO：Maven test。
-- TODO：两个前端 typecheck/build。
-- TODO：关键与全量 Playwright；按历史/环境/本轮回归分类。
-- TODO：Docker build/up/ps 与四个健康接口 HTTP 200。
+- DONE：AI pytest 97 passed（从 `services/ai-service` 使用项目虚拟环境执行）。
+- DONE：Maven test 67 passed，0 failed。
+- DONE：两个前端 typecheck/build 均通过。
+- DONE：关键 Playwright 与全量回归通过；完整结果 105 passed、11 skipped。
+- DONE：Docker build/up/ps 完成，MySQL、AI、后端、前端均 healthy，四个健康接口 HTTP 200。
 - TODO：一次真实 PDF 和一次真实大场镇网页 External 验收，不记录密钥。
-- TODO：保存真实 before/after 截图及截图索引。
-- TODO：完成 UX 减法、产品化、测试和必要迁移报告。
+- DONE：保存真实 before/after 截图及 17 张修改后截图索引，未改写 Phase 7.3 证据。
+- DONE：完成 UX 减法、产品化、测试和数据迁移说明。
 - TODO：按真实阶段中文提交；禁止 push。

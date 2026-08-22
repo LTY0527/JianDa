@@ -142,6 +142,20 @@ URL，不使用图片 URL。
 - `GET /api/public/assistant/suggestions`：根据当前已发布分类返回稳定推荐问题。
 - `POST /api/public/assistant/chat`：状态问题由后端直接回答；公共服务问题通过可替换检索器仅召回 `PUBLISHED` 内容，并返回回答、行动建议、来源引用、安全提示和 `mode`。`mode` 为 `status`、`retrieval`、`ai` 或 `general_ai`；显式启用且未超过每日次数/Token 预算时，有依据问题可返回 `ai`，低风险无依据问题可返回明确标注的 `general_ai`，External 失败安全降级。医疗诊断、政策资格、金额、办理材料等高风险问题无依据时拒绝猜测。
 - `POST /api/public/items/{id}/view`：仅对仍为 `PUBLISHED` 的内容记录一次匿名浏览事件，不保存用户问题或身份信息。
+- `GET /api/public/service-directory?regionCode=310113102`：只聚合当前区域已审核发布内容中的真实地点、电话、时间与官方来源；缺失字段不返回伪造兜底。
+- `GET /api/public/reminders`、`POST /api/public/items/{id}/reminder`、`DELETE /api/public/reminders/{id}`：按匿名游客 ID 保存、读取和删除内容时间提醒。
+- `POST /api/public/items/{id}/event/{eventType}`：记录收听、服务电话点击和地址复制等最小匿名使用事件；不采集精确位置和浏览器指纹。
+
+居民与邻里接口：
+
+- `POST /api/public/resident/login`、`GET /api/public/resident/me`、`POST /api/public/resident/logout`：居民试点会话；后续请求使用 `X-Resident-Token`，服务端仅保存 token 的 SHA-256 摘要。
+- `GET|POST /api/public/community/posts`：按大场镇区域和分类读取或发布不超过 500 字的纯文字帖。
+- `POST /api/public/community/posts/{id}/like`：切换点赞。
+- `GET|POST /api/public/community/posts/{id}/comments`：读取或发布不超过 300 字的评论。
+- `POST /api/public/community/posts/{id}/report`：提交举报并将帖子进入 `REPORTED` 待核对状态。
+- `GET /api/community-admin/posts`、`POST /api/community-admin/posts/{id}/status`：仅平台管理员查看举报并在 `VISIBLE/REPORTED/HIDDEN` 间治理。
+
+居民 DEMO 账号只用于本地产品验收。后端拒绝非 `310113102` 的社区写操作；帖子不支持图片、私信或精确门牌。
 
 助手请求示例：
 
