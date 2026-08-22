@@ -9,11 +9,14 @@ import {
 } from "../api/documents";
 import { apiMessage } from "../api/http";
 import { buildH5GuideUrl } from "../utils/h5-url";
-import { CheckCircle2, Send, ShieldCheck } from "lucide-vue-next";
+import { CheckCircle2, Send, ShieldCheck, Smartphone, Type } from "lucide-vue-next";
 
 const documentId = Number(useRoute().params.id);
 const document = ref<DocumentDetail | null>(null);
 const fieldCount = ref(0);
+const previewFields = ref<Array<{ label: string; value: string }>>([]);
+const previewSteps = ref<string[]>([]);
+const previewFont = ref<20 | 24>(20);
 const publishedSlug = ref("");
 const error = ref("");
 const submitting = ref(false);
@@ -58,6 +61,11 @@ function parseJson(value?: string): Record<string, string> {
     return {};
   }
 }
+function parseArray(value?: string): unknown[] {
+  if (!value) return [];
+  try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; }
+  catch { return []; }
+}
 
 onMounted(async () => {
   try {
@@ -84,6 +92,14 @@ onMounted(async () => {
       document.value.source_published_at || new Date().toISOString(),
     ).slice(0, 10);
     fieldCount.value = fieldsResponse.data.data.length;
+    previewFields.value = fieldsResponse.data.data
+      .filter((field) => field.field_value?.trim())
+      .slice(0, 6)
+      .map((field) => ({ label: field.field_label, value: field.field_value }));
+    previewSteps.value = parseArray(generated.find((item) => item.content_type === "STEP_CARDS")?.content_json)
+      .slice(0, 3)
+      .map((step) => typeof step === "string" ? step : String((step as Record<string, unknown>).title || (step as Record<string, unknown>).description || ""))
+      .filter(Boolean);
     initialForm.value = JSON.stringify(form);
   } catch (cause) {
     error.value = apiMessage(cause);
@@ -117,7 +133,7 @@ async function publish() {
 </script>
 
 <template>
-  <div class="narrow">
+  <div class="publish-page">
     <PageHeader
       title="审核与发布"
       description="确认分类、来源和用户端展示效果后发布。"
@@ -137,7 +153,8 @@ async function publish() {
         >
       </div>
     </div>
-    <section v-else class="panel publish-form">
+    <div v-else class="publish-layout">
+    <section class="panel publish-form">
       <div class="review-ok">
         <ShieldCheck />
         <span
@@ -201,5 +218,17 @@ async function publish() {
         </button>
       </div>
     </section>
+    <aside class="publish-preview" aria-label="用户端发布预览">
+      <header><div><Smartphone /><span><b>用户端预览</b><small>发布前确认老人实际看到的内容</small></span></div><div class="preview-size-switch"><button type="button" :class="{ active: previewFont === 20 }" @click="previewFont = 20">普通字号</button><button type="button" :class="{ active: previewFont === 24 }" @click="previewFont = 24"><Type />大字模式</button></div></header>
+      <article class="phone-preview" :style="{ fontSize: `${previewFont}px` }">
+        <span class="phone-preview__category">{{ form.category }}</span>
+        <h2>{{ form.title || "待填写标题" }}</h2>
+        <p>{{ form.summary || "暂无摘要，请返回审核页确认适老化内容。" }}</p>
+        <dl v-if="previewFields.length"><div v-for="field in previewFields" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl>
+        <section v-if="previewSteps.length"><h3>接下来怎么做</h3><ol><li v-for="step in previewSteps" :key="step">{{ step }}</li></ol></section>
+        <footer><b>来源：{{ form.sourceName || "待确认" }}</b><small>公开日期：{{ form.publishedAt }}</small><span v-if="form.allowPublicOriginal">可查看官方原文或上传原文件</span></footer>
+      </article>
+    </aside>
+    </div>
   </div>
 </template>

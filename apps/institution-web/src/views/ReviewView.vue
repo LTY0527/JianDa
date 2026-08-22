@@ -33,6 +33,7 @@ const fields = ref<any[]>([]);
 const active = ref(0);
 const values = ref<string[]>([]);
 const confirmed = ref<number[]>([]);
+const showAllFields = ref(false);
 const error = ref("");
 const submitting = ref(false);
 const loading = ref(true);
@@ -116,6 +117,12 @@ const reviewActionLabel = computed(() => {
   return submitting.value ? "正在提交…" : "完成字段审核";
 });
 const isDirty = computed(() => values.value.some((value, index) => value !== fields.value[index]?.value));
+const focusedFieldEntries = computed(() => fields.value
+  .map((field, index) => ({ field, index }))
+  .filter(({ index }) => showAllFields.value || !confirmed.value.includes(index)));
+const needsConfirmationCount = computed(() => fields.value.filter((_, index) =>
+  !confirmed.value.includes(index),
+).length);
 onBeforeRouteLeave(() => {
   if (allowLeave.value || !isDirty.value) return true;
   return window.confirm("审核内容尚未保存，确定离开吗？");
@@ -181,6 +188,10 @@ async function load() {
     confirmed.value = fields.value
       .map((field, index) => (field.reviewStatus === "CONFIRMED" ? index : -1))
       .filter((index) => index >= 0);
+    const firstFocused = fields.value.findIndex((_, index) =>
+      !confirmed.value.includes(index),
+    );
+    active.value = firstFocused >= 0 ? firstFocused : 0;
     const generated = generatedResponse.status === "fulfilled"
       ? generatedResponse.value.data.data : [];
     if (generatedResponse.status === "rejected") {
@@ -426,6 +437,10 @@ async function rejectCandidate(candidate: ImageCandidate) {
     <p v-if="isWebArticle && (document?.version_no || 1) > 1" class="version-review-note">
       当前审核对象：V{{ document?.version_no }}。已发布的 V{{ (document?.version_no || 1) - 1 }} 继续保持公开，只有本版本完成人工审核并发布后才会替换。
     </p>
+    <section v-if="fields.length" class="review-focus-summary">
+      <div><TriangleAlert v-if="needsConfirmationCount" /><CheckCircle2 v-else /><span><b>{{ needsConfirmationCount ? `发现 ${needsConfirmationCount} 项需要确认` : "关键字段已全部确认" }}</b><small>优先显示未确认、低置信度和疑似重复字段；已确认的低风险字段默认收起。</small></span></div>
+      <button class="btn secondary" type="button" @click="showAllFields = !showAllFields">{{ showAllFields ? "只看需要确认" : `查看全部 ${fields.length} 项` }}</button>
+    </section>
 
     <section v-if="isWebArticle" class="panel web-source-review">
       <div class="web-source-review__cover">
@@ -577,32 +592,32 @@ async function rejectCandidate(candidate: ImageCandidate) {
         </section>
         <div class="review-fields">
           <article
-            v-for="(field, index) in fields"
-            :key="field.id"
+            v-for="entry in focusedFieldEntries"
+            :key="entry.field.id"
             :class="{
-              active: active === index,
-              confirmed: confirmed.includes(index),
+              active: active === entry.index,
+              confirmed: confirmed.includes(entry.index),
             }"
-            @click="active = index"
+            @click="active = entry.index"
           >
             <header>
-              <b>{{ field.label }}</b>
-              <span v-if="field.duplicateSuspected" class="duplicate-warning"
+              <b>{{ entry.field.label }}</b>
+              <span v-if="entry.field.duplicateSuspected" class="duplicate-warning"
                 ><TriangleAlert />疑似重复字段</span
               >
-              <span v-if="confirmed.includes(index)"
+              <span v-if="confirmed.includes(entry.index)"
                 ><CheckCircle2 />已确认</span
               >
-              <span v-else :class="{ risk: field.confidence < 0.93 }">{{
-                field.confidence < 0.93 ? "请重点核对" : "待确认"
+              <span v-else :class="{ risk: entry.field.confidence < 0.93 }">{{
+                entry.field.confidence < 0.93 ? "请重点核对" : "待确认"
               }}</span>
             </header>
-            <textarea v-model="values[index]" rows="2"></textarea>
+            <textarea v-model="values[entry.index]" rows="2"></textarea>
             <div class="trace">
-              <span>原文依据 · 第 {{ field.page }} 页</span>
-              <p>“{{ field.quote }}”</p>
+              <span>原文依据 · 第 {{ entry.field.page }} 页</span>
+              <p>“{{ entry.field.quote }}”</p>
             </div>
-            <button class="confirm-btn" @click.stop="confirm(index)">
+            <button class="confirm-btn" @click.stop="confirm(entry.index)">
               <CheckCircle2 :size="17" />确认此字段
             </button>
           </article>

@@ -104,10 +104,16 @@ function installMocks(
     }
     if (path === "/api/documents/922") return json(route, document);
     if (path === "/api/documents/922/fields") {
-      return json(route, [{
-        id: 51, field_label: "适用对象", field_value: "社区居民", page_no: 1,
-        source_quote: "社区居民", confidence: 0.98, review_status: "CONFIRMED",
-      }]);
+      return json(route, [
+        {
+          id: 51, field_label: "适用对象", field_value: "社区居民", page_no: 1,
+          source_quote: "社区居民", confidence: 0.98, review_status: "CONFIRMED",
+        },
+        {
+          id: 52, field_label: "办理时间", field_value: "工作日 09:00—17:00", page_no: 1,
+          source_quote: "工作日 09:00—17:00", confidence: 0.86, review_status: "PENDING",
+        },
+      ]);
     }
     if (path === "/api/documents/922/jobs") {
       return json(route, [{ id: 91, status: "SUCCEEDED", progress: 100 }]);
@@ -116,6 +122,7 @@ function installMocks(
       return json(route, [
         { id: 61, content_type: "SUMMARY", content_json: '["更新了社区健康服务安排。"]', plain_text: "更新了社区健康服务安排。", status: "GENERATED" },
         { id: 62, content_type: "PLAIN_TEXT", plain_text: "请按新安排参加社区健康服务。", status: "GENERATED" },
+        { id: 63, content_type: "STEP_CARDS", content_json: '[{"title":"确认服务时间"},{"description":"携带身份证前往服务点"}]', status: "GENERATED" },
       ]);
     }
     if (path === "/api/web-articles/922/image-candidates") return json(route, candidates);
@@ -149,6 +156,11 @@ test("V2 审核保留已发布 V1，并完整展示和确认图片候选来源",
 
   await expect(page.getByText(/当前审核对象：V2/)).toBeVisible();
   await expect(page.getByText(/已发布的 V1 继续保持公开/)).toBeVisible();
+  await expect(page.getByText("发现 1 项需要确认")).toBeVisible();
+  await expect(page.locator(".review-fields")).toContainText("办理时间");
+  await expect(page.locator(".review-fields")).not.toContainText("适用对象");
+  await page.getByRole("button", { name: "查看全部 2 项" }).click();
+  await expect(page.locator(".review-fields")).toContainText("适用对象");
   const firstCandidate = page.locator(".web-article-images figure").first();
   await expect(firstCandidate).toContainText(candidates[0].candidate_url);
   await expect(firstCandidate).toContainText(candidates[0].source_page_url);
@@ -180,6 +192,12 @@ test("拒绝候选后可改用分类默认图，未审核图片明确阻止发�
   await page.goto(`${institutionUrl}/documents/922/publish`);
   await expect(page.getByText(/发布已阻止：网页文章图片尚未完成人工审核/)).toBeVisible();
   await expect(page.getByRole("button", { name: "审核通过并发布" })).toBeDisabled();
+  const preview = page.getByLabel("用户端发布预览");
+  await expect(preview).toContainText("社区健康服务内容更新");
+  await expect(preview).toContainText("办理时间");
+  await expect(preview).toContainText("确认服务时间");
+  await page.getByRole("button", { name: "大字模式" }).click();
+  await expect(page.locator(".phone-preview")).toHaveCSS("font-size", "24px");
 });
 
 test("版本和图片审核在手机与桌面视口无明显横向溢出", async ({ page }) => {
