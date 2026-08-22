@@ -91,6 +91,23 @@ class PublicOrderingIntegrationTest {
                 .andExpect(jsonPath("$.data.next").doesNotExist());
     }
 
+    @Test
+    void dachangRegionIsExposedAndRegionMetadataIsReturned() throws Exception {
+        jdbc.update("UPDATE published_item SET province='上海市',city='上海市',district='宝山区',"
+                + "street_or_town='大场镇',region_code='310113102',local_scope='TOWN',is_local=TRUE "
+                + "WHERE slug='ordering-test-pinned'");
+
+        mvc.perform(get("/api/public/regions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].district").value("宝山区"))
+                .andExpect(jsonPath("$.data[0].street_or_town").value("大场镇"))
+                .andExpect(jsonPath("$.data[0].region_code").value("310113102"));
+        mvc.perform(get("/api/public/items").param("regionCode", "310113102"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].street_or_town").value("大场镇"))
+                .andExpect(jsonPath("$.data[0].region_code").value("310113102"));
+    }
+
     private void insert(String slug, String category, boolean pinned, int importance,
             String publishedAt, String status) {
         String title = MARKER + slug;

@@ -29,6 +29,13 @@ export interface PublicItem {
   reading_minutes?: number;
   pinned?: boolean;
   importance?: number;
+  province?: string;
+  city?: string;
+  district?: string;
+  street_or_town?: string;
+  community?: string;
+  region_code?: string;
+  local_scope?: string;
 }
 
 export interface AssistantCitation {
@@ -66,9 +73,12 @@ export class AssistantApiError extends Error {
   }
 }
 
-export async function fetchItems(category?: string): Promise<PublicItem[]> {
+export async function fetchItems(category?: string, regionCode?: string): Promise<PublicItem[]> {
   const response = await client.get("/public/items", {
-    params: category && category !== "全部" ? { category } : {},
+    params: {
+      ...(category && category !== "全部" ? { category } : {}),
+      ...(regionCode ? { regionCode } : {}),
+    },
   });
   return response.data.data;
 }

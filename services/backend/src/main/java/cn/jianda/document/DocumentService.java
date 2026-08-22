@@ -932,11 +932,14 @@ public class DocumentService {
             default -> 50;
         };
         jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,source_name,"
-                        + "source_url,content_kind,cover_image_url,is_local,reading_minutes,importance) "
-                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        + "source_url,content_kind,cover_image_url,is_local,reading_minutes,importance,province,city,"
+                        + "district,street_or_town,community,region_code,local_scope) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 id, slug, title, summary, category, user.id(), sourceName, sourceUrl,
                 contentKind.isBlank() ? null : contentKind, cover.isBlank() ? null : cover,
-                local, readingMinutes, importance);
+                local, readingMinutes, importance, document.get("province"), document.get("city"),
+                document.get("district"), document.get("street_or_town"), document.get("community"),
+                document.get("region_code"), document.getOrDefault("local_scope", "UNSPECIFIED"));
         jdbc.update("UPDATE source_document SET processing_status='PUBLISHED',allow_public_original=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 allowPublicOriginal, id);
         jdbc.update("UPDATE generated_content SET status='PUBLISHED' WHERE document_id=?", id);

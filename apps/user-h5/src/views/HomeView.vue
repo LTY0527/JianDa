@@ -8,6 +8,7 @@ import { contentKind, importanceScore, normalizeTitle, truncateSummary } from ".
 import { readerPreferences } from "../library";
 import { Search, Landmark, HeartPulse, HandHeart, ShieldAlert, Drama, ChevronRight, Volume2, Type, CalendarDays, BellRing, ArrowRight, WifiOff } from "lucide-vue-next";
 import { articleCover, categoryDefaultCover } from "../utils/coverImage";
+import { activeRegion } from "../region";
 const items = ref<PublicItem[]>([]);
 const loading = ref(true);
 const error = ref("");
@@ -34,11 +35,11 @@ function fallbackCover(event: Event, item: PublicItem) {
   const fallback = categoryDefaultCover(item, attempt);
   if (!image.src.endsWith(fallback)) image.src = fallback;
 }
-async function load() { loading.value = true; error.value = ""; try { items.value = await fetchItems(); } catch { error.value = "暂时无法读取权威内容，请稍后再试"; } finally { loading.value = false; } }
+async function load() { loading.value = true; error.value = ""; try { items.value = await fetchItems(undefined, activeRegion.value.region_code); } catch { error.value = "暂时无法读取权威内容，请稍后再试"; } finally { loading.value = false; } }
 onMounted(load);
 </script>
 <template><div class="h5-page"><H5Header /><main class="h5-main home-main">
-  <section class="welcome welcome--compact"><div><p class="welcome-date"><CalendarDays />{{ today }}</p><h1>{{ greeting }}，今天想了解什么？</h1><p>权威内容先审核，再为您清楚说明。</p></div><RouterLink to="/search" class="search-box"><Search />搜索办事指南、健康资讯</RouterLink><div class="home-shortcuts"><RouterLink to="/settings"><Type /><span><b>大字阅读</b><small>18—24px 可调</small></span></RouterLink><RouterLink to="/settings"><Volume2 /><span><b>语音设置</b><small>慢速也能听清</small></span></RouterLink></div></section>
+  <section class="welcome welcome--compact"><div><p class="welcome-date"><CalendarDays />{{ today }}</p><h1>{{ greeting }}，{{ activeRegion.street_or_town }}居民</h1><p>本地通知优先，权威内容先审核再发布。</p></div><RouterLink to="/search" class="search-box"><Search />搜索办事指南、健康资讯</RouterLink><div class="home-shortcuts"><RouterLink to="/settings"><Type /><span><b>大字阅读</b><small>18—24px 可调</small></span></RouterLink><RouterLink to="/settings"><Volume2 /><span><b>语音设置</b><small>慢速也能听清</small></span></RouterLink></div></section>
   <div v-if="loading" class="home-skeleton" aria-label="正在加载"><i v-for="n in 4" :key="n"></i></div>
   <div v-else-if="error" class="home-error" role="status"><WifiOff /><div><b>内容暂时没有加载成功</b><p>{{ error }}</p></div><button type="button" @click="load">重新加载</button></div>
   <template v-else>
