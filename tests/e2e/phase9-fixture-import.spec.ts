@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const institutionUrl =
   process.env.JIANDA_INSTITUTION_URL ?? "http://127.0.0.1:8090";
+const fixturesEnabled = process.env.JIANDA_ENABLE_DEV_FIXTURES === "true";
 
 const fixtures = [
   {
@@ -46,6 +47,7 @@ async function prepare(page: Page) {
 }
 
 test("三个稳定 fixture 可按 ID 导入并刷新导入记录", async ({ page }) => {
+  test.skip(!fixturesEnabled, "生产构建默认隐藏开发 fixture；仅显式启用时验收该入口");
   await prepare(page);
   const importedIds: string[] = [];
   let importListReads = 0;
@@ -85,6 +87,7 @@ test("三个稳定 fixture 可按 ID 导入并刷新导入记录", async ({ page
 });
 
 test("fixture API 失败显示明确错误而不是伪装为空列表", async ({ page }) => {
+  test.skip(!fixturesEnabled, "生产构建默认隐藏开发 fixture；仅显式启用时验收该入口");
   await prepare(page);
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;

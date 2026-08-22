@@ -96,6 +96,7 @@ test("未知官网必须先安全预览并由平台管理员确认官方身份",
   });
 
   await page.goto(`${institutionUrl}/public-sources`);
+  await page.getByRole("button", { name: /展开平台高级设置/ }).click();
   await page.getByRole("button", { name: "扫描与导入" }).click();
   await page.getByLabel("公开文章地址").fill("https://mp.weixin.qq.com/s/example");
   await page.getByRole("button", { name: "安全预览来源身份" }).click();
@@ -166,6 +167,7 @@ test("扫描筛选和批量保存只提交所选未导入 URL", async ({ page })
   });
 
   await page.goto(`${institutionUrl}/public-sources`);
+  await page.getByRole("button", { name: /展开平台高级设置/ }).click();
   await page.getByRole("button", { name: "扫描与导入" }).click();
   await page.getByLabel("关键词", { exact: true }).fill("健康");
   await page.getByRole("button", { name: "扫描最近文章" }).click();
@@ -248,6 +250,7 @@ test("历史补图必须先预览再确认执行", async ({ page }) => {
   });
 
   await page.goto(`${institutionUrl}/public-sources`);
+  await page.getByRole("button", { name: /展开平台高级设置/ }).click();
   await page.getByRole("button", { name: "高级自动采集设置" }).click();
   await expect(page.getByRole("button", { name: "执行历史补图" })).toBeDisabled();
   await page.getByRole("button", { name: "预览补图范围" }).click();

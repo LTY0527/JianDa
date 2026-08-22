@@ -44,7 +44,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
       ["/news", "权威资讯", "h5-news-375.png"],
       ["/assistant", "简达助手", "h5-assistant-375.png"],
       ["/services", "办事行动中心", "h5-services-375.png"],
-      ["/profile", "游客使用", "h5-profile-375.png"],
+      ["/profile", "居民登录", "h5-profile-375.png"],
     ] as const;
 
     for (const [route, heading, file] of pages) {
@@ -283,10 +283,10 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     await login(page);
 
     const pages = [
-      ["/", "内容工作台", "admin-dashboard-1440.png"],
-      ["/documents", "材料管理", "admin-documents-1440.png"],
-      ["/public-sources", "权威来源管理", "admin-public-sources-1440.png"],
-      ["/public-import", "权威公开信息导入", "admin-public-import-1440.png"],
+      ["/", /好，平台管理员/, "admin-dashboard-1440.png"],
+      ["/documents", "内容中心", "admin-documents-1440.png"],
+      ["/public-sources", "采集与来源", "admin-public-sources-1440.png"],
+      ["/public-import", "添加内容", "admin-public-import-1440.png"],
       ["/logs", "操作日志", "admin-logs-1440.png"],
     ] as const;
     for (const [route, heading, file] of pages) {

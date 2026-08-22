@@ -21,9 +21,11 @@ test("真实上传 PDF 可在桌面和移动端内置阅读器中查看与下载
   const documents = (await documentsResponse.json()).data as Array<{
     id: number;
     file_name?: string | null;
+    status?: string;
   }>;
   const pdf = documents.find((item) =>
-    item.file_name?.toLocaleLowerCase().endsWith(".pdf"),
+    item.file_name?.toLocaleLowerCase().endsWith(".pdf") &&
+    ["WAITING_REVIEW", "REVIEWED", "PUBLISHED"].includes(item.status || ""),
   );
   test.skip(!pdf, "当前数据库没有可用于真实阅读器验收的已上传 PDF");
 

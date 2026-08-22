@@ -32,6 +32,8 @@ test("document 16 shows real processing counts and traceable external fields", a
   await expect(page.getByRole("heading", { name: "原文对照审核" })).toBeVisible();
   await expect(page.locator(".source-pane")).toContainText("医院门诊预约调整告知");
   await expect(page.locator(".pane-title").first()).toContainText("第 1 页 / 共 1 页");
+  const showAllFields = page.getByRole("button", { name: "查看全部 10 项" });
+  if (await showAllFields.isVisible()) await showAllFields.click();
 
   const fieldCards = page.locator(".review-fields article");
   await expect(fieldCards).toHaveCount(10);

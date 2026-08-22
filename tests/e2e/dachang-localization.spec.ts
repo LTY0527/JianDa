@@ -39,7 +39,7 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 390, height: 844 }
     await page.goto(h5Url);
 
     await expect(page.getByRole("heading", { name: /大场镇居民/ })).toBeVisible();
-    await expect(page.getByText("2026年大场镇政府开放月活动预告")).toBeVisible();
+    await expect(page.getByText("2026年大场镇政府开放月活动预告").first()).toBeVisible();
     await expect(page.getByRole("link", { name: "邻里" })).toBeVisible();
     await expectNoOverflow(page);
 
@@ -57,11 +57,16 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 390, height: 844 }
 
 test("邻里空状态不使用演示内容冒充真实社区消息", async ({ page, context }) => {
   await mockItems(context, []);
+  await context.route("**/api/public/community/posts**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json; charset=utf-8",
+    body: JSON.stringify({ code: 0, message: "成功", data: [] }),
+  }));
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto(`${h5Url}/neighborhood`);
   await expect(page.getByRole("heading", { name: "邻里" })).toBeVisible();
   await expect(page.getByText("上海市 · 宝山区 · 大场镇")).toBeVisible();
-  await expect(page.getByText(/不会用演示内容冒充真实社区信息/)).toBeVisible();
+  await expect(page.getByText("当前没有邻里帖子。")).toBeVisible();
   await expect(page.getByText("陈阿姨")).toHaveCount(0);
   await expectNoOverflow(page);
 });

@@ -103,11 +103,22 @@ test("PARTIAL_SUCCESS 错误队列只允许重试未解决的可重试项", asyn
       return json(route, null);
     }
     if (path === "/api/ai-queue") return json(route, []);
+    if (path === "/api/runtime-capabilities") {
+      return json(route, {
+        llmProvider: "mock",
+        assistantExternalEnabled: false,
+        crawlAutoAiEnabled: false,
+        crawlSchedulerEnabled: false,
+        dailyArticleLimit: 0,
+        dailyTokenLimit: 0,
+      });
+    }
     return json(route, null, 404, "测试未配置该接口");
   });
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${institutionUrl}/public-sources`);
+  await page.getByRole("button", { name: /展开平台高级设置/ }).click();
   await page.getByRole("button", { name: "采集任务" }).click();
   const partialRow = page.locator("tbody tr").filter({ hasText: "#610" });
   await expect(partialRow).toContainText("部分成功");
