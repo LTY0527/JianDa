@@ -374,17 +374,31 @@ class CoreFlowIntegrationTest {
                 "fact_extract_ms", 12, "prompt_tokens", 10, "completion_tokens", 5,
                 "total_tokens", 15, "facts", facts);
         when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
-                .thenThrow(new AiServiceException(503, Map.of(
-                        "error_code", "LLM_SCHEMA_VALIDATION_FAILED",
-                        "message", "缺少必填字段：quick_summary",
-                        "stage", "accessible_rewrite", "json_path", "$.quick_summary",
-                        "request_id", "req-rewrite", "retryable", true,
-                        "fact_checkpoint", checkpoint)));
+                .thenThrow(new AiServiceException(503, Map.ofEntries(
+                        Map.entry("error_code", "LLM_SCHEMA_VALIDATION_FAILED"),
+                        Map.entry("message", "缺少必填字段：quick_summary"),
+                        Map.entry("stage", "accessible_rewrite"),
+                        Map.entry("json_path", "$.quick_summary"),
+                        Map.entry("request_id", "req-rewrite"),
+                        Map.entry("provider", "external"),
+                        Map.entry("model", "deepseek-v4-flash"),
+                        Map.entry("prompt_tokens", 23),
+                        Map.entry("completion_tokens", 12),
+                        Map.entry("total_tokens", 35),
+                        Map.entry("retryable", true),
+                        Map.entry("fact_checkpoint", checkpoint))));
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PROCESSING"));
         mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(1));
+        mvc.perform(get("/api/documents/{id}/jobs", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].provider_id").value("external"))
+                .andExpect(jsonPath("$.data[0].model_id").value("deepseek-v4-flash"))
+                .andExpect(jsonPath("$.data[0].provider_request_id").value("req-rewrite"))
+                .andExpect(jsonPath("$.data[0].crossed_provider_boundary").value(true))
+                .andExpect(jsonPath("$.data[0].total_tokens").value(35));
         when(aiClient.rewrite(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap(), anyMap()))
                 .thenReturn(Map.of(
                         "fields", List.of(fact), "summary", List.of("请按原文咨询。"),

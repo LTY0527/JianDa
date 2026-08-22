@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 import fitz
 
@@ -6,6 +7,35 @@ from app.models import ExtractTextResult, Segment
 
 
 ALLOWED_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg"}
+OCR_LANGUAGE = os.getenv("OCR_LANGUAGE", "chi_sim+eng").strip() or "chi_sim+eng"
+
+
+class OcrUnavailableError(RuntimeError):
+    """Raised when a scanned page needs OCR but local OCR is unavailable."""
+
+
+def _page_needs_ocr(page: fitz.Page, text: str) -> bool:
+    if text.strip():
+        return False
+    try:
+        return bool(page.get_image_info())
+    except RuntimeError:
+        return False
+
+
+def _ocr_page_text(page: fitz.Page) -> str:
+    try:
+        text_page = page.get_textpage_ocr(
+            language=OCR_LANGUAGE,
+            dpi=220,
+            full=True,
+        )
+        return page.get_text("text", textpage=text_page).strip()
+    except (RuntimeError, ValueError) as exc:
+        raise OcrUnavailableError(
+            "扫描页需要本地 OCR，但 OCR 引擎或中文语言包不可用；"
+            "请安装 Tesseract 5 和 chi_sim 语言包后重试"
+        ) from exc
 
 
 def extract_file(path: Path) -> ExtractTextResult:
@@ -18,12 +48,16 @@ def extract_file(path: Path) -> ExtractTextResult:
     segments: list[Segment] = []
     full_text: list[str] = []
     offset = 0
+    ocr_page_count = 0
     with fitz.open(path) as document:
         for page_index, page in enumerate(document):
             # A page is the durable trace unit. PDF layout engines often split one
             # sentence into multiple visual blocks, so block-level segments can
             # make an otherwise exact source quote impossible to trace.
             text = page.get_text("text").strip()
+            if _page_needs_ocr(page, text):
+                text = _ocr_page_text(page)
+                ocr_page_count += 1
             if text:
                 segments.append(
                     Segment(
@@ -37,11 +71,22 @@ def extract_file(path: Path) -> ExtractTextResult:
                 full_text.append(text)
                 offset += len(text) + 1
         page_count = document.page_count
+    if not full_text:
+        raise ValueError(
+            "PDF 未提取到可读文本；文件可能是空白扫描件或 OCR 未能识别，请检查原文件后重试"
+        )
+    extraction_method = (
+        "pymupdf+ocr"
+        if ocr_page_count and ocr_page_count < page_count
+        else "ocr"
+        if ocr_page_count
+        else "pymupdf"
+    )
     return ExtractTextResult(
         text="\n".join(full_text),
         page_count=page_count,
         segments=segments,
-        extraction_method="pymupdf",
+        extraction_method=extraction_method,
     )
 
 

@@ -1,9 +1,11 @@
 from pathlib import Path
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 
-from app.extraction import extract_file, render_pdf_first_page
+import app.extraction as extraction
+from app.extraction import OcrUnavailableError, extract_file, render_pdf_first_page
 from app.main import app
 from app.providers.external import ExternalProviderError
 from app.models import MetadataPreview, TextRequest
@@ -104,6 +106,81 @@ def test_pdf_extraction_saves_one_traceable_segment_per_page() -> None:
         assert result.segments[0].text == "first page source"
         assert result.segments[1].text == "second page source"
         assert result.text == "first page source\nsecond page source"
+    finally:
+        pdf_path.unlink(missing_ok=True)
+
+
+def _insert_scanned_page(document: fitz.Document) -> None:
+    page = document.new_page(width=595, height=842)
+    pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 400, 200), False)
+    pixmap.clear_with(255)
+    page.insert_image(fitz.Rect(72, 72, 472, 272), stream=pixmap.tobytes("png"))
+
+
+def test_scanned_pdf_uses_page_aware_local_ocr(monkeypatch) -> None:
+    pdf_path = Path(__file__).with_name("_generated-scanned.pdf")
+    try:
+        document = fitz.open()
+        _insert_scanned_page(document)
+        document.save(pdf_path)
+        document.close()
+        monkeypatch.setattr(
+            extraction,
+            "_ocr_page_text",
+            lambda page: "大场镇社区服务扫描通知",
+        )
+
+        result = extract_file(pdf_path)
+
+        assert result.extraction_method == "ocr"
+        assert result.page_count == 1
+        assert result.text == "大场镇社区服务扫描通知"
+        assert result.segments[0].page_no == 1
+        assert result.segments[0].text == result.text
+    finally:
+        pdf_path.unlink(missing_ok=True)
+
+
+def test_mixed_pdf_only_ocr_scanned_page(monkeypatch) -> None:
+    pdf_path = Path(__file__).with_name("_generated-mixed.pdf")
+    try:
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 72), "digital first page")
+        _insert_scanned_page(document)
+        document.save(pdf_path)
+        document.close()
+        calls: list[int] = []
+
+        def fake_ocr(page: fitz.Page) -> str:
+            calls.append(page.number + 1)
+            return "第二页扫描正文"
+
+        monkeypatch.setattr(extraction, "_ocr_page_text", fake_ocr)
+        result = extract_file(pdf_path)
+
+        assert calls == [2]
+        assert result.extraction_method == "pymupdf+ocr"
+        assert [item.page_no for item in result.segments] == [1, 2]
+        assert result.text == "digital first page\n第二页扫描正文"
+    finally:
+        pdf_path.unlink(missing_ok=True)
+
+
+def test_scanned_pdf_reports_local_ocr_failure(monkeypatch) -> None:
+    pdf_path = Path(__file__).with_name("_generated-ocr-failure.pdf")
+    try:
+        document = fitz.open()
+        _insert_scanned_page(document)
+        document.save(pdf_path)
+        document.close()
+
+        def fail_ocr(page: fitz.Page) -> str:
+            raise OcrUnavailableError("扫描页需要本地 OCR，但 OCR 引擎不可用")
+
+        monkeypatch.setattr(extraction, "_ocr_page_text", fail_ocr)
+        with pytest.raises(OcrUnavailableError, match="OCR 引擎不可用"):
+            extract_file(pdf_path)
     finally:
         pdf_path.unlink(missing_ok=True)
 

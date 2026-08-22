@@ -311,6 +311,10 @@ public class HttpAiClient implements AiClient {
                 Object rawDetail = error.get("detail");
                 if (rawDetail instanceof Map<?, ?> map) {
                     map.forEach((key, value) -> detail.put(String.valueOf(key), value));
+                } else if (rawDetail instanceof String message && !message.isBlank()) {
+                    detail.put("error_code", status == 503 ? "OCR_UNAVAILABLE" : "TEXT_EXTRACTION_FAILED");
+                    detail.put("message", message);
+                    detail.put("retryable", status >= 500);
                 }
             } catch (JsonProcessingException ignored) {
                 // Upstream bodies are not exposed when they are not structured safe errors.

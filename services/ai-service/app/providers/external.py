@@ -136,6 +136,12 @@ class ExternalProviderError(RuntimeError):
         normalization_applied: bool = False,
         normalization_rules: tuple[str, ...] = (),
         fact_checkpoint: dict[str, Any] | None = None,
+        provider: str = "external",
+        model: str | None = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        elapsed_ms: int = 0,
     ) -> None:
         super().__init__(message)
         self.error_code = error_code
@@ -149,6 +155,12 @@ class ExternalProviderError(RuntimeError):
         self.normalization_applied = normalization_applied
         self.normalization_rules = normalization_rules
         self.fact_checkpoint = fact_checkpoint
+        self.provider = provider
+        self.model = model
+        self.prompt_tokens = max(0, prompt_tokens)
+        self.completion_tokens = max(0, completion_tokens)
+        self.total_tokens = max(0, total_tokens)
+        self.elapsed_ms = max(0, elapsed_ms)
 
     def safe_detail(self) -> dict[str, Any]:
         detail: dict[str, Any] = {
@@ -167,6 +179,13 @@ class ExternalProviderError(RuntimeError):
         detail.update({key: value for key, value in optional.items() if value})
         detail["normalization_applied"] = self.normalization_applied
         detail["normalization_rules"] = list(self.normalization_rules)
+        detail["provider"] = self.provider
+        if self.model:
+            detail["model"] = self.model
+        detail["prompt_tokens"] = self.prompt_tokens
+        detail["completion_tokens"] = self.completion_tokens
+        detail["total_tokens"] = self.total_tokens
+        detail["elapsed_ms"] = self.elapsed_ms
         if self.fact_checkpoint is not None:
             detail["fact_checkpoint"] = self.fact_checkpoint
         return detail
@@ -625,6 +644,14 @@ class ExternalLlmProvider(LlmProvider):
         )
 
     def analyze(self, request: TextRequest) -> AnalyzeResult:
+        started = time.perf_counter()
+        try:
+            return self._analyze(request)
+        except ExternalProviderError as exc:
+            self._enrich_error(exc, self._elapsed_ms(started))
+            raise
+
+    def _analyze(self, request: TextRequest) -> AnalyzeResult:
         total_started = time.perf_counter()
         active_prompt_version = self._prompt_version(request)
         cache_key = self._cache_key(request) if request.content_sha256 else ""
@@ -773,6 +800,9 @@ class ExternalLlmProvider(LlmProvider):
                     "total_tokens": fact_result.total_tokens,
                     "facts": checkpoint.model_dump(mode="json"),
                 }
+                exc.prompt_tokens += fact_result.prompt_tokens
+                exc.completion_tokens += fact_result.completion_tokens
+                exc.total_tokens += fact_result.total_tokens
             raise
         rewrite = self._rewrite_with_sessions(rewrite, facts, sessions)
         metrics = ProcessingMetrics(
@@ -900,6 +930,16 @@ class ExternalLlmProvider(LlmProvider):
         ))
 
     def rewrite_from_checkpoint(
+        self, request: TextRequest, checkpoint_payload: dict[str, Any]
+    ) -> AnalyzeResult:
+        started = time.perf_counter()
+        try:
+            return self._rewrite_from_checkpoint(request, checkpoint_payload)
+        except ExternalProviderError as exc:
+            self._enrich_error(exc, self._elapsed_ms(started))
+            raise
+
+    def _rewrite_from_checkpoint(
         self, request: TextRequest, checkpoint_payload: dict[str, Any]
     ) -> AnalyzeResult:
         active_prompt_version = self._prompt_version(request)
@@ -1565,7 +1605,17 @@ class ExternalLlmProvider(LlmProvider):
             retryable=stage == "accessible_rewrite",
             normalization_applied=completion.normalization_applied if completion else False,
             normalization_rules=completion.repaired_paths if completion else (),
+            model=self.settings.model,
+            prompt_tokens=completion.prompt_tokens if completion else 0,
+            completion_tokens=completion.completion_tokens if completion else 0,
+            total_tokens=completion.total_tokens if completion else 0,
+            elapsed_ms=completion.elapsed_ms if completion else 0,
         )
+
+    def _enrich_error(self, error: ExternalProviderError, elapsed_ms: int) -> None:
+        error.provider = "external"
+        error.model = error.model or self.settings.model
+        error.elapsed_ms = max(error.elapsed_ms, elapsed_ms)
 
     def _log_schema_validation_error(
         self,

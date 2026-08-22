@@ -524,10 +524,22 @@ def test_untraceable_quote_or_page_mismatch_is_rejected_without_retry(invalid_fi
 def test_invalid_rewrite_schema_fails_without_mock_fallback(caplog):
     invalid_rewrite = rewrite()
     invalid_rewrite.pop("audio_script")
+    invalid_rewrite_response = json_completion(invalid_rewrite)
+    invalid_rewrite_response["usage"] = {
+        "prompt_tokens": 13,
+        "completion_tokens": 7,
+        "total_tokens": 20,
+    }
+    fact_response = json_completion(facts())
+    fact_response["usage"] = {
+        "prompt_tokens": 11,
+        "completion_tokens": 5,
+        "total_tokens": 16,
+    }
     with QueueServer(
         [
-            response(200, json_completion(facts())),
-            response(200, json_completion(invalid_rewrite)),
+            response(200, fact_response),
+            response(200, invalid_rewrite_response),
         ]
     ) as server:
         provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
@@ -540,6 +552,13 @@ def test_invalid_rewrite_schema_fails_without_mock_fallback(caplog):
     assert error.keyword == "required"
     assert error.retryable is True
     assert error.response_fingerprint
+    assert error.provider == "external"
+    assert error.model == "deepseek-v4-flash"
+    assert error.prompt_tokens == 24
+    assert error.completion_tokens == 12
+    assert error.total_tokens == 36
+    assert error.safe_detail()["total_tokens"] == 36
+    assert error.elapsed_ms >= 0
     assert error.fact_checkpoint is not None
     assert error.fact_checkpoint["facts"]["fields"][0]["value"] == "青松社区服务站"
     assert len(server.requests) == 2

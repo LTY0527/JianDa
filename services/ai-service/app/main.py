@@ -6,7 +6,12 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Response
 
-from app.extraction import ALLOWED_SUFFIXES, extract_file, render_pdf_first_page
+from app.extraction import (
+    ALLOWED_SUFFIXES,
+    OcrUnavailableError,
+    extract_file,
+    render_pdf_first_page,
+)
 from app.metadata import detect_metadata
 from app.models import (
     AnalyzeResult,
@@ -62,7 +67,12 @@ async def extract_text(file: UploadFile = File(...)) -> ExtractTextResult:
         temp.write(await file.read())
         path = Path(temp.name)
     try:
-        return extract_file(path)
+        try:
+            return extract_file(path)
+        except OcrUnavailableError as exception:
+            raise HTTPException(status_code=503, detail=str(exception)) from exception
+        except (ValueError, RuntimeError) as exception:
+            raise HTTPException(status_code=422, detail=str(exception)) from exception
     finally:
         path.unlink(missing_ok=True)
 

@@ -433,11 +433,14 @@ public class DocumentService {
             }
             jdbc.update("UPDATE processing_job SET status='FAILED',stage=?,last_failed_stage=?,reason_code=?,"
                             + "provider_id=?,model_id=?,provider_request_id=?,response_fingerprint=?,"
-                            + "crossed_provider_boundary=?,error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                            + "crossed_provider_boundary=?,prompt_tokens=?,completion_tokens=?,total_tokens=?,"
+                            + "error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
                     failedStage, failedStage, reasonCode,
                     nullableString(diagnosticProvider), nullableString(diagnosticModel),
                     nullableString(diagnosticRequestId), nullableString(diagnosticFingerprint),
-                    crossedProviderBoundary, errorMessage, jobId);
+                    crossedProviderBoundary, tokenMetric(exception, "prompt_tokens"),
+                    tokenMetric(exception, "completion_tokens"), tokensFrom(exception),
+                    errorMessage, jobId);
             jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "FAILED");
             throw new BusinessException(503, publicFailureMessage(exception));
@@ -639,6 +642,11 @@ public class DocumentService {
             return waitingResult(reservation);
         }
         int returnedActualTokens = 0;
+        String diagnosticProvider = "";
+        String diagnosticModel = "";
+        String diagnosticRequestId = "";
+        String diagnosticFingerprint = "";
+        boolean crossedProviderBoundary = false;
         try {
             List<Map<String, Object>> sourceSegments = jdbc.query(
                     "SELECT id,page_no,text FROM document_segment WHERE document_id=? ORDER BY page_no,segment_no",
@@ -657,6 +665,7 @@ public class DocumentService {
                         String.valueOf(document.get("raw_text")),
                         document.get("content_source_id") != null ? "public_news" : "guide",
                         String.valueOf(document.getOrDefault("source_name", "")), sourceSegments, context, checkpoint);
+                crossedProviderBoundary = true;
             } catch (RuntimeException exception) {
                 aiQueueService.fail(reservation, tokensFrom(exception),
                         providerFrom(exception), modelFrom(exception), "AI_CALL_FAILED");
@@ -666,13 +675,20 @@ public class DocumentService {
             saveRewriteResult(id, result, document.get("content_source_id") != null ? document : null);
             Map<String, Object> metrics = result.get("metrics") instanceof Map<?, ?> map
                     ? (Map<String, Object>) map : Map.of();
+            diagnosticProvider = nullableString(metrics.get("provider"));
+            diagnosticModel = nullableString(metrics.get("model"));
+            diagnosticRequestId = nullableString(metrics.get("request_id"));
+            diagnosticFingerprint = nullableString(metrics.get("response_fingerprint"));
             returnedActualTokens = (int) metric(metrics, "total_tokens");
             aiQueueService.settle(reservation, returnedActualTokens, true,
                     nullableString(metrics.get("provider")), nullableString(metrics.get("model")));
             jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,accessible_rewrite_ms=?,"
-                            + "prompt_tokens=?,completion_tokens=?,total_tokens=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                            + "prompt_tokens=?,completion_tokens=?,total_tokens=?,provider_id=?,model_id=?,provider_request_id=?,"
+                            + "response_fingerprint=?,crossed_provider_boundary=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
                     metric(metrics, "accessible_rewrite_ms"), metric(metrics, "prompt_tokens"),
-                    metric(metrics, "completion_tokens"), metric(metrics, "total_tokens"), jobId);
+                    metric(metrics, "completion_tokens"), metric(metrics, "total_tokens"),
+                    diagnosticProvider, diagnosticModel, diagnosticRequestId, diagnosticFingerprint,
+                    crossedProviderBoundary, jobId);
             jdbc.update("UPDATE source_document SET processing_status='WAITING_REVIEW',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             return Map.of("documentId", id, "status", "WAITING_REVIEW", "stage", "SUCCEEDED", "progress", 100);
         } catch (RuntimeException exception) {
@@ -680,11 +696,32 @@ public class DocumentService {
                     "AI_CALL_OR_PERSISTENCE_FAILED");
             String failedStage = exception instanceof AiServiceException aiFailure
                     ? defaultString(aiFailure.stringValue("stage"), "accessible_rewrite") : "accessible_rewrite";
-            jdbc.update("UPDATE processing_job SET status='FAILED',stage=?,last_failed_stage=?,error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                    failedStage, failedStage, diagnosticMessage(exception), jobId);
+            String reasonCode = "PROCESSING_FAILED";
+            if (exception instanceof AiServiceException aiFailure) {
+                diagnosticProvider = defaultString(aiFailure.stringValue("provider"), diagnosticProvider);
+                diagnosticModel = defaultString(aiFailure.stringValue("model"), diagnosticModel);
+                diagnosticRequestId = defaultString(aiFailure.stringValue("request_id"), diagnosticRequestId);
+                diagnosticFingerprint = defaultString(aiFailure.stringValue("response_fingerprint"), diagnosticFingerprint);
+                returnedActualTokens = Math.max(returnedActualTokens, tokensFrom(exception));
+                crossedProviderBoundary = crossedProviderBoundary || !diagnosticRequestId.isBlank();
+                reasonCode = defaultString(aiFailure.stringValue("reason_code"), "AI_SERVICE_FAILED");
+            }
+            jdbc.update("UPDATE processing_job SET status='FAILED',stage=?,last_failed_stage=?,reason_code=?,"
+                            + "provider_id=?,model_id=?,provider_request_id=?,response_fingerprint=?,crossed_provider_boundary=?,"
+                            + "prompt_tokens=?,completion_tokens=?,total_tokens=?,error_message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    failedStage, failedStage, reasonCode, diagnosticProvider, diagnosticModel,
+                    diagnosticRequestId, diagnosticFingerprint, crossedProviderBoundary,
+                    tokenMetric(exception, "prompt_tokens"), tokenMetric(exception, "completion_tokens"),
+                    returnedActualTokens, diagnosticMessage(exception), jobId);
             jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
             throw new BusinessException(503, publicFailureMessage(exception));
         }
+    }
+
+    private static int tokenMetric(RuntimeException exception, String key) {
+        if (!(exception instanceof AiServiceException failure)) return 0;
+        Object value = failure.detail().get(key);
+        return value instanceof Number number ? Math.max(0, number.intValue()) : 0;
     }
 
     private void saveRewriteResult(long id, Map<String, Object> result, Map<String, Object> publicDocument) {
