@@ -1,9 +1,11 @@
 package cn.jianda;
 
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.hamcrest.Matchers.not;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -106,6 +108,23 @@ class PublicOrderingIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].street_or_town").value("大场镇"))
                 .andExpect(jsonPath("$.data[0].region_code").value("310113102"));
+    }
+
+    @Test
+    void expiredContentLeavesListsButDetailRemainsTraceable() throws Exception {
+        jdbc.update("UPDATE published_item SET expires_at=DATEADD('DAY',-1,CURRENT_TIMESTAMP),"
+                + "deadline_at=DATEADD('DAY',-2,CURRENT_TIMESTAMP) WHERE slug='ordering-test-important'");
+
+        mvc.perform(get("/api/public/items"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].slug", not(hasItem("ordering-test-important"))));
+        mvc.perform(get("/api/public/search").param("keyword", MARKER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].slug", not(hasItem("ordering-test-important"))));
+        mvc.perform(get("/api/public/items/ordering-test-important"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.slug").value("ordering-test-important"))
+                .andExpect(jsonPath("$.data.expires_at").exists());
     }
 
     private void insert(String slug, String category, boolean pinned, int importance,

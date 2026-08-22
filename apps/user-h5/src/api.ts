@@ -36,6 +36,12 @@ export interface PublicItem {
   community?: string;
   region_code?: string;
   local_scope?: string;
+  effective_from?: string;
+  deadline_at?: string;
+  expires_at?: string;
+  last_verified_at?: string;
+  source_updated_at?: string;
+  verification_status?: "VERIFIED" | "REVIEW_REQUIRED";
 }
 
 export interface AssistantCitation {

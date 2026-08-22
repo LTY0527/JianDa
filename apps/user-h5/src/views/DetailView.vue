@@ -102,6 +102,11 @@ const registrationDate = computed(() => {
     return `${startDate.value} 至 ${endDate.value}`;
   return startDate.value || endDate.value;
 });
+const isExpired = computed(() => Boolean(item.value.expires_at)
+  && new Date(item.value.expires_at).getTime() < Date.now());
+const isDeadlinePassed = computed(() => !isExpired.value && Boolean(item.value.deadline_at)
+  && new Date(item.value.deadline_at).getTime() < Date.now());
+const verificationPending = computed(() => item.value.verification_status === "REVIEW_REQUIRED");
 const speechText = computed(() =>
   [
     cleanDisplayTitle(item.value.title),
@@ -339,13 +344,24 @@ function openOfficial() {
           <ShieldCheck /><span
             ><b>{{ item.source_name }}</b
             ><small
-              >权威来源 ·
+              >{{ verificationPending ? "原文更新待复核" : "已通过人工核验" }} ·
               {{ String(item.original_published_at || item.published_at).slice(0, 10) }} 原始发布 ·
               {{ String(item.published_at).slice(0, 10) }} 简达处理</small
             ></span
           >
         </div>
       </article>
+      <section v-if="isExpired || isDeadlinePassed || verificationPending" class="lifecycle-notice" role="status">
+        <TriangleAlert />
+        <div>
+          <b v-if="isExpired">信息已过期</b>
+          <b v-else-if="isDeadlinePassed">办理或报名已截止</b>
+          <b v-else>原文近期有更新，正在重新核验</b>
+          <p v-if="isExpired">本页作为历史记录保留，不再出现在首页推荐。请查看官方原文确认最新安排。</p>
+          <p v-else-if="isDeadlinePassed">截止时间已经过去，本页仍保留供您核对历史信息。</p>
+          <p v-else>更新内容尚未通过新一轮人工审核，当前页面不再标记为“已核验”。</p>
+        </div>
+      </section>
       <nav class="reader-tools">
         <button @click="speech.toggle(speechText)" :class="{ active: speech.isActive.value }">
           <component :is="speech.status.value === 'playing' ? Pause : Volume2" /><span>{{

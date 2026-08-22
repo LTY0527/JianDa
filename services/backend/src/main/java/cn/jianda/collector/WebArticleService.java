@@ -567,6 +567,9 @@ public class WebArticleService {
             jdbc.update("UPDATE crawl_job SET content_changed=TRUE,last_success_at=CURRENT_TIMESTAMP,"
                             + "last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE document_id=?",
                     documentId);
+            jdbc.update("UPDATE published_item SET source_updated_at=CURRENT_TIMESTAMP,"
+                            + "verification_status='REVIEW_REQUIRED' WHERE document_id=? AND status='PUBLISHED'",
+                    documentId);
             log(user, "CREATE_WEB_ARTICLE_VERSION", newDocumentId, "UPLOADED");
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("documentId", newDocumentId);

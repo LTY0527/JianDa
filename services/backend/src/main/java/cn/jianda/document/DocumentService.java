@@ -13,8 +13,13 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.sql.PreparedStatement;
+import java.sql.Timestamp;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -24,6 +29,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -47,6 +54,7 @@ public class DocumentService {
             "SERVICE_GUIDE", "ACTIVITY_NOTICE", "POLICY_DOCUMENT",
             "STANDARD_SPECIFICATION", "HEALTH_EDUCATION", "ANTI_FRAUD",
             "ELDERLY_SERVICE", "NEWS_ARTICLE", "GENERAL_PUBLIC_SERVICE");
+    private static final Pattern CHINESE_DATE = Pattern.compile("(\\d{4})年(\\d{1,2})月(\\d{1,2})日");
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
     private final AiQueueService aiQueueService;
@@ -931,15 +939,24 @@ public class DocumentService {
             case "COMMUNITY_SERVICE" -> 70;
             default -> 50;
         };
+        Timestamp effectiveFrom = lifecycleDate(id, "START_DATE", false);
+        Timestamp deadlineAt = lifecycleDate(id, "END_DATE", true);
+        Timestamp expiresAt = deadlineAt == null ? null
+                : Timestamp.valueOf(deadlineAt.toLocalDateTime().toLocalDate().plusDays(1).atStartOfDay());
         jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,source_name,"
                         + "source_url,content_kind,cover_image_url,is_local,reading_minutes,importance,province,city,"
-                        + "district,street_or_town,community,region_code,local_scope) "
-                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        + "district,street_or_town,community,region_code,local_scope,effective_from,deadline_at,expires_at,"
+                        + "last_verified_at,verification_status) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 id, slug, title, summary, category, user.id(), sourceName, sourceUrl,
                 contentKind.isBlank() ? null : contentKind, cover.isBlank() ? null : cover,
                 local, readingMinutes, importance, document.get("province"), document.get("city"),
                 document.get("district"), document.get("street_or_town"), document.get("community"),
-                document.get("region_code"), document.getOrDefault("local_scope", "UNSPECIFIED"));
+                document.get("region_code"), document.getOrDefault("local_scope", "UNSPECIFIED"),
+                effectiveFrom, deadlineAt, expiresAt, Timestamp.valueOf(LocalDateTime.now()), "VERIFIED");
+        if (document.get("previous_version_id") instanceof Number previous) {
+            jdbc.update("UPDATE published_item SET status='WITHDRAWN' WHERE document_id=?", previous.longValue());
+        }
         jdbc.update("UPDATE source_document SET processing_status='PUBLISHED',allow_public_original=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 allowPublicOriginal, id);
         jdbc.update("UPDATE generated_content SET status='PUBLISHED' WHERE document_id=?", id);
@@ -1005,6 +1022,32 @@ public class DocumentService {
 
     private static String trimToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private Timestamp lifecycleDate(long documentId, String fieldType, boolean endOfDay) {
+        List<String> values = jdbc.queryForList(
+                "SELECT field_value FROM extracted_field WHERE document_id=? AND field_type=? "
+                        + "AND field_value IS NOT NULL AND field_value<>'' ORDER BY id LIMIT 1",
+                String.class, documentId, fieldType);
+        if (values.isEmpty()) return null;
+        LocalDate date = parseDate(values.get(0));
+        if (date == null) return null;
+        return Timestamp.valueOf(endOfDay ? date.atTime(23, 59, 59) : date.atStartOfDay());
+    }
+
+    private static LocalDate parseDate(String value) {
+        Matcher chinese = CHINESE_DATE.matcher(value == null ? "" : value);
+        if (chinese.find()) {
+            return LocalDate.of(Integer.parseInt(chinese.group(1)),
+                    Integer.parseInt(chinese.group(2)), Integer.parseInt(chinese.group(3)));
+        }
+        try {
+            Matcher iso = Pattern.compile("(\\d{4}-\\d{1,2}-\\d{1,2})").matcher(value == null ? "" : value);
+            if (iso.find()) return LocalDate.parse(iso.group(1), DateTimeFormatter.ISO_LOCAL_DATE);
+        } catch (DateTimeParseException ignored) {
+            // 无法可靠识别的日期不写入生命周期字段，继续交由人工审核。
+        }
+        return null;
     }
 
     private static String nullableString(Object value) {
