@@ -20,6 +20,8 @@ import cn.jianda.collector.SourceRegistryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,17 +54,18 @@ class SourceRegistryOperationsIntegrationTest {
         jdbc.update("DELETE FROM source_registry_identity");
         jdbc.update("DELETE FROM source_registry WHERE domain LIKE 'phase93b-%'");
         platformAuth = "Bearer " + login("platform_admin");
+        OffsetDateTime published = OffsetDateTime.now(ZoneOffset.UTC).minusDays(1);
         when(aiClient.discoverArticles(anyLong(), anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(Map.of(
                         "candidates", List.of(Map.of(
                                 "discovered_url", "https://www.news.cn/controlled-article.html",
                                 "canonical_url", "https://www.news.cn/controlled-article.html",
                                 "title", "受控采集测试文章",
-                                "published_time", "2026-07-29T10:00:00+08:00",
+                                "published_time", published.toString(),
                                 "discovery_method", "SECTION",
                                 "discovery_page", "https://www.news.cn/",
                                 "content_kind_candidate", "GENERAL_NEWS",
-                                "discovered_at", "2026-07-29T10:01:00+08:00",
+                                "discovered_at", published.plusMinutes(1).toString(),
                                 "dedup_key", "controlled-article")),
                         "errors", List.of()));
         when(aiClient.previewWebArticle(anyString(), anyBoolean())).thenReturn(Map.ofEntries(

@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import cn.jianda.ai.AiClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -100,12 +102,13 @@ class ArticleDiscoveryIntegrationTest {
     }
 
     private Map<String, Object> candidate(String url, String key) {
+        OffsetDateTime published = OffsetDateTime.now(ZoneOffset.UTC).minusDays(1);
         return Map.ofEntries(
                 Map.entry("source_id", enabledId), Map.entry("discovered_url", url),
                 Map.entry("canonical_url", url), Map.entry("title", "离线文章" + key),
-                Map.entry("published_time", "2026-07-29T08:00:00Z"), Map.entry("discovery_method", "RSS"),
+                Map.entry("published_time", published.toString()), Map.entry("discovery_method", "RSS"),
                 Map.entry("discovery_page", "https://discovery-fixture-enabled.example/rss.xml"),
-                Map.entry("content_kind_candidate", "UNKNOWN"), Map.entry("discovered_at", "2026-07-29T08:01:00Z"),
+                Map.entry("content_kind_candidate", "UNKNOWN"), Map.entry("discovered_at", published.plusMinutes(1).toString()),
                 Map.entry("dedup_key", key));
     }
 
