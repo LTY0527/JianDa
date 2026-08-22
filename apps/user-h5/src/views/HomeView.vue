@@ -6,7 +6,7 @@ import ContentCard from "../components/ContentCard.vue";
 import { fetchItems, type PublicItem } from "../api";
 import { contentKind, importanceScore, normalizeTitle, truncateSummary } from "../content";
 import { readerPreferences } from "../library";
-import { Search, Landmark, HeartPulse, HandHeart, ShieldAlert, Drama, ChevronRight, Volume2, Type, CalendarDays, BellRing, ArrowRight, WifiOff } from "lucide-vue-next";
+import { Search, Landmark, HeartPulse, HandHeart, ShieldAlert, Drama, ChevronRight, Volume2, Type, CalendarDays, BellRing, ArrowRight, WifiOff, Utensils, Building2, PhoneCall } from "lucide-vue-next";
 import { articleCover, categoryDefaultCover } from "../utils/coverImage";
 import { activeRegion } from "../region";
 const items = ref<PublicItem[]>([]);
@@ -24,10 +24,11 @@ const alerts = computed(() => [...items.value]
 const usedPrimaryIds = computed(() => new Set([featured.value?.id, ...alerts.value.map((item) => item.id)].filter(Boolean)));
 const newsStream = computed(() => todayReads.value.filter((item) => !usedPrimaryIds.value.has(item.id)).slice(0,4));
 const usedNewsIds = computed(() => new Set([...usedPrimaryIds.value, ...newsStream.value.map((item) => item.id)]));
-const guides = computed(() => items.value.filter((item) => !usedNewsIds.value.has(item.id) && (item.content_kind === "SERVICE_NOTICE" || contentKind(item) === "guide")).slice(0,3));
+const guides = computed(() => items.value.filter((item) => item.is_local || item.region_code === activeRegion.value.region_code).slice(0,3));
 const usedAllIds = computed(() => new Set([...usedNewsIds.value, ...guides.value.map((item) => item.id)]));
 const healthReminders = computed(() => items.value.filter((item) => !usedAllIds.value.has(item.id) && item.category === "健康").slice(0,3));
 const fraudReminders = computed(() => items.value.filter((item) => !usedAllIds.value.has(item.id) && item.category === "反诈").slice(0,3));
+const commonServices = [["社区卫生", HeartPulse, "健康"], ["长者食堂", Utensils, "养老"], ["社区事务", Building2, "社区服务"], ["便民电话", PhoneCall, "生活服务"]] as const;
 function fallbackCover(event: Event, item: PublicItem) {
   const image = event.currentTarget as HTMLImageElement;
   const attempt = Number(image.dataset.fallbackAttempt || "0") + 1;
@@ -39,18 +40,19 @@ async function load() { loading.value = true; error.value = ""; try { items.valu
 onMounted(load);
 </script>
 <template><div class="h5-page"><H5Header /><main class="h5-main home-main">
-  <section class="welcome welcome--compact"><div><p class="welcome-date"><CalendarDays />{{ today }}</p><h1>{{ greeting }}，{{ activeRegion.street_or_town }}居民</h1><p>本地通知优先，权威内容先审核再发布。</p></div><RouterLink to="/search" class="search-box"><Search />搜索办事指南、健康资讯</RouterLink><div class="home-shortcuts"><RouterLink to="/settings"><Type /><span><b>大字阅读</b><small>18—24px 可调</small></span></RouterLink><RouterLink to="/settings"><Volume2 /><span><b>语音设置</b><small>慢速也能听清</small></span></RouterLink></div></section>
+  <section class="welcome welcome--compact"><div><p class="welcome-date"><CalendarDays />{{ today }}</p><h1>{{ greeting }}，{{ activeRegion.street_or_town }}居民</h1><p>{{ loading ? "正在整理今天的信息" : `今天有 ${Math.min(items.length, 3)} 件事值得留意` }}</p></div><RouterLink to="/search" class="search-box"><Search />搜索通知、办事和社区服务</RouterLink><div class="home-shortcuts"><RouterLink to="/settings"><Type /><span><b>大字阅读</b><small>18—24px 可调</small></span></RouterLink><RouterLink to="/listen"><Volume2 /><span><b>听一听</b><small>把权威内容读给您听</small></span></RouterLink></div></section>
   <div v-if="loading" class="home-skeleton" aria-label="正在加载"><i v-for="n in 4" :key="n"></i></div>
   <div v-else-if="error" class="home-error" role="status"><WifiOff /><div><b>内容暂时没有加载成功</b><p>{{ error }}</p></div><button type="button" @click="load">重新加载</button></div>
   <template v-else>
-    <header v-if="featured" class="stream-heading home-recommend-heading"><div><h2>今日推荐</h2><p>从权威资讯中为您优先选择</p></div></header>
+    <header v-if="featured" class="stream-heading home-recommend-heading"><div><h2>今天要紧的事</h2><p>按本地相关、重要程度和截止时间整理</p></div></header>
     <section v-if="featured" class="featured-story">
       <img :src="articleCover(featured)" :alt="featured.image_alt_text || `${featured.title}配图`" fetchpriority="high" decoding="async" referrerpolicy="no-referrer" @error="fallbackCover($event, featured)"/>
       <div><span>{{featured.category}}{{featured.is_local?" · 本地":""}}</span><h2>{{normalizeTitle(featured.title)}}</h2><p>{{truncateSummary(featured.summary)}}</p><small>权威来源 · {{featured.source_name}} · {{String(featured.published_at).slice(0,10)}} · {{featured.reading_minutes||1}}分钟阅读</small><RouterLink :to="`/news/${featured.slug}`">查看适老版<ArrowRight/></RouterLink></div>
     </section>
     <section v-if="alerts.length" class="important-alerts"><header><BellRing /><div><h2>重要提醒</h2><p>请优先留意安全、健康和公共服务变化</p></div></header><article v-for="alert in alerts" :key="alert.id"><span>{{ alert.category }}</span><div><h3>{{ normalizeTitle(alert.title) }}</h3><p>{{ truncateSummary(alert.summary, 100) }}</p><small>{{ alert.source_name }} · {{ String(alert.published_at).slice(0,10) }}</small></div><RouterLink :to="`/${contentKind(alert)}/${alert.slug}`">立即查看<ArrowRight /></RouterLink></article></section>
-    <section class="home-stream"><header class="stream-heading"><div><h2>图文资讯</h2><p>按人工置顶、重要程度和发布时间排序</p></div><RouterLink to="/news">更多内容<ChevronRight /></RouterLink></header><ContentCard v-for="item in newsStream" :key="item.id" :item="item" actions /></section>
-    <section class="service-brief"><header class="stream-heading"><div><h2>重要公共服务通知</h2><p>时间、地点和办理要求，提前看清楚</p></div><RouterLink to="/services">全部通知<ChevronRight /></RouterLink></header><div class="service-brief__grid"><RouterLink v-for="item in guides" :key="item.id" :to="`/${contentKind(item)}/${item.slug}`"><span>{{ item.category }}</span><h3>{{ normalizeTitle(item.title) }}</h3><p>{{ truncateSummary(item.summary, 90) }}</p><small>{{ item.source_name }}</small><b>查看怎么做<ArrowRight /></b></RouterLink></div><div v-if="!guides.length" class="compact-empty">当前没有已发布公共服务通知</div></section>
+    <section class="service-brief"><header class="stream-heading"><div><h2>大场通知</h2><p>只展示已审核发布、与当前地区相关的内容</p></div><RouterLink to="/services">查看办事<ChevronRight /></RouterLink></header><div class="service-brief__grid"><RouterLink v-for="item in guides" :key="item.id" :to="`/${contentKind(item)}/${item.slug}`"><span>{{ item.category }}</span><h3>{{ normalizeTitle(item.title) }}</h3><p>{{ truncateSummary(item.summary, 90) }}</p><small>{{ item.source_name }}</small><b>查看详情<ArrowRight /></b></RouterLink></div><div v-if="!guides.length" class="compact-empty">当前没有已审核发布的大场镇通知。</div></section>
+    <section class="common-services"><header class="stream-heading"><div><h2>长辈常用</h2><p>按现实任务进入服务目录</p></div></header><nav><RouterLink v-for="service in commonServices" :key="service[0]" :to="{ path: '/services', query: { type: service[2] } }"><component :is="service[1]"/><span>{{ service[0] }}</span><ChevronRight/></RouterLink></nav></section>
+    <section class="home-stream"><header class="stream-heading"><div><h2>最近更新</h2><p>来自权威来源并已通过人工审核</p></div><RouterLink to="/news">更多内容<ChevronRight /></RouterLink></header><ContentCard v-for="item in newsStream" :key="item.id" :item="item" actions /></section>
     <section v-if="healthReminders.length || fraudReminders.length" class="home-topic-grid">
       <article v-if="healthReminders.length"><header><HeartPulse/><div><h2>健康提醒</h2><p>来自已审核权威内容</p></div></header><RouterLink v-for="item in healthReminders" :key="item.id" :to="`/news/${item.slug}`"><span><b>{{ normalizeTitle(item.title) }}</b><small>{{ item.source_name }} · {{ String(item.published_at).slice(0,10) }}</small></span><ChevronRight/></RouterLink></article>
       <article v-if="fraudReminders.length"><header><ShieldAlert/><div><h2>防诈提醒</h2><p>先核实，再操作</p></div></header><RouterLink v-for="item in fraudReminders" :key="item.id" :to="`/news/${item.slug}`"><span><b>{{ normalizeTitle(item.title) }}</b><small>{{ item.source_name }} · {{ String(item.published_at).slice(0,10) }}</small></span><ChevronRight/></RouterLink></article>

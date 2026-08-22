@@ -20,10 +20,15 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.CacheControl;
 import java.io.IOException;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 
 @RestController
 @RequestMapping("/api/public")
@@ -95,6 +100,88 @@ public class PublicController {
     @GetMapping("/categories")
     public ApiResponse<List<String>> categories() {
         return ApiResponse.ok(List.of("健康", "养老政策", "防诈", "社区服务", "文化学习", "办事通知"));
+    }
+
+    @GetMapping("/service-directory")
+    public ApiResponse<List<Map<String, Object>>> serviceDirectory(
+            @RequestParam(defaultValue = "310113102") String regionCode) {
+        return ApiResponse.ok(jdbc.queryForList(
+                "SELECT p.id,p.title name,p.category service_type,p.district,p.street_or_town,p.community,"
+                        + "MAX(CASE WHEN f.field_type='LOCATION' THEN f.field_value END) address,"
+                        + "MAX(CASE WHEN f.field_type='CONTACT' THEN f.field_value END) phone,"
+                        + "MAX(CASE WHEN f.field_type IN ('SERVICE_TIME','TIME') THEN f.field_value END) opening_hours,"
+                        + "p.summary description,p.source_url,p.source_name,p.last_verified_at "
+                        + "FROM published_item p LEFT JOIN extracted_field f ON f.document_id=p.document_id "
+                        + "WHERE p.status='PUBLISHED' AND p.region_code=? "
+                        + "AND (p.expires_at IS NULL OR p.expires_at>=CURRENT_TIMESTAMP) "
+                        + "AND p.source_url IS NOT NULL AND p.source_url<>'' "
+                        + "GROUP BY p.id,p.title,p.category,p.district,p.street_or_town,p.community,p.summary,"
+                        + "p.source_url,p.source_name,p.last_verified_at "
+                        + "ORDER BY p.last_verified_at DESC,p.published_at DESC", regionCode.trim()));
+    }
+
+    @GetMapping("/reminders")
+    public ApiResponse<List<Map<String, Object>>> reminders(
+            @RequestHeader(value = "X-Anonymous-User") String user) {
+        validateAnonymousUser(user);
+        return ApiResponse.ok(jdbc.queryForList(
+                "SELECT r.id,r.reminder_type,r.remind_at,r.created_at,p.id published_item_id,p.slug,p.title,"
+                        + "p.category,p.content_kind,p.status content_status FROM resident_reminder r "
+                        + "JOIN published_item p ON p.id=r.published_item_id "
+                        + "WHERE r.anonymous_user_id=? ORDER BY r.remind_at,r.id", user));
+    }
+
+    @PostMapping("/items/{id}/reminder")
+    public ApiResponse<Map<String, Object>> createReminder(
+            @PathVariable long id,
+            @RequestHeader(value = "X-Anonymous-User") String user,
+            @RequestBody ReminderRequest request) {
+        validateAnonymousUser(user);
+        Timestamp remindAt = parseReminderTime(request.remindAt());
+        String type = request.reminderType() == null ? "CONTENT_TIME" : request.reminderType().trim();
+        if (!List.of("CONTENT_TIME", "DEADLINE", "ACTIVITY_START").contains(type)) {
+            throw new BusinessException(400, "不支持的提醒类型");
+        }
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM published_item WHERE id=? AND status='PUBLISHED'",
+                Integer.class, id);
+        if (count == null || count == 0) throw new BusinessException(404, "内容不存在或已撤回");
+        int existing = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM resident_reminder WHERE anonymous_user_id=? AND published_item_id=? AND reminder_type=?",
+                Integer.class, user, id, type);
+        if (existing == 0) {
+            jdbc.update("INSERT INTO resident_reminder(anonymous_user_id,published_item_id,reminder_type,remind_at) VALUES (?,?,?,?)",
+                    user, id, type, remindAt);
+            recordUsage(user, id, "REMINDER_CREATE");
+        } else {
+            jdbc.update("UPDATE resident_reminder SET remind_at=?,created_at=CURRENT_TIMESTAMP "
+                    + "WHERE anonymous_user_id=? AND published_item_id=? AND reminder_type=?",
+                    remindAt, user, id, type);
+        }
+        return ApiResponse.ok(Map.of("publishedItemId", id, "reminderType", type, "remindAt", remindAt));
+    }
+
+    @DeleteMapping("/reminders/{id}")
+    public ApiResponse<Void> deleteReminder(
+            @PathVariable long id,
+            @RequestHeader(value = "X-Anonymous-User") String user) {
+        validateAnonymousUser(user);
+        jdbc.update("DELETE FROM resident_reminder WHERE id=? AND anonymous_user_id=?", id, user);
+        return ApiResponse.ok(null);
+    }
+
+    @PostMapping("/items/{id}/event/{eventType}")
+    public ApiResponse<Void> usageEvent(
+            @PathVariable long id,
+            @PathVariable String eventType,
+            @RequestHeader(value = "X-Anonymous-User") String user) {
+        validateAnonymousUser(user);
+        String normalized = eventType.trim().toUpperCase();
+        if (!List.of("CONTENT_LISTEN", "SERVICE_PHONE_CLICK", "SERVICE_ADDRESS_COPY").contains(normalized)) {
+            throw new BusinessException(400, "不支持的使用事件");
+        }
+        recordUsage(user, id, normalized);
+        return ApiResponse.ok(null);
     }
 
     @GetMapping("/items/{slug}")
@@ -247,4 +334,32 @@ public class PublicController {
         }
         return sessions;
     }
+
+    private static void validateAnonymousUser(String user) {
+        if (user == null || user.isBlank() || user.length() > 80) {
+            throw new BusinessException(400, "游客标识无效");
+        }
+    }
+
+    private static Timestamp parseReminderTime(String value) {
+        if (value == null || value.isBlank()) throw new BusinessException(400, "请选择提醒时间");
+        try {
+            Instant instant;
+            try {
+                instant = Instant.parse(value);
+            } catch (DateTimeParseException ignored) {
+                instant = OffsetDateTime.parse(value).toInstant();
+            }
+            return Timestamp.from(instant);
+        } catch (DateTimeParseException exception) {
+            throw new BusinessException(400, "提醒时间格式不正确");
+        }
+    }
+
+    private void recordUsage(String user, long contentId, String eventType) {
+        jdbc.update("INSERT INTO usage_event(anonymous_session_id,content_id,event_type) VALUES (?,?,?)",
+                user, contentId, eventType);
+    }
+
+    public record ReminderRequest(String reminderType, String remindAt) {}
 }

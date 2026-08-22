@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
-import { fetchDetail, fetchNeighbors, recordContentView, setFavorite, type PublicItemNeighbor, type PublicItemNeighbors } from "../api";
+import { createReminder, fetchDetail, fetchNeighbors, recordContentView, recordUsageEvent, setFavorite, type PublicItemNeighbor, type PublicItemNeighbors } from "../api";
 import { cleanDisplayTitle, sanitizeDisplayText } from "../content";
 import { readerPreferences, recordVisit, saveFavorite } from "../library";
 import SpeechRateSelector from "../components/SpeechRateSelector.vue";
@@ -28,6 +28,7 @@ import {
   ExternalLink,
   Stethoscope,
   Landmark,
+  BellRing,
 } from "lucide-vue-next";
 const route = useRoute();
 const router = useRouter();
@@ -45,6 +46,7 @@ const isHealth = computed(() => item.value.content_kind === "HEALTH_EDUCATION");
 const isPolicy = computed(() => item.value.content_kind === "POLICY_NEWS");
 const error = ref("");
 const copyFeedback = ref("");
+const reminderFeedback = ref("");
 const accessibleText = ref("");
 const readingMode = ref<"quick" | "complete">("quick");
 const item = ref<any>({
@@ -107,6 +109,7 @@ const isExpired = computed(() => Boolean(item.value.expires_at)
 const isDeadlinePassed = computed(() => !isExpired.value && Boolean(item.value.deadline_at)
   && new Date(item.value.deadline_at).getTime() < Date.now());
 const verificationPending = computed(() => item.value.verification_status === "REVIEW_REQUIRED");
+const reminderTarget = computed(() => item.value.deadline_at || item.value.effective_from || "");
 const speechText = computed(() =>
   [
     cleanDisplayTitle(item.value.title),
@@ -306,6 +309,20 @@ async function copyAddress() {
   copyFeedback.value = (await copyText(location.value))
     ? "地址已复制"
     : "复制失败，请长按地址手动复制";
+  if (copyFeedback.value === "地址已复制") void recordUsageEvent(item.value.id, "SERVICE_ADDRESS_COPY").catch(() => undefined);
+}
+async function remindMe() {
+  if (!reminderTarget.value) return;
+  try {
+    const deadline = Boolean(item.value.deadline_at);
+    await createReminder(item.value.id, deadline ? "DEADLINE" : "ACTIVITY_START", new Date(reminderTarget.value).toISOString());
+    reminderFeedback.value = "提醒已保存，可在“我的提醒”中查看";
+  } catch { reminderFeedback.value = "提醒保存失败，请稍后重试"; }
+}
+function toggleSpeech() {
+  const starting = speech.status.value === "idle";
+  speech.toggle(speechText.value);
+  if (starting && item.value.id) void recordUsageEvent(item.value.id, "CONTENT_LISTEN").catch(() => undefined);
 }
 function grow() {
   font.value = font.value >= 24 ? 18 : font.value + 2;
@@ -363,7 +380,7 @@ function openOfficial() {
         </div>
       </section>
       <nav class="reader-tools">
-        <button @click="speech.toggle(speechText)" :class="{ active: speech.isActive.value }">
+        <button @click="toggleSpeech" :class="{ active: speech.isActive.value }">
           <component :is="speech.status.value === 'playing' ? Pause : Volume2" /><span>{{
             speech.status.value === "playing" ? "暂停" : speech.status.value === "paused" ? "继续" : "听全文"
           }}</span></button
@@ -375,12 +392,15 @@ function openOfficial() {
           <Heart :fill="favorite ? 'currentColor' : 'none'" /><span>{{
             favorite ? "已收藏" : "收藏"
           }}</span></button
+        ><button v-if="reminderTarget && new Date(reminderTarget).getTime() > Date.now()" type="button" @click="remindMe">
+          <BellRing /><span>提醒我</span></button
         ><RouterLink :to="{ path: `/original/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"
           ><FileText /><span>提取文本</span></RouterLink
         >
         <RouterLink v-if="item.original_file_available" :to="{ path: `/original-file/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"><FileText /><span>原{{ String(item.mime_type || '').startsWith('image/') ? '图' : 'PDF' }}</span></RouterLink>
         <button v-if="isNews" type="button" @click="openOfficial"><ExternalLink/><span>官方原文</span></button>
       </nav>
+      <p v-if="reminderFeedback" class="action-feedback" role="status">{{ reminderFeedback }}</p>
       <div v-if="loading" class="detail-skeleton" aria-label="正在加载详情"><i v-for="n in 5" :key="n"></i></div>
       <section v-else-if="error" class="withdrawn-state" role="status">
         <TriangleAlert /><h2>这条内容当前无法查看</h2><p>{{ error }}</p><RouterLink to="/">返回首页查看其他信息</RouterLink>
@@ -521,7 +541,7 @@ function openOfficial() {
         <article v-if="contact">
           <Phone /><span
             ><small>咨询电话</small
-            ><a v-if="contactHref" :href="contactHref">{{ contact }}</a
+            ><a v-if="contactHref" :href="contactHref" @click="recordUsageEvent(item.id, 'SERVICE_PHONE_CLICK').catch(() => undefined)">{{ contact }}</a
             ><b v-else>{{ contact }}</b></span
           >
         </article>

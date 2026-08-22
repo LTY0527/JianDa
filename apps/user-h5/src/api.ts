@@ -142,6 +142,63 @@ export async function setFavorite(
   });
 }
 
+export interface ServiceDirectoryItem {
+  id: number;
+  name: string;
+  service_type: string;
+  district?: string;
+  street_or_town?: string;
+  community?: string;
+  address?: string;
+  phone?: string;
+  opening_hours?: string;
+  description: string;
+  source_url: string;
+  source_name: string;
+  last_verified_at?: string;
+}
+
+export interface ResidentReminder {
+  id: number;
+  reminder_type: "CONTENT_TIME" | "DEADLINE" | "ACTIVITY_START";
+  remind_at: string;
+  published_item_id: number;
+  slug: string;
+  title: string;
+  category: string;
+  content_kind?: string;
+  content_status: string;
+}
+
+export async function fetchServiceDirectory(regionCode: string): Promise<ServiceDirectoryItem[]> {
+  const response = await client.get("/public/service-directory", { params: { regionCode } });
+  return response.data.data;
+}
+
+export async function createReminder(
+  id: number,
+  reminderType: ResidentReminder["reminder_type"],
+  remindAt: string,
+): Promise<void> {
+  await client.post(`/public/items/${id}/reminder`, { reminderType, remindAt });
+}
+
+export async function fetchReminders(): Promise<ResidentReminder[]> {
+  const response = await client.get("/public/reminders");
+  return response.data.data;
+}
+
+export async function deleteReminder(id: number): Promise<void> {
+  await client.delete(`/public/reminders/${id}`);
+}
+
+export async function recordUsageEvent(
+  id: number,
+  eventType: "CONTENT_LISTEN" | "SERVICE_PHONE_CLICK" | "SERVICE_ADDRESS_COPY",
+): Promise<void> {
+  await client.post(`/public/items/${id}/event/${eventType}`);
+}
+
 export async function fetchAssistantSuggestions(): Promise<string[]> {
   const response = await client.get("/public/assistant/suggestions");
   return response.data.data;

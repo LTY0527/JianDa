@@ -7,7 +7,7 @@ const links = [
   { to: "/neighborhood", icon: UsersRound, label: "邻里", matches: ["/neighborhood"] },
   { to: "/assistant", icon: MessageCircleQuestion, label: "简达助手", primary: true, matches: ["/assistant"] },
   { to: "/services", icon: ClipboardList, label: "办事", matches: ["/services", "/guide", "/steps"] },
-  { to: "/profile", icon: UserRound, label: "我的", matches: ["/profile", "/favorites", "/history", "/settings"] },
+  { to: "/profile", icon: UserRound, label: "我的", matches: ["/profile", "/favorites", "/history", "/reminders", "/settings"] },
 ];
 function isActive(matches: string[]) {
   return matches.some((path) => path === "/" ? route.path === "/" : route.path.startsWith(path));
