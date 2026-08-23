@@ -152,6 +152,7 @@ function modeLabel(mode?: ConversationMessage["mode"]) {
 }
 
 onMounted(async () => {
+  question.value = String(route.query.q || "").trim().slice(0, 500);
   try { suggestions.value = await fetchAssistantSuggestions(); }
   catch { suggestions.value = []; }
   if (contextSlug.value) {

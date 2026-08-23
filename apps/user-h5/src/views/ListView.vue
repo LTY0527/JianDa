@@ -5,7 +5,7 @@ import AppTopBar from "../components/navigation/AppTopBar.vue";
 import BottomNav from "../components/BottomNav.vue";
 import ContentCard from "../components/ContentCard.vue";
 import { fetchItems } from "../api";
-import { Search, WifiOff } from "lucide-vue-next";
+import { MessageCircleQuestion, Search, WifiOff } from "lucide-vue-next";
 const route = useRoute();
 const router = useRouter();
 const query = ref(String(route.query.q || ""));
@@ -35,7 +35,7 @@ onUnmounted(() => sessionStorage.setItem(stateKey.value, JSON.stringify({ query:
       <section class="list-surface">
         <div v-if="loading" class="list-skeleton"><i v-for="n in 4" :key="n"></i></div>
         <ContentCard v-for="item in filtered" v-else :key="item.id" :item="item" />
-        <div v-if="!loading && !filtered.length" class="empty"><component :is="error ? WifiOff : Search" /><b>{{ error ? "内容暂时无法读取" : "没有找到相关内容" }}</b><p>{{ error || "换一个更简单的关键词试试" }}</p><button v-if="error" class="green-link" @click="$router.go(0)">重新加载</button></div>
+        <div v-if="!loading && !filtered.length" class="empty"><component :is="error ? WifiOff : Search" /><b>{{ error ? "内容暂时无法读取" : "平台资料暂未命中" }}</b><p>{{ error || "可以换一个更简单的关键词，或让简达助手继续从已审核内容中查找。" }}</p><button v-if="error" class="green-link" @click="$router.go(0)">重新加载</button><RouterLink v-else class="green-link" :to="{ path: '/assistant', query: { q: query } }"><MessageCircleQuestion />带关键词问简达</RouterLink></div>
       </section>
     </main>
     <BottomNav />
