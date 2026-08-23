@@ -1,21 +1,24 @@
-# Phase 9.6 截图索引
+# Phase 9.6 真实验收视觉证据
 
-本目录分为：
+本目录只保存 Phase 9.6 明确要求的真实 Docker 验收截图，不使用 `page.route`、`route.fulfill` 或 Mock 数据。
 
-- `before/`：改造前、使用当前真实或明确标记的隔离数据；
-- `after/`：改造后视觉回归；
-- `real-e2e/`：只允许真实 Docker、MySQL、来源、文件、External Provider 和业务写入产生的证据。
+## before
 
-`real-e2e` 不得使用 `page.route`、`route.fulfill`、fixture 或 mock API。每张截图生成后必须在下表登记。
+真实配图和产品改造前的 H5 与机构端基线。
 
-| 文件 | 真实/隔离 | 页面 | viewport | 数据来源 | document id / slug | 说明 |
-| --- | --- | --- | --- | --- | --- | --- |
-| `before/h5-home-390.png` | 真实 | H5 首页 | 390×844 | Docker / MySQL | 首页公开列表 | Hero 为分类默认 SVG |
-| `before/h5-detail-390.png` | 真实 | H5 详情 | 390×844 | Docker / MySQL | `news-34` | 已发布权威资讯详情 |
-| `before/h5-assistant-390.png` | 真实 | 简达助手 | 390×844 | Docker / MySQL | 无 | 提问前状态 |
-| `before/admin-auto-collection-1440.png` | 真实 | 采集与来源 | 1440×900 | Docker / MySQL | 5 个来源 | 来源健康卡现状 |
-| `before/admin-dashboard-1440.png` | 真实 | 机构工作台 | 1440×900 | Docker / MySQL | 真实待办 | 工作台现状 |
-| `real-e2e/03-review.png` | 真实 | 机构端原文对照审核 | 1440×900 | Docker / MySQL / 真实网页 / External Provider | document `63` | 展示大场镇原文、可追溯字段与人工修正结果 |
-| `real-e2e/05-h5-published-real-photo.png` | 真实 | H5 已发布资讯详情 | 390×844 | Docker / MySQL / 真实网页 / External Provider | `news-63` | 文件名沿用验收清单；因原图缓存和公开使用依据未确认，页面诚实回退分类默认图，并非真实照片封面 |
+## real-e2e
 
-说明：`real-e2e/05-h5-published-real-photo.png` 证明真实文章发布和移动端展示链路，不作为“真实来源图片已公开”的证据。当前真实图片候选已完成技术校验，但在许可依据确认前不得公开。
+- `03-review.png`：文档 63 机构端审核证据。
+- `05-h5-published-real-photo.png`：文档 63 发布后的用户端证据。
+- 文档 67 的认证浏览器截图仅在调用进程预先提供 `JIANDA_REAL_PLATFORM_PASSWORD` 时生成；当前运行明确跳过，没有伪造截图。
+
+## after
+
+- `h5-news-63-375-18px.png`
+- `h5-news-63-390-20px.png`
+- `h5-news-63-768-22px.png`
+- `h5-news-63-1440-24px.png`
+
+四张截图均来自真实公开接口。Playwright 同时断言页面无横向滚动，所有可见 `img` 的 `naturalWidth` 和 `naturalHeight` 大于 0。
+
+历史 `artifacts/phase7-3` 不属于本目录；一键脚本会在运行前后比较其哈希，禁止覆盖既有验收证据。
