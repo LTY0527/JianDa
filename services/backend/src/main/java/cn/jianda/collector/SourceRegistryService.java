@@ -32,7 +32,7 @@ public class SourceRegistryService {
             "AUTHORIZED", "LOCAL_DEMO_CONFIRMED");
     private static final String PUBLIC_COLUMNS = "id,domain,allowed_hosts,source_name,source_type,authority_level,enabled,"
             + "crawl_mode,discovery_mode,homepage_url,rss_url,sitemap_url,section_url,daily_crawl_time,"
-            + "max_articles_per_run,allow_image_candidates,allow_auto_ai,daily_article_budget,daily_token_budget,"
+            + "max_articles_per_run,allow_auto_crawl,allow_image_candidates,allow_auto_ai,daily_article_budget,daily_token_budget,"
             + "schedule_mode,interval_hours,schedule_timezone,recent_days,include_keywords,exclude_keywords,"
             + "auto_save_draft,duplicate_strategy,max_retries,image_usage_policy,image_usage_basis,"
             + "auto_approve_images,image_cache_allowed,image_policy_reviewed_by,image_policy_reviewed_at,"
@@ -138,6 +138,17 @@ public class SourceRegistryService {
                 enabled, user.id(), id);
         if (changed == 0) throw new BusinessException(404, "权威来源不存在");
         log(user, enabled ? "ENABLE_IMAGE_CANDIDATES" : "DISABLE_IMAGE_CANDIDATES", id);
+        return get(id);
+    }
+
+    @Transactional
+    public Map<String, Object> setAutoCrawlEnabled(long id, boolean enabled, AuthUser user) {
+        int changed = jdbc.update(
+                "UPDATE source_registry SET allow_auto_crawl=?,operator_id=?,next_run_at=?,"
+                        + "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                enabled, user.id(), enabled ? Timestamp.valueOf(LocalDateTime.now()) : null, id);
+        if (changed == 0) throw new BusinessException(404, "权威来源不存在");
+        log(user, enabled ? "ENABLE_AUTO_CRAWL" : "DISABLE_AUTO_CRAWL", id);
         return get(id);
     }
 

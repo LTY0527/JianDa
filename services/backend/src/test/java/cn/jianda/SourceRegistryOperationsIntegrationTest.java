@@ -130,6 +130,18 @@ class SourceRegistryOperationsIntegrationTest {
                         .content("{\"enabled\":false}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.allow_image_candidates").value(false));
+
+        mvc.perform(put("/api/source-registries/{id}/auto-crawl-enabled", id)
+                        .header("Authorization", platformAuth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.allow_auto_crawl").value(true))
+                .andExpect(jsonPath("$.data.next_run_at").isNotEmpty());
+        mvc.perform(put("/api/source-registries/{id}/auto-crawl-enabled", id)
+                        .header("Authorization", platformAuth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.allow_auto_crawl").value(false));
     }
 
     @Test

@@ -18,9 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 @PreAuthorize("hasRole('PLATFORM_ADMIN')")
 public class CrawlTaskController {
     private final CrawlTaskService service;
+    private final CrawlScheduler scheduler;
 
-    public CrawlTaskController(CrawlTaskService service) {
+    public CrawlTaskController(CrawlTaskService service, CrawlScheduler scheduler) {
         this.service = service;
+        this.scheduler = scheduler;
     }
 
     @GetMapping
@@ -57,6 +59,11 @@ public class CrawlTaskController {
         long jobId = service.createBatch(request.sourceId(), request.entryUrl(), request.triggerType(),
                 request.discoveryMethod(), UserContext.current(), null);
         return ApiResponse.ok(Map.of("jobId", jobId));
+    }
+
+    @PostMapping("/scheduler/sources/{sourceId}/run-now")
+    public ApiResponse<Map<String, Object>> runScheduledSource(@PathVariable long sourceId) {
+        return ApiResponse.ok(scheduler.runSourceNow(sourceId));
     }
 
     public record CreateRequest(long sourceId, String entryUrl, String triggerType, String discoveryMethod) {}
