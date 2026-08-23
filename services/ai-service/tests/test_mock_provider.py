@@ -274,6 +274,22 @@ def test_metadata_preview_defaults_to_no_llm(monkeypatch) -> None:
     assert response.json()["authority_status"] == "UNCONFIRMED"
 
 
+def test_assistant_status_requires_no_secret(monkeypatch) -> None:
+    client = TestClient(app)
+    monkeypatch.delenv("EXTERNAL_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("ASSISTANT_EXTERNAL_ENABLED", raising=False)
+    assert client.get("/internal/assistant/status").json() == {
+        "status": "disabled",
+        "external_enabled": False,
+        "provider_configured": False,
+    }
+
+    monkeypatch.setenv("ASSISTANT_EXTERNAL_ENABLED", "true")
+    assert client.get("/internal/assistant/status").json()["status"] == "degraded"
+    monkeypatch.setenv("EXTERNAL_LLM_API_KEY", "configured-for-test")
+    assert client.get("/internal/assistant/status").json()["status"] == "ready"
+
+
 def test_health_and_unknown_analyze() -> None:
     client = TestClient(app)
     assert client.get("/health").json()["status"] == "ok"

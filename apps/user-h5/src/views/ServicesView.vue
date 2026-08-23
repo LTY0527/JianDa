@@ -6,6 +6,7 @@ import { fetchDetail, fetchItems, fetchServiceDirectory, setFavorite, type Publi
 import { saveFavorite } from "../library";
 import { Search, ClipboardList, Building2, Users, WifiOff, CalendarClock, FileCheck2, ListChecks, MapPin, Heart, MessageCircleQuestion, ChevronRight, Phone, ExternalLink } from "lucide-vue-next";
 import { activeRegion } from "../region";
+import { truncateSummary } from "../content";
 import { buildTelephoneHref } from "../utils/contactActions";
 interface GuideSummary {
   item: PublicItem;
@@ -83,7 +84,7 @@ onMounted(load);
   <section class="service-action-list"><div v-if="loading" class="list-skeleton"><i v-for="n in 3" :key="n"></i></div><div v-else-if="error && !items.length" class="empty"><WifiOff /><b>办事内容暂时无法读取</b><p>{{ error }}</p><button class="green-link" @click="load">重新加载</button></div><template v-else>
     <article v-for="item in filtered" :key="item.id" class="service-action-card">
       <header><span>{{ item.category }}</span><small>{{ item.source_name }}</small><button type="button" :aria-label="favoriteIds.has(item.id) ? '取消收藏' : '收藏事项'" :class="{ active: favoriteIds.has(item.id) }" @click="toggleFavorite(item)"><Heart /></button></header>
-      <RouterLink :to="`/guide/${item.slug}`"><h2>{{ item.title }}</h2><p>{{ item.summary }}</p></RouterLink>
+      <RouterLink :to="`/guide/${item.slug}`"><h2>{{ item.title }}</h2><p>{{ truncateSummary(item.summary) }}</p></RouterLink>
       <dl>
         <div v-if="details[item.id]?.audience"><dt><Users />适用对象</dt><dd>{{ details[item.id]?.audience }}</dd></div>
         <div v-if="details[item.id]?.deadline"><dt><CalendarClock />办理期限</dt><dd>{{ details[item.id]?.deadline }}</dd></div>

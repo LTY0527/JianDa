@@ -31,6 +31,7 @@ public class HttpAiClient implements AiClient {
     private final URI articleDiscoveryUri;
     private final URI assistantAnswerUri;
     private final URI assistantGeneralAnswerUri;
+    private final URI assistantStatusUri;
 
     public HttpAiClient(ObjectMapper objectMapper, @Value("${jianda.ai-service-url}") String baseUrl) {
         this.objectMapper = objectMapper;
@@ -44,6 +45,7 @@ public class HttpAiClient implements AiClient {
         this.articleDiscoveryUri = URI.create(baseUrl + "/internal/article-discovery");
         this.assistantAnswerUri = URI.create(baseUrl + "/internal/assistant/answer");
         this.assistantGeneralAnswerUri = URI.create(baseUrl + "/internal/assistant/general-answer");
+        this.assistantStatusUri = URI.create(baseUrl + "/internal/assistant/status");
     }
 
     @Override
@@ -207,6 +209,26 @@ public class HttpAiClient implements AiClient {
                 Map.of("question", question),
                 "assistant general answer",
                 75_000);
+    }
+
+    @Override
+    public Map<String, Object> assistantStatus() {
+        return sendGet(assistantStatusUri, "assistant status", 5_000);
+    }
+
+    private Map<String, Object> sendGet(URI uri, String operation, int readTimeout) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) uri.toURL().openConnection(Proxy.NO_PROXY);
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(3_000);
+            connection.setReadTimeout(readTimeout);
+            return readResponse(connection, operation);
+        } catch (IOException exception) {
+            throw new IllegalStateException(operation + " service connection failed", exception);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
     }
 
     private Map<String, Object> analyzeRequest(String title, String text, String documentType,

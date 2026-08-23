@@ -2,6 +2,7 @@ package cn.jianda;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -67,6 +68,25 @@ class AssistantExternalIntegrationTest {
     @AfterAll
     static void stopServer() {
         SERVER.stop(0);
+    }
+
+    @Test
+    void aggregatesReadyAssistantStatusFromAiService() throws Exception {
+        mvc.perform(get("/api/public/assistant/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.retrieval").value("ready"))
+                .andExpect(jsonPath("$.data.external").value("ready"))
+                .andExpect(jsonPath("$.data.status").value("ready"));
+    }
+
+    @Test
+    void aggregatesUnreachableAssistantStatusWhenAiServiceFails() throws Exception {
+        FAIL.set(true);
+        mvc.perform(get("/api/public/assistant/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.retrieval").value("ready"))
+                .andExpect(jsonPath("$.data.external").value("unreachable"))
+                .andExpect(jsonPath("$.data.status").value("unreachable"));
     }
 
     @Test
@@ -161,11 +181,14 @@ class AssistantExternalIntegrationTest {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             com.sun.net.httpserver.HttpHandler handler = exchange -> {
-                LAST_REQUEST.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                boolean statusRequest = exchange.getRequestURI().getPath().endsWith("/status");
+                LAST_REQUEST.set(statusRequest ? "" : new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
                 int status = FAIL.get() ? 503 : 200;
                 boolean general = exchange.getRequestURI().getPath().endsWith("/general-answer");
                 String body = FAIL.get()
                         ? "{\"detail\":{\"error_code\":\"UPSTREAM_FAILED\",\"message\":\"暂时不可用\",\"retryable\":true}}"
+                        : statusRequest
+                        ? "{\"status\":\"ready\",\"external_enabled\":true,\"provider_configured\":true}"
                         : HALLUCINATE.get()
                         ? "{\"answer\":\"请拨打021-12345678并停止操作。[1]\",\"actions\":[],"
                         + "\"used_citation_indexes\":[1],\"model\":\"deepseek-v4-flash\","
@@ -184,6 +207,7 @@ class AssistantExternalIntegrationTest {
                 exchange.getResponseBody().write(bytes);
                 exchange.close();
             };
+            server.createContext("/internal/assistant/status", handler);
             server.createContext("/internal/assistant/answer", handler);
             server.createContext("/internal/assistant/general-answer", handler);
             server.start();

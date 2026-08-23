@@ -13,6 +13,15 @@ const citation = {
 };
 
 test.beforeEach(async ({ context }) => {
+  await context.route("**/api/public/assistant/status", (route) =>
+    route.fulfill({
+      contentType: "application/json; charset=utf-8",
+      body: JSON.stringify({
+        code: 0,
+        data: { status: "degraded", retrieval: "ready", external: "degraded" },
+      }),
+    }),
+  );
   await context.route("**/api/public/assistant/suggestions", (route) =>
     route.fulfill({
       contentType: "application/json; charset=utf-8",
@@ -100,7 +109,7 @@ test("retrieval 降级和无证据状态都有明确反馈", async ({ page }) =>
   await page.goto(`${h5Url}/assistant`);
   await page.getByLabel("输入您想了解的问题").fill("服务暂时降级时怎么核对？");
   await page.getByRole("button", { name: "发送问题" }).click();
-  await expect(page.getByText("原文检索")).toBeVisible();
+  await expect(page.getByText("原文检索", { exact: true })).toBeVisible();
   await expect(page.locator(".assistant-citation")).toHaveCount(1);
 
   await page.getByLabel("输入您想了解的问题").fill("未知星球的补贴是多少？");
@@ -116,6 +125,7 @@ test("状态直答与通用 AI 参考使用明确且不同的来源标签", asyn
   await page.getByLabel("输入您想了解的问题").fill("简达助手运行状态正常吗？");
   await page.getByRole("button", { name: "发送问题" }).click();
   await expect(page.getByText("平台运行状态")).toBeVisible();
+  await expect(page.getByText(/原文检索可用 · AI 降级/)).toBeVisible();
 
   await page.getByLabel("输入您想了解的问题").fill("请解释什么是量子纠缠");
   await page.getByRole("button", { name: "发送问题" }).click();

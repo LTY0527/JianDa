@@ -18,6 +18,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import cn.jianda.document.DocumentService;
 import cn.jianda.ai.AiClient;
 import cn.jianda.ai.AiServiceException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -141,6 +142,20 @@ class CoreFlowIntegrationTest {
                 .andExpect(result ->
                         org.junit.jupiter.api.Assertions.assertNotNull(
                                 result.getResponse().getHeader("X-Request-Id")));
+    }
+
+    @Test
+    void publicationSummaryPrefersStructuredSummaryAndCleansMarkup() {
+        String summary = DocumentService.compactPublicationSummary(
+                List.of("## 第一条 **重点**", "<b>第二条</b> [查看](https://example.org)"),
+                "不应优先使用的 plain text");
+        org.junit.jupiter.api.Assertions.assertEquals("第一条 重点 第二条 查看", summary);
+
+        String longSummary = DocumentService.compactPublicationSummary(
+                null, "# " + "办事摘要".repeat(40));
+        org.junit.jupiter.api.Assertions.assertTrue(longSummary.length() <= 121);
+        org.junit.jupiter.api.Assertions.assertTrue(longSummary.endsWith("…"));
+        org.junit.jupiter.api.Assertions.assertFalse(longSummary.contains("#"));
     }
 
     @Test

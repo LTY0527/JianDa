@@ -22,7 +22,10 @@ import org.springframework.stereotype.Service;
 public class AssistantService {
     private static final Logger LOGGER = LoggerFactory.getLogger(AssistantService.class);
     private static final String DISCLAIMER = "仅帮助理解，正式要求以原文为准。涉及医疗、金融或政策决定时，请向主管部门或专业人员核实。";
+    private static final String COMMUNITY_DISCLAIMER = "邻里信息由居民发布，未经官方核验，不作为政策、办事或其他官方依据，请自行联系确认并注意安全。";
+    private static final String DACHANG_REGION = "310113102";
     private static final int MAX_CITATIONS = 3;
+    private static final int MAX_COMMUNITY_POSTS = 5;
     private static final List<Pattern> GROUNDED_FACT_PATTERNS = List.of(
             Pattern.compile("\\d{4}年\\d{1,2}月\\d{1,2}日|\\d{1,2}月\\d{1,2}日"),
             Pattern.compile("\\d{1,2}[:：]\\d{2}(?:\\s*[-—至]\\s*\\d{1,2}[:：]\\d{2})?"),
@@ -63,20 +66,55 @@ public class AssistantService {
         return result.stream().limit(4).toList();
     }
 
+    public Map<String, Object> status() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("retrieval", "ready");
+        if (!externalEnabled) {
+            result.put("status", "disabled");
+            result.put("external", "disabled");
+            return result;
+        }
+        try {
+            Map<String, Object> upstream = aiClient.assistantStatus();
+            String upstreamStatus = text(upstream, "status");
+            String status = Set.of("ready", "degraded", "disabled").contains(upstreamStatus)
+                    ? upstreamStatus : "degraded";
+            result.put("status", status);
+            result.put("external", status);
+        } catch (RuntimeException exception) {
+            result.put("status", "unreachable");
+            result.put("external", "unreachable");
+        }
+        return result;
+    }
+
     public Map<String, Object> chat(String message, String contextSlug) {
+        return chat(message, contextSlug, DACHANG_REGION);
+    }
+
+    public Map<String, Object> chat(String message, String contextSlug, String regionCode) {
         String question = message == null ? "" : message.trim();
         if (question.isBlank()) {
             return retrievalResponse("请先输入您想了解的问题。", List.of());
         }
+        if (isCommunityQuestion(question)) {
+            return communityResponse(question, regionCode);
+        }
         if (isStatusQuestion(question)) {
+            Map<String, Object> runtime = status();
+            String runtimeStatus = text(runtime, "status");
             recordEvent(question, contextSlug, "status", 0, 0, true,
                     null, null, 0, 0, 0, 0, null);
-            return response(
-                    externalEnabled
-                            ? "简达助手运行正常。已审核内容检索可用，AI 整理能力已启用。"
-                            : "简达助手运行正常。已审核内容检索可用，当前使用原文检索回答。",
-                    List.of(),
-                    "status");
+            String detail = switch (runtimeStatus) {
+                case "ready" -> "AI 整理能力可用。";
+                case "degraded" -> "AI 整理配置不完整，当前降级为原文检索。";
+                case "unreachable" -> "AI 服务暂时无法连接，当前降级为原文检索。";
+                default -> "AI 整理能力未启用，当前使用原文检索。";
+            };
+            Map<String, Object> response = response(
+                    "简达助手的已审核内容检索可用。" + detail, List.of(), "status");
+            response.put("assistantStatus", runtimeStatus);
+            return response;
         }
 
         List<Map<String, Object>> rows = retriever.publishedContent();
@@ -168,6 +206,65 @@ public class AssistantService {
                     exception.getClass().getSimpleName());
             return retrievalResponse(answer, citations);
         }
+    }
+
+    private Map<String, Object> communityResponse(String question, String regionCode) {
+        String activeRegion = regionCode == null || regionCode.isBlank()
+                ? DACHANG_REGION : regionCode.trim();
+        if (!DACHANG_REGION.equals(activeRegion)) {
+            Map<String, Object> result = response(
+                    "当前地区尚未开放邻里信息检索。", List.of(), "community_post");
+            result.put("communityPosts", List.of());
+            result.put("disclaimer", COMMUNITY_DISCLAIMER);
+            return result;
+        }
+        Set<String> terms = terms(question);
+        List<Map<String, Object>> posts = jdbc.queryForList(
+                "SELECT p.id,p.category,p.content,p.region_code,p.district,p.street_or_town,p.created_at,u.nickname "
+                        + "FROM community_post p JOIN resident_user u ON u.id=p.resident_user_id "
+                        + "WHERE p.status='VISIBLE' AND p.region_code=? "
+                        + "ORDER BY p.created_at DESC,p.id DESC LIMIT 50",
+                activeRegion);
+        List<Map<String, Object>> matches = posts.stream()
+                .map(post -> new RankedItem(post, communityScore(post, terms)))
+                .filter(item -> item.score() > 0)
+                .sorted(Comparator.comparingInt(RankedItem::score).reversed()
+                        .thenComparing(item -> String.valueOf(item.row().get("created_at")), Comparator.reverseOrder())
+                        .thenComparing(item -> number(item.row().get("id")), Comparator.reverseOrder()))
+                .limit(MAX_COMMUNITY_POSTS)
+                .map(RankedItem::row)
+                .toList();
+        String answer = matches.isEmpty()
+                ? "当前开放地区的可见邻里信息中，没有找到与这个问题相关的帖子。"
+                : "在当前开放地区找到 " + matches.size()
+                        + " 条相关邻里信息。以下内容由居民发布，请查看发布时间并自行联系确认。";
+        recordEvent(question, null, "community_post", matches.size(), 0, true,
+                null, null, 0, 0, 0, 0, matches.isEmpty() ? "NO_COMMUNITY_POST" : null);
+        Map<String, Object> result = response(answer, List.of(), "community_post");
+        result.put("communityPosts", matches);
+        result.put("disclaimer", COMMUNITY_DISCLAIMER);
+        return result;
+    }
+
+    private int communityScore(Map<String, Object> post, Set<String> terms) {
+        String content = normalize(text(post, "content"));
+        String category = normalize(text(post, "category"));
+        int score = 0;
+        for (String term : terms) {
+            if (term.length() < 2) continue;
+            if (content.contains(term)) score += 8;
+            if (category.contains(term) || term.contains(category)) score += 4;
+        }
+        return score;
+    }
+
+    private boolean isCommunityQuestion(String question) {
+        String normalized = normalize(question);
+        boolean neighborhood = List.of("邻里", "邻居", "社区帖子", "居民发布", "互助信息", "拼车", "搭子")
+                .stream().anyMatch(normalized::contains);
+        boolean localActivity = normalized.contains("附近")
+                && List.of("活动", "互助", "闲置", "求助").stream().anyMatch(normalized::contains);
+        return neighborhood || localActivity;
     }
 
     private Map<String, Object> retrievalResponse(

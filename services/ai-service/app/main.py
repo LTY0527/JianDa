@@ -19,6 +19,7 @@ from app.models import (
     ArticleDiscoveryResponse,
     AssistantAnswerRequest,
     AssistantAnswerResponse,
+    AssistantStatusResponse,
     GeneralAssistantRequest,
     GeneralAssistantResponse,
     ExtractTextResult,
@@ -193,6 +194,18 @@ def generate_steps(request: TextRequest) -> dict[str, object]:
 @app.post("/internal/trace-fields")
 def trace_fields(request: TextRequest) -> dict[str, object]:
     return {"fields": analyze(request).fields}
+
+
+@app.get("/internal/assistant/status", response_model=AssistantStatusResponse)
+def assistant_status() -> AssistantStatusResponse:
+    enabled = os.getenv("ASSISTANT_EXTERNAL_ENABLED", "false").lower() == "true"
+    configured = bool(os.getenv("EXTERNAL_LLM_API_KEY", "").strip())
+    status = "disabled" if not enabled else "ready" if configured else "degraded"
+    return AssistantStatusResponse(
+        status=status,
+        external_enabled=enabled,
+        provider_configured=configured,
+    )
 
 
 @app.post("/internal/assistant/answer", response_model=AssistantAnswerResponse)

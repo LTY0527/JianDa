@@ -3,7 +3,8 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
-import { AssistantApiError, askAssistant, fetchAssistantSuggestions, fetchDetail, type AssistantCitation, type AssistantFactCard } from "../api";
+import { AssistantApiError, askAssistant, fetchAssistantStatus, fetchAssistantSuggestions, fetchDetail, type AssistantCitation, type AssistantCommunityPost, type AssistantFactCard, type AssistantRuntimeStatus } from "../api";
+import { activeRegion } from "../region";
 import { createUuid } from "../utils/visitorId";
 import SpeechRateSelector from "../components/SpeechRateSelector.vue";
 import { useSpeechPlayer } from "../composables/useSpeechPlayer";
@@ -15,9 +16,11 @@ interface ConversationMessage {
   text: string;
   actions?: string[];
   factCards?: AssistantFactCard[];
+  communityPosts?: AssistantCommunityPost[];
   citations?: AssistantCitation[];
   disclaimer?: string;
-  mode?: "status" | "retrieval" | "ai" | "general_ai";
+  mode?: "status" | "retrieval" | "ai" | "general_ai" | "community_post";
+  assistantStatus?: AssistantRuntimeStatus;
   createdAt: string;
 }
 
@@ -31,6 +34,7 @@ const error = ref("");
 const failedQuestion = ref("");
 const conversation = ref<HTMLElement>();
 const contextTitle = ref("");
+const assistantStatus = ref<AssistantRuntimeStatus>("unreachable");
 const spokenMessageId = ref("");
 const speech = useSpeechPlayer(() => { spokenMessageId.value = ""; });
 const contextSlug = computed(() => String(route.query.about || ""));
@@ -70,18 +74,21 @@ async function submit(value = question.value, recordUser = true) {
   busy.value = true;
   await scrollToLatest();
   try {
-    const reply = await askAssistant(text, contextSlug.value);
+    const reply = await askAssistant(text, contextSlug.value, activeRegion.value.region_code);
     messages.value.push({
       id: createUuid(),
       role: "assistant",
       text: reply.answer,
       actions: reply.actions,
       factCards: reply.factCards,
+      communityPosts: reply.communityPosts,
       citations: reply.citations,
       disclaimer: reply.disclaimer,
       mode: reply.mode,
+      assistantStatus: reply.assistantStatus,
       createdAt: new Date().toISOString(),
     });
+    if (reply.assistantStatus) assistantStatus.value = reply.assistantStatus;
     saveSession();
   } catch (requestError) {
     failedQuestion.value = text;
@@ -147,14 +154,26 @@ function modeLabel(mode?: ConversationMessage["mode"]) {
     retrieval: "原文检索",
     ai: "已审核内容 + AI 整理",
     general_ai: "通用 AI 参考",
+    community_post: "居民邻里信息",
   };
   return mode ? labels[mode] : "原文检索";
+}
+
+function statusLabel(status: AssistantRuntimeStatus) {
+  return ({
+    ready: "AI 可用",
+    degraded: "AI 降级",
+    unreachable: "AI 无法连接",
+    disabled: "AI 未启用",
+  } as const)[status];
 }
 
 onMounted(async () => {
   question.value = String(route.query.q || "").trim().slice(0, 500);
   try { suggestions.value = await fetchAssistantSuggestions(); }
   catch { suggestions.value = []; }
+  try { assistantStatus.value = (await fetchAssistantStatus()).status; }
+  catch { assistantStatus.value = "unreachable"; }
   if (contextSlug.value) {
     try {
       const detail = await fetchDetail(contextSlug.value);
@@ -172,9 +191,9 @@ onMounted(async () => {
       <header class="assistant-hero">
         <div class="assistant-hero__title">
           <MessageCircleQuestion />
-          <div><h1>简达助手</h1><p>只依据平台已人工审核并发布的内容回答，并为每条结论附上来源。</p></div>
+          <div><h1>简达助手</h1><p>已发布官方内容可核对；居民邻里信息会单独标明，绝不当作官方依据。</p></div>
         </div>
-        <div class="assistant-trust"><BookOpenCheck /><span><b>可核对，不猜测</b><small>找不到可靠依据时会明确告诉您</small></span></div>
+        <div class="assistant-trust"><BookOpenCheck /><span><b>原文检索可用 · {{ statusLabel(assistantStatus) }}</b><small>AI 不可用时仍会使用确定性检索，不会猜测</small></span></div>
       </header>
 
       <section v-if="contextTitle" class="assistant-context">
@@ -220,6 +239,14 @@ onMounted(async () => {
               第 {{ speech.progress.value.current }} / {{ speech.progress.value.total }} 段
             </span>
           </div>
+          <section v-if="message.communityPosts?.length" class="assistant-community-posts" aria-label="相关邻里信息">
+            <h3>相关邻里信息</h3>
+            <article v-for="post in message.communityPosts" :key="post.id">
+              <span>{{ post.category }} · {{ post.nickname }} · {{ post.street_or_town }}</span>
+              <p>{{ post.content }}</p>
+              <small>{{ formatDate(post.created_at) }}</small>
+            </article>
+          </section>
           <div v-if="message.citations?.length" class="assistant-citations">
             <h3>回答依据</h3>
             <RouterLink v-for="citation in message.citations" :key="citation.slug" :to="detailPath(citation)" class="assistant-citation">

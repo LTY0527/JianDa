@@ -30,5 +30,7 @@ public interface AiClient {
 
     Map<String, Object> answerGeneralAssistant(String question);
 
+    Map<String, Object> assistantStatus();
+
     record ImageAsset(byte[] bytes, String contentType, Integer width, Integer height) {}
 }

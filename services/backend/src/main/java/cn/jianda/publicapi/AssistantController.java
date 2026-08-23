@@ -26,14 +26,21 @@ public class AssistantController {
         return ApiResponse.ok(assistantService.suggestions());
     }
 
+    @GetMapping("/status")
+    public ApiResponse<Map<String, Object>> status() {
+        return ApiResponse.ok(assistantService.status());
+    }
+
     @PostMapping("/chat")
     public ApiResponse<Map<String, Object>> chat(@Valid @RequestBody ChatRequest request) {
-        return ApiResponse.ok(assistantService.chat(request.message(), request.contextSlug()));
+        return ApiResponse.ok(assistantService.chat(
+                request.message(), request.contextSlug(), request.regionCode()));
     }
 
     public record ChatRequest(
             @NotBlank(message = "请输入问题")
             @Size(max = 500, message = "问题不能超过500个字符")
             String message,
-            String contextSlug) {}
+            String contextSlug,
+            String regionCode) {}
 }

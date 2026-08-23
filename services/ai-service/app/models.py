@@ -408,6 +408,7 @@ class Segment(BaseModel):
 class PageExtractionQuality(BaseModel):
     page_no: int = Field(ge=1)
     quality: Literal["GOOD", "UNCERTAIN", "POOR"]
+    score: float = 0
     selected_source: Literal["TEXT_LAYER", "OCR"]
     text_char_count: int = 0
     valid_chinese_ratio: float = 0
@@ -417,6 +418,9 @@ class PageExtractionQuality(BaseModel):
     image_area_ratio: float = 0
     text_block_count: int = 0
     suspicious_garbage_ratio: float = 0
+    ocr_attempted: bool = False
+    ocr_error: str | None = None
+    needs_human_review: bool = False
 
 
 class ExtractTextResult(BaseModel):
@@ -524,6 +528,14 @@ class WebArticlePreview(BaseModel):
     original_page_available: bool = True
     images: list[WebArticleImage] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class AssistantStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["ready", "degraded", "disabled"]
+    external_enabled: bool
+    provider_configured: bool
 
 
 class AssistantEvidence(BaseModel):

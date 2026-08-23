@@ -966,6 +966,49 @@ public class DocumentService {
         log(user, "REVIEW_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
     }
 
+    public static String compactPublicationSummary(Object contentJson, String plainText) {
+        String source = "";
+        if (contentJson instanceof List<?> list) {
+            source = list.stream().map(String::valueOf)
+                    .filter(value -> !value.isBlank()).reduce((left, right) -> left + " " + right).orElse("");
+        } else if (contentJson instanceof Map<?, ?> map) {
+            source = map.values().stream().map(String::valueOf)
+                    .filter(value -> !value.isBlank()).reduce((left, right) -> left + " " + right).orElse("");
+        } else if (contentJson != null) {
+            source = String.valueOf(contentJson);
+        }
+        if (source.isBlank()) source = plainText == null ? "" : plainText;
+        String cleaned = source
+                .replaceAll("(?s)```(?:\\w+)?\\s*(.*?)```", " $1 ")
+                .replaceAll("!\\[[^]]*]\\([^)]*\\)", " ")
+                .replaceAll("\\[([^]]+)]\\([^)]*\\)", "$1")
+                .replaceAll("(?m)^\\s{0,3}#{1,6}\\s*", "")
+                .replaceAll("<[^>]+>", " ")
+                .replace("**", "").replace("__", "")
+                .replaceAll("[*_~`>|]", " ")
+                .replaceAll("\\s+", " ").trim();
+        int maxLength = 120;
+        if (cleaned.length() <= maxLength) return cleaned;
+        return cleaned.substring(0, maxLength).replaceAll("[，、；：\\s]+$", "") + "…";
+    }
+
+    private String publicationSummary(long documentId) {
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT content_json,plain_text FROM generated_content WHERE document_id=? "
+                        + "AND content_type='SUMMARY' ORDER BY version DESC LIMIT 1",
+                documentId);
+        Object contentJson = null;
+        String serialized = nullableString(row.get("content_json"));
+        if (!serialized.isBlank()) {
+            try {
+                contentJson = objectMapper.readValue(serialized, Object.class);
+            } catch (JsonProcessingException ignored) {
+                contentJson = serialized;
+            }
+        }
+        return compactPublicationSummary(contentJson, nullableString(row.get("plain_text")));
+    }
+
     @Transactional
     public Map<String, Object> publish(long id, String title, String category, String sourceName,
                                        String sourceUrl, boolean allowPublicOriginal, AuthUser user) {
@@ -976,7 +1019,7 @@ public class DocumentService {
         if (webArticle && !Boolean.TRUE.equals(document.get("image_reviewed"))) {
             throw new BusinessException(400, "第三方文章封面尚未人工确认，请确认图片来源或改用分类默认图");
         }
-        String summary = jdbc.queryForObject("SELECT plain_text FROM generated_content WHERE document_id=? AND content_type='SUMMARY' ORDER BY version DESC LIMIT 1", String.class, id);
+        String summary = publicationSummary(id);
         String slug = (webArticle ? "news-" : "guide-") + id;
         String contentKind = nullableString(document.get("content_kind"));
         String cover = Boolean.TRUE.equals(document.get("image_reviewed"))

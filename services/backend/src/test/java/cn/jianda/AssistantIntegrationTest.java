@@ -28,6 +28,7 @@ class AssistantIntegrationTest {
 
     @BeforeEach
     void prepareContent() {
+        jdbc.update("DELETE FROM community_post WHERE content LIKE '助手邻里测试-%'");
         jdbc.update("DELETE FROM published_item WHERE slug LIKE 'assistant-test-%'");
         jdbc.update("DELETE FROM source_document WHERE title LIKE '助手测试-%'");
         long publishedDocument = insertDocument("助手测试-反诈提醒", "接到陌生客服来电时，不要提供验证码。请通过官方渠道核实身份。");
@@ -103,6 +104,67 @@ class AssistantIntegrationTest {
                 .andExpect(jsonPath("$.data.citations.length()").value(0))
                 .andExpect(jsonPath("$.data.answer")
                         .value(org.hamcrest.Matchers.containsString("已审核内容检索可用")));
+    }
+
+    @Test
+    void communityIntentReturnsOnlyVisibleOpenRegionPostsWithoutOfficialCitations() throws Exception {
+        Long residentId = jdbc.queryForObject(
+                "SELECT id FROM resident_user WHERE region_code='310113102' ORDER BY id LIMIT 1", Long.class);
+        jdbc.update("INSERT INTO community_post(resident_user_id,category,content,region_code,district,street_or_town,status) "
+                        + "VALUES (?,'互助','助手邻里测试-周六一起去大场公园健步走','310113102','宝山区','大场镇','VISIBLE')",
+                residentId);
+        jdbc.update("INSERT INTO community_post(resident_user_id,category,content,region_code,district,street_or_town,status) "
+                        + "VALUES (?,'互助','助手邻里测试-大场公园隐藏信息','310113102','宝山区','大场镇','HIDDEN')",
+                residentId);
+        jdbc.update("INSERT INTO community_post(resident_user_id,category,content,region_code,district,street_or_town,status) "
+                        + "VALUES (?,'互助','助手邻里测试-大场公园已举报信息','310113102','宝山区','大场镇','REPORTED')",
+                residentId);
+        jdbc.update("INSERT INTO community_post(resident_user_id,category,content,region_code,district,street_or_town,status) "
+                        + "VALUES (?,'互助','助手邻里测试-大场公园其他地区','310113101','宝山区','其他街道','VISIBLE')",
+                residentId);
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"邻里有没有大场公园健步走活动？","regionCode":"310113102"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("community_post"))
+                .andExpect(jsonPath("$.data.citations.length()").value(0))
+                .andExpect(jsonPath("$.data.communityPosts.length()")
+                        .value(org.hamcrest.Matchers.lessThanOrEqualTo(5)))
+                .andExpect(jsonPath("$.data.communityPosts[*].content",
+                        org.hamcrest.Matchers.hasItem(org.hamcrest.Matchers.containsString("周六一起"))))
+                .andExpect(jsonPath("$.data.communityPosts[*].content",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem(
+                                org.hamcrest.Matchers.containsString("隐藏信息")))))
+                .andExpect(jsonPath("$.data.communityPosts[*].content",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem(
+                                org.hamcrest.Matchers.containsString("已举报信息")))))
+                .andExpect(jsonPath("$.data.communityPosts[*].content",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem(
+                                org.hamcrest.Matchers.containsString("其他地区")))))
+                .andExpect(jsonPath("$.data.disclaimer")
+                        .value(org.hamcrest.Matchers.containsString("未经官方核验")));
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"邻里有没有大场公园活动？","regionCode":"310113101"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("community_post"))
+                .andExpect(jsonPath("$.data.communityPosts.length()").value(0))
+                .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("尚未开放")));
+    }
+
+    @Test
+    void exposesDisabledAssistantStatusWithoutSecret() throws Exception {
+        mvc.perform(get("/api/public/assistant/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.retrieval").value("ready"))
+                .andExpect(jsonPath("$.data.external").value("disabled"))
+                .andExpect(jsonPath("$.data.status").value("disabled"));
     }
 
     @Test

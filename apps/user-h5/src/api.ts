@@ -58,9 +58,30 @@ export interface AssistantReply {
   answer: string;
   actions?: string[];
   factCards?: AssistantFactCard[];
+  communityPosts?: AssistantCommunityPost[];
   citations: AssistantCitation[];
   disclaimer: string;
-  mode: "status" | "retrieval" | "ai" | "general_ai";
+  mode: "status" | "retrieval" | "ai" | "general_ai" | "community_post";
+  assistantStatus?: AssistantRuntimeStatus;
+}
+
+export type AssistantRuntimeStatus = "ready" | "degraded" | "unreachable" | "disabled";
+
+export interface AssistantStatus {
+  status: AssistantRuntimeStatus;
+  retrieval: "ready";
+  external: AssistantRuntimeStatus;
+}
+
+export interface AssistantCommunityPost {
+  id: number;
+  category: string;
+  content: string;
+  nickname: string;
+  region_code: string;
+  district: string;
+  street_or_town: string;
+  created_at: string;
 }
 
 export interface AssistantFactCard {
@@ -210,11 +231,14 @@ export interface ResidentProfile {
   id: number; username: string; nickname: string; district: string;
   streetOrTown: string; regionCode: string; demo: boolean;
 }
+export interface CommunityMedia {
+  id: number; mimeType: string; width: number; height: number; url: string; thumbnailUrl: string;
+}
 export interface CommunityPost {
   id: number; category: "最新" | "互助" | "活动"; content: string; region_code: string;
   district: string; street_or_town: string; status: "VISIBLE" | "REPORTED";
   is_demo: boolean; created_at: string; nickname: string; user_is_demo: boolean;
-  like_count: number; comment_count: number;
+  like_count: number; comment_count: number; media: CommunityMedia[];
 }
 const residentHeaders = () => ({ "X-Resident-Token": localStorage.getItem("jianda_resident_token") || "" });
 export async function residentLogin(username: string, password: string): Promise<ResidentProfile> {
@@ -222,6 +246,16 @@ export async function residentLogin(username: string, password: string): Promise
   localStorage.setItem("jianda_resident_token", response.data.data.token);
   localStorage.setItem("jianda_resident_profile", JSON.stringify(response.data.data.profile));
   return response.data.data.profile;
+}
+export async function residentRegister(username: string, password: string, nickname: string): Promise<ResidentProfile> {
+  const response = await client.post("/public/resident/register", { username, password, nickname });
+  localStorage.setItem("jianda_resident_token", response.data.data.token);
+  localStorage.setItem("jianda_resident_profile", JSON.stringify(response.data.data.profile));
+  return response.data.data.profile;
+}
+export async function residentRegistrationCapabilities(): Promise<{ usernamePassword: boolean; sms: { enabled: boolean; message: string } }> {
+  const response = await client.get("/public/resident/registration-capabilities");
+  return response.data.data;
 }
 export async function residentMe(): Promise<ResidentProfile> {
   const response = await client.get("/public/resident/me", { headers: residentHeaders() });
@@ -235,8 +269,13 @@ export async function fetchCommunityPosts(category = "最新", regionCode = "310
   const response = await client.get("/public/community/posts", { params: { category, regionCode } });
   return response.data.data;
 }
-export async function createCommunityPost(category: string, content: string): Promise<void> {
-  await client.post("/public/community/posts", { category, content }, { headers: residentHeaders() });
+export async function uploadCommunityMedia(file: File): Promise<CommunityMedia> {
+  const form = new FormData(); form.append("file", file);
+  const response = await client.post("/public/community/media", form, { headers: residentHeaders() });
+  return response.data.data;
+}
+export async function createCommunityPost(category: string, content: string, mediaIds: number[] = []): Promise<void> {
+  await client.post("/public/community/posts", { category, content, mediaIds }, { headers: residentHeaders() });
 }
 export async function toggleCommunityLike(id: number): Promise<boolean> {
   const response = await client.post(`/public/community/posts/${id}/like`, null, { headers: residentHeaders() });
@@ -254,14 +293,21 @@ export async function fetchAssistantSuggestions(): Promise<string[]> {
   return response.data.data;
 }
 
+export async function fetchAssistantStatus(): Promise<AssistantStatus> {
+  const response = await client.get("/public/assistant/status");
+  return response.data.data;
+}
+
 export async function askAssistant(
   message: string,
   contextSlug?: string,
+  regionCode?: string,
 ): Promise<AssistantReply> {
   try {
     const response = await client.post("/public/assistant/chat", {
       message,
       contextSlug: contextSlug || undefined,
+      regionCode: regionCode || undefined,
     });
     const data = response.data?.data;
     if (
@@ -269,7 +315,7 @@ export async function askAssistant(
       typeof data.answer !== "string" ||
       !Array.isArray(data.citations) ||
       typeof data.disclaimer !== "string" ||
-      !["status", "retrieval", "ai", "general_ai"].includes(data.mode)
+      !["status", "retrieval", "ai", "general_ai", "community_post"].includes(data.mode)
     ) {
       throw new AssistantApiError("format");
     }
