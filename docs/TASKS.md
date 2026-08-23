@@ -565,8 +565,11 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] 审计 Phase 9.5 本地与远端基线；本地与远端 ahead/behind 均为 0。
 - [x] 从 `0e1c64b` 建立 `feat/phase9-6-real-acceptance-v1`，未覆盖 Phase 7.3 的 15 张现有修改截图。
 - [x] 建立 `PHASE9_6_BASELINE_AUDIT.md`、`PHASE9_6_CHECKLIST.md`、真实验收截图目录和问题台账。
-- [ ] 先完成真实网页图片候选、审核、缓存、公开封面和历史图片追溯审计。
-- [ ] 保存 before 截图，并建立不拦截 API 的真实 Docker Playwright 验收套件。
+- [x] 完成真实 MySQL 图片基线审计：21 条已发布内容均为分类默认图，真实封面覆盖率 0%，1 个候选因使用依据未确认而阻塞。
+- [x] 保存首页、详情、助手、采集来源和工作台 before 截图；截图来自真实 Docker 页面且未拦截 API。
+- [x] V26 增加候选上下文和相关性分数；通用解析结合 DOM、附近正文、标题主题和发现方式，不包含站点专用选择器。
+- [x] 首页只在同一重要性分段内对真实封面加权；无真实图片或破图时使用文字 Hero，分类 SVG 不再占据主视觉。
+- [ ] 建立不拦截 API 的真实 Docker Playwright 验收套件。
 - [ ] 完成大场镇网页与官方 PDF 的真实 External → 审核 → 发布闭环。
 - [ ] 完成真实图片优先首页、助手多轮引用、真实调度、居民治理、提醒和运营指标验收。
 - [ ] 分别汇报 Regression Tests 与 REAL ACCEPTANCE；未满足全部真实门禁时不得标记 PASS。
