@@ -26,6 +26,7 @@ from app.models import WebArticleImage, WebArticlePreview
 USER_AGENT = "JianDaContentBot/1.0 (+public-service accessibility research)"
 REQUEST_TIMEOUT = httpx.Timeout(20.0, connect=8.0)
 MAX_HTML_BYTES = 5 * 1024 * 1024
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
 _CLIENT: httpx.AsyncClient | None = None
 _DOMAIN_LOCKS: dict[str, asyncio.Lock] = {}
 _LAST_REQUEST_AT: dict[str, float] = {}

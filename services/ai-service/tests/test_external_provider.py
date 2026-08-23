@@ -179,6 +179,32 @@ def test_normal_two_stage_request_and_endpoint_contract():
         assert sent["json"]["stream"] is False
 
 
+def test_rewrite_from_checkpoint_reports_external_execution_metadata():
+    rewrite_response = json_completion(rewrite())
+    rewrite_response["id"] = "rewrite-request-1"
+    rewrite_response["usage"] = {
+        "prompt_tokens": 21,
+        "completion_tokens": 13,
+        "total_tokens": 34,
+    }
+    checkpoint = FactExtractionResponse.model_validate(facts())
+
+    with QueueServer([response(200, rewrite_response)]) as server:
+        provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
+        result = provider.rewrite_from_checkpoint(
+            request(), checkpoint.model_dump(mode="json")
+        )
+
+    assert result.metrics.provider == "external"
+    assert result.metrics.model == "deepseek-v4-flash"
+    assert result.metrics.request_id == "rewrite-request-1"
+    assert result.metrics.prompt_tokens == 21
+    assert result.metrics.completion_tokens == 13
+    assert result.metrics.total_tokens == 34
+    assert result.metrics.accessible_rewrite_ms >= 0
+    assert len(result.metrics.response_fingerprint) == 16
+
+
 def test_standard_document_can_succeed_without_flat_fields():
     source = """养老服务标准
 1 范围
@@ -394,6 +420,62 @@ def test_rewrite_schema_recovery_fills_optional_fields_and_preserves_uncertainty
     assert any("internal_note" in item for item in validated.uncertainties)
     assert "$.steps:default" in paths
     assert "$.scope.national_or_local:enum_alias" in paths
+
+
+def test_rewrite_schema_recovery_quarantines_non_object_trace_items():
+    payload = {
+        "prompt_version": "v1.1",
+        "summary": ["通俗摘要"],
+        "plain_text": "通俗正文",
+        "audio_script": "播报正文",
+        "steps": ["先阅读原文", {
+            "order": 1,
+            "title": "阅读原文",
+            "description": "核对正式标准",
+        }],
+        "key_facts": ["标准自2026年起实施", {
+            "label": "发布机构",
+            "value": "国家卫生健康委员会",
+            "source_quote": "国家卫生健康委员会发布",
+            "segment_id": 1,
+        }],
+        "action_checklist": [],
+        "faq": [],
+    }
+
+    repaired, paths = ExternalLlmProvider._repair_schema_payload(
+        payload, "accessible_rewrite"
+    )
+    validated = RewriteResponse.model_validate(repaired)
+
+    assert len(validated.steps) == 1
+    assert len(validated.key_facts) == 1
+    assert any("$.steps[0]" in item for item in validated.uncertainties)
+    assert any("$.key_facts[0]" in item for item in validated.uncertainties)
+    assert "$.steps[0]:quarantined" in paths
+    assert "$.key_facts[0]:quarantined" in paths
+
+
+def test_rewrite_schema_recovery_quarantines_non_object_scope():
+    payload = {
+        "prompt_version": "v1.1",
+        "summary": ["通俗摘要"],
+        "plain_text": "通俗正文",
+        "audio_script": "播报正文",
+        "steps": [],
+        "warnings": [],
+        "term_explanations": {},
+        "scope": "全国",
+    }
+
+    repaired, paths = ExternalLlmProvider._repair_schema_payload(
+        payload, "accessible_rewrite"
+    )
+    validated = RewriteResponse.model_validate(repaired)
+
+    assert validated.scope is None
+    assert any("$.scope" in item for item in validated.uncertainties)
+    assert "$.scope:quarantined" in paths
 
 
 def test_base_url_already_contains_completion_path_is_not_duplicated():

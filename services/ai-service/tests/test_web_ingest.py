@@ -51,6 +51,36 @@ def _run_preview(
         asyncio.run(client.aclose())
 
 
+def test_download_validated_image_enforces_declared_size_and_dimensions(monkeypatch):
+    async def allow_public(_url: str) -> None:
+        return None
+
+    async def no_wait(_domain: str, _seconds: int) -> None:
+        return None
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(
+            200,
+            content=_png(1200, 675),
+            headers={"Content-Type": "image/png"},
+        )),
+        follow_redirects=True,
+    )
+    monkeypatch.setattr(web_ingest, "_CLIENT", client)
+    monkeypatch.setattr(web_ingest, "_assert_public_host", allow_public)
+    monkeypatch.setattr(web_ingest, "_rate_limit", no_wait)
+    try:
+        data, content_type, width, height = asyncio.run(
+            web_ingest.download_validated_image("https://www.news.cn/cover.png")
+        )
+    finally:
+        asyncio.run(client.aclose())
+
+    assert data.startswith(b"\x89PNG")
+    assert content_type == "image/png"
+    assert (width, height) == (1200, 675)
+
+
 def test_extracts_json_ld_open_graph_and_cleans_navigation(monkeypatch):
     data = {
         "@type": "NewsArticle",

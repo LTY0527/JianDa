@@ -969,6 +969,7 @@ class ExternalLlmProvider(LlmProvider):
         rewrite = self._rewrite_with_sessions(rewrite, facts, sessions)
         metrics = ProcessingMetrics(
             schema_version=SCHEMA_VERSION,
+            cache_hit=False,
             accessible_rewrite_ms=rewrite_result.elapsed_ms,
             total_ms=self._elapsed_ms(started),
             prompt_tokens=rewrite_result.prompt_tokens,
@@ -978,6 +979,11 @@ class ExternalLlmProvider(LlmProvider):
             accessible_char_count=len(rewrite.plain_text),
             key_fact_count=len(rewrite.key_facts),
             action_item_count=len(rewrite.action_checklist),
+            provider="external",
+            model=self.settings.model,
+            http_status=200,
+            request_id=rewrite_result.request_id,
+            response_fingerprint=rewrite_result.response_sha256[:16],
         )
         return AnalyzeResult(
             fields=[ExtractedField(
@@ -1467,12 +1473,18 @@ class ExternalLlmProvider(LlmProvider):
                 raw_items = payload.get(key)
                 if not isinstance(raw_items, list):
                     continue
+                normalized_items: list[dict[str, Any]] = []
                 for index, raw in enumerate(raw_items):
-                    if isinstance(raw, dict):
-                        cls._quarantine_unknown(
-                            raw, allowed_fields, f"$.{key}[{index}]",
-                            uncertain, repaired
-                        )
+                    path = f"$.{key}[{index}]"
+                    if not isinstance(raw, dict):
+                        uncertain.append(f"{path} 不是对象，已隔离")
+                        repaired.append(f"{path}:quarantined")
+                        continue
+                    cls._quarantine_unknown(
+                        raw, allowed_fields, path, uncertain, repaired
+                    )
+                    normalized_items.append(raw)
+                payload[key] = normalized_items
             scope = payload.get("scope")
             if isinstance(scope, dict):
                 cls._quarantine_unknown(
@@ -1496,6 +1508,10 @@ class ExternalLlmProvider(LlmProvider):
                 if value in scope_aliases:
                     scope["national_or_local"] = scope_aliases[value]
                     repaired.append("$.scope.national_or_local:enum_alias")
+            elif scope is not None:
+                uncertain.append("$.scope 不是对象，已隔离")
+                repaired.append("$.scope:quarantined")
+                payload["scope"] = None
             payload["uncertainties"] = (
                 cls._string_list(payload.get("uncertainties")) + uncertain
             )
