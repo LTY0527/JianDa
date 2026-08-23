@@ -126,7 +126,7 @@ public class ResidentCommunityController {
                 + "(SELECT COUNT(*) FROM community_post_like l WHERE l.community_post_id=p.id) like_count,"
                 + "(SELECT COUNT(*) FROM community_comment c WHERE c.community_post_id=p.id AND c.status='VISIBLE') comment_count "
                 + "FROM community_post p JOIN resident_user u ON u.id=p.resident_user_id "
-                + "WHERE p.region_code=? AND p.status IN ('VISIBLE','REPORTED') " + filter
+                + "WHERE p.region_code=? AND p.status='VISIBLE' " + filter
                 + "ORDER BY p.created_at DESC,p.id DESC LIMIT 100";
         List<Map<String, Object>> result = "最新".equals(category)
                 ? jdbc.queryForList(sql, regionCode)
