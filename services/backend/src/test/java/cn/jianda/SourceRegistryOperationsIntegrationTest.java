@@ -145,6 +145,25 @@ class SourceRegistryOperationsIntegrationTest {
     }
 
     @Test
+    void verifiedOfficialSourcesEnableImageFlowAndDachangRunsEveryTwelveHours() {
+        Integer disabledImageSources = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_registry WHERE authority_level IN ('A','B') "
+                        + "AND (allow_image_candidates=FALSE OR allow_image_cache=FALSE OR image_cache_allowed=FALSE)",
+                Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(0, disabledImageSources);
+        Map<String, Object> dachang = jdbc.queryForMap(
+                "SELECT enabled,allow_auto_crawl,allow_image_candidates,allow_image_cache,image_cache_allowed,"
+                        + "schedule_mode,interval_hours FROM source_registry WHERE domain='xxgk.shbsq.gov.cn'");
+        org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE, dachang.get("enabled"));
+        org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE, dachang.get("allow_auto_crawl"));
+        org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE, dachang.get("allow_image_candidates"));
+        org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE, dachang.get("allow_image_cache"));
+        org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE, dachang.get("image_cache_allowed"));
+        org.junit.jupiter.api.Assertions.assertEquals("INTERVAL", dachang.get("schedule_mode"));
+        org.junit.jupiter.api.Assertions.assertEquals(12, ((Number) dachang.get("interval_hours")).intValue());
+    }
+
+    @Test
     void quickPreviewRequiresAdministratorConfirmationAndStoresIdentityFingerprint() throws Exception {
         String url = "https://www.news.cn/controlled-article.html";
         mvc.perform(post("/api/source-registries/quick-preview").header("Authorization", platformAuth)
