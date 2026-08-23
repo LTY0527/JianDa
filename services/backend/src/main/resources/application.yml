@@ -32,6 +32,12 @@ jianda:
     external-enabled: ${ASSISTANT_EXTERNAL_ENABLED:false}
     daily-call-limit: ${ASSISTANT_DAILY_CALL_LIMIT:30}
     daily-token-limit: ${ASSISTANT_DAILY_TOKEN_LIMIT:30000}
+    global-daily-call-limit: ${ASSISTANT_GLOBAL_DAILY_CALL_LIMIT:200}
+    global-daily-token-limit: ${ASSISTANT_GLOBAL_DAILY_TOKEN_LIMIT:200000}
+    resident-daily-call-limit: ${ASSISTANT_RESIDENT_DAILY_CALL_LIMIT:20}
+    resident-daily-token-limit: ${ASSISTANT_RESIDENT_DAILY_TOKEN_LIMIT:30000}
+    guest-daily-call-limit: ${ASSISTANT_GUEST_DAILY_CALL_LIMIT:5}
+    guest-daily-token-limit: ${ASSISTANT_GUEST_DAILY_TOKEN_LIMIT:5000}
   public-fixture: ${JIANDA_PUBLIC_FIXTURE:}
   crawl:
     scheduler-enabled: ${CRAWL_SCHEDULER_ENABLED:false}

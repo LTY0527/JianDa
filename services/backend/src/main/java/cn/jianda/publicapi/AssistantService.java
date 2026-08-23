@@ -35,22 +35,34 @@ public class AssistantService {
     private final AiClient aiClient;
     private final PublishedContentRetriever retriever;
     private final boolean externalEnabled;
-    private final int dailyCallLimit;
-    private final int dailyTokenLimit;
+    private final int globalDailyCallLimit;
+    private final int globalDailyTokenLimit;
+    private final int residentDailyCallLimit;
+    private final int residentDailyTokenLimit;
+    private final int guestDailyCallLimit;
+    private final int guestDailyTokenLimit;
 
     public AssistantService(
             JdbcTemplate jdbc,
             AiClient aiClient,
             PublishedContentRetriever retriever,
             @Value("${jianda.assistant.external-enabled:false}") boolean externalEnabled,
-            @Value("${jianda.assistant.daily-call-limit:30}") int dailyCallLimit,
-            @Value("${jianda.assistant.daily-token-limit:30000}") int dailyTokenLimit) {
+            @Value("${jianda.assistant.global-daily-call-limit:200}") int globalDailyCallLimit,
+            @Value("${jianda.assistant.global-daily-token-limit:200000}") int globalDailyTokenLimit,
+            @Value("${jianda.assistant.resident-daily-call-limit:20}") int residentDailyCallLimit,
+            @Value("${jianda.assistant.resident-daily-token-limit:30000}") int residentDailyTokenLimit,
+            @Value("${jianda.assistant.guest-daily-call-limit:5}") int guestDailyCallLimit,
+            @Value("${jianda.assistant.guest-daily-token-limit:5000}") int guestDailyTokenLimit) {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
         this.retriever = retriever;
         this.externalEnabled = externalEnabled;
-        this.dailyCallLimit = dailyCallLimit;
-        this.dailyTokenLimit = dailyTokenLimit;
+        this.globalDailyCallLimit = globalDailyCallLimit;
+        this.globalDailyTokenLimit = globalDailyTokenLimit;
+        this.residentDailyCallLimit = residentDailyCallLimit;
+        this.residentDailyTokenLimit = residentDailyTokenLimit;
+        this.guestDailyCallLimit = guestDailyCallLimit;
+        this.guestDailyTokenLimit = guestDailyTokenLimit;
     }
 
     public List<String> suggestions() {
@@ -89,22 +101,27 @@ public class AssistantService {
     }
 
     public Map<String, Object> chat(String message, String contextSlug) {
-        return chat(message, contextSlug, DACHANG_REGION);
+        return chat(message, contextSlug, DACHANG_REGION, null, null);
     }
 
     public Map<String, Object> chat(String message, String contextSlug, String regionCode) {
+        return chat(message, contextSlug, regionCode, null, null);
+    }
+
+    public Map<String, Object> chat(String message, String contextSlug, String regionCode,
+                                    Long residentUserId, String visitorId) {
         String question = message == null ? "" : message.trim();
         if (question.isBlank()) {
-            return retrievalResponse("请先输入您想了解的问题。", List.of());
+            return retrievalResponse("请先输入您想了解的问题。", List.of(), null);
         }
         if (isCommunityQuestion(question)) {
-            return communityResponse(question, regionCode);
+            return communityResponse(question, regionCode, residentUserId, visitorId);
         }
         if (isStatusQuestion(question)) {
             Map<String, Object> runtime = status();
             String runtimeStatus = text(runtime, "status");
             recordEvent(question, contextSlug, "status", 0, 0, true,
-                    null, null, 0, 0, 0, 0, null);
+                    null, null, 0, 0, 0, 0, null, residentUserId, visitorId);
             String detail = switch (runtimeStatus) {
                 case "ready" -> "AI 整理能力可用。";
                 case "degraded" -> "AI 整理配置不完整，当前降级为原文检索。";
@@ -130,17 +147,22 @@ public class AssistantService {
                 .toList();
 
         if (ranked.isEmpty()) {
-            if (!requiresGroundedEvidence(question)
-                    && externalEnabled && withinDailyBudget()) {
-                return generalAiResponse(question, contextSlug);
+            if (!requiresGroundedEvidence(question) && externalEnabled) {
+                BudgetCheck budget = withinDailyBudget(residentUserId, visitorId);
+                if (budget.passed()) {
+                    return generalAiResponse(question, contextSlug, residentUserId, visitorId);
+                }
+                recordEvent(question, contextSlug, "retrieval", 0, 0, true,
+                        null, null, 0, 0, 0, 0, budget.errorCode(), residentUserId, visitorId);
+                return retrievalResponse(budget.userMessage(), List.of(), budget.errorCode());
             }
+            String grounded = requiresGroundedEvidence(question) ? "NO_EVIDENCE" : (externalEnabled ? "AI_DISABLED" : "NO_EVIDENCE");
             recordEvent(question, contextSlug, "retrieval", 0, 0, true,
-                    null, null, 0, 0, 0, 0, "NO_EVIDENCE");
-            return retrievalResponse(
-                    requiresGroundedEvidence(question)
-                            ? "当前已审核发布内容中没有可靠依据。这个问题涉及资格、金额、材料、医疗或其他重要决定，简达不会猜测，请查阅主管部门原文或向工作人员核实。"
-                            : "当前已审核发布内容中没有可靠答案，且通用 AI 当前不可用。",
-                    List.of());
+                    null, null, 0, 0, 0, 0, grounded, residentUserId, visitorId);
+            String fallbackText = requiresGroundedEvidence(question)
+                    ? "当前已审核发布内容中没有可靠依据。这个问题涉及资格、金额、材料、医疗或其他重要决定，简达不会猜测，请查阅主管部门原文或向工作人员核实。"
+                    : (externalEnabled ? "当前已审核发布内容中没有可靠答案，通用 AI 当前不可用。" : "当前已审核发布内容中没有可靠答案，AI 整理能力未启用。");
+            return retrievalResponse(fallbackText, List.of(), grounded);
         }
 
         List<Map<String, Object>> citations = ranked.stream()
@@ -152,11 +174,13 @@ public class AssistantService {
                 .orElse("");
         String answer = "根据平台已审核发布的内容，您可以先查看" + titles
                 + "。下方列出了与问题最相关的原文片段，请结合完整原文确认适用条件、材料和时限。";
-        if (!externalEnabled || !withinDailyBudget()) {
+        BudgetCheck budget = externalEnabled ? withinDailyBudget(residentUserId, visitorId) : BudgetCheck.disabled();
+        if (!budget.passed()) {
             recordEvent(question, contextSlug, "retrieval", citations.size(), citations.size(),
-                    true, null, null, 0, 0, 0, 0,
-                    externalEnabled ? "BUDGET_LIMIT" : "EXTERNAL_DISABLED");
-            return retrievalResponse(answer, citations);
+                    true, null, null, 0, 0, 0, 0, budget.errorCode(), residentUserId, visitorId);
+            Map<String, Object> resp = retrievalResponse(answer, citations, budget.errorCode());
+            resp.put("budgetHint", budget.userMessage());
+            return resp;
         }
         long started = System.nanoTime();
         try {
@@ -192,7 +216,7 @@ public class AssistantService {
             if (elapsed <= 0) elapsed = elapsedMs(started);
             recordEvent(question, contextSlug, "ai", citations.size(), usedCitations.size(),
                     true, text(generated, "model"), text(generated, "request_id"),
-                    promptTokens, completionTokens, totalTokens, elapsed, null);
+                    promptTokens, completionTokens, totalTokens, elapsed, null, residentUserId, visitorId);
             Map<String, Object> response = response(generatedAnswer, usedCitations, "ai");
             response.put("actions", stringList(generated.get("actions")));
             response.put("factCards", factCards(ranked, used));
@@ -200,15 +224,18 @@ public class AssistantService {
         } catch (RuntimeException exception) {
             long elapsed = elapsedMs(started);
             recordEvent(question, contextSlug, "retrieval", citations.size(), citations.size(),
-                    false, null, null, 0, 0, 0, elapsed, "EXTERNAL_FALLBACK");
+                    false, null, null, 0, 0, 0, elapsed, "EXTERNAL_CALL_FAILED", residentUserId, visitorId);
             LOGGER.warn("assistant_rag_fallback category={} evidence_count={} elapsed_ms={} error_type={}",
                     questionCategory(question), citations.size(), elapsed,
                     exception.getClass().getSimpleName());
-            return retrievalResponse(answer, citations);
+            Map<String, Object> resp = retrievalResponse(answer, citations, "EXTERNAL_CALL_FAILED");
+            resp.put("aiErrorHint", "外部 AI 调用暂时失败，已自动降级为原文检索。可稍后重试。");
+            return resp;
         }
     }
 
-    private Map<String, Object> communityResponse(String question, String regionCode) {
+    private Map<String, Object> communityResponse(String question, String regionCode,
+                                                  Long residentUserId, String visitorId) {
         String activeRegion = regionCode == null || regionCode.isBlank()
                 ? DACHANG_REGION : regionCode.trim();
         if (!DACHANG_REGION.equals(activeRegion)) {
@@ -239,7 +266,8 @@ public class AssistantService {
                 : "在当前开放地区找到 " + matches.size()
                         + " 条相关邻里信息。以下内容由居民发布，请查看发布时间并自行联系确认。";
         recordEvent(question, null, "community_post", matches.size(), 0, true,
-                null, null, 0, 0, 0, 0, matches.isEmpty() ? "NO_COMMUNITY_POST" : null);
+                null, null, 0, 0, 0, 0, matches.isEmpty() ? "NO_COMMUNITY_POST" : null,
+                residentUserId, visitorId);
         Map<String, Object> result = response(answer, List.of(), "community_post");
         result.put("communityPosts", matches);
         result.put("disclaimer", COMMUNITY_DISCLAIMER);
@@ -268,8 +296,10 @@ public class AssistantService {
     }
 
     private Map<String, Object> retrievalResponse(
-            String answer, List<Map<String, Object>> citations) {
-        return response(answer, citations, "retrieval");
+            String answer, List<Map<String, Object>> citations, String errorCode) {
+        Map<String, Object> result = response(answer, citations, "retrieval");
+        if (errorCode != null && !errorCode.isBlank()) result.put("errorCode", errorCode);
+        return result;
     }
 
     private Map<String, Object> response(
@@ -348,16 +378,45 @@ public class AssistantService {
         return canonical.toString().replaceAll("[—–－-]+", "");
     }
 
-    private boolean withinDailyBudget() {
-        Map<String, Object> usage = jdbc.queryForMap(
+    private BudgetCheck withinDailyBudget(Long residentUserId, String visitorId) {
+        Map<String, Object> globalUsage = jdbc.queryForMap(
                 "SELECT COUNT(*) call_count,COALESCE(SUM(total_tokens),0) token_count "
                         + "FROM assistant_query_event WHERE mode IN ('ai','general_ai') "
                         + "AND created_at>=CURRENT_DATE");
-        return number(usage.get("call_count")) < dailyCallLimit
-                && number(usage.get("token_count")) < dailyTokenLimit;
+        int globalCalls = number(globalUsage.get("call_count"));
+        int globalTokens = number(globalUsage.get("token_count"));
+        if (globalCalls >= globalDailyCallLimit || globalTokens >= globalDailyTokenLimit) {
+            return BudgetCheck.fail("GLOBAL_BUDGET_LIMIT", "今日全局 AI 预算保护已触发，请明日再试或联系管理员。");
+        }
+        if (residentUserId != null) {
+            Map<String, Object> userUsage = jdbc.queryForMap(
+                    "SELECT COUNT(*) call_count,COALESCE(SUM(total_tokens),0) token_count "
+                            + "FROM assistant_query_event WHERE resident_user_id=? "
+                            + "AND mode IN ('ai','general_ai') AND created_at>=CURRENT_DATE",
+                    residentUserId);
+            int userCalls = number(userUsage.get("call_count"));
+            int userTokens = number(userUsage.get("token_count"));
+            if (userCalls >= residentDailyCallLimit || userTokens >= residentDailyTokenLimit) {
+                return BudgetCheck.fail("RESIDENT_BUDGET_LIMIT", "今日您的个人 AI 额度已用完，请明日再试。");
+            }
+        } else {
+            String vid = visitorId == null ? "anon-default" : visitorId;
+            Map<String, Object> guestUsage = jdbc.queryForMap(
+                    "SELECT COUNT(*) call_count,COALESCE(SUM(total_tokens),0) token_count "
+                            + "FROM assistant_query_event WHERE visitor_id=? "
+                            + "AND mode IN ('ai','general_ai') AND created_at>=CURRENT_DATE",
+                    vid);
+            int guestCalls = number(guestUsage.get("call_count"));
+            int guestTokens = number(guestUsage.get("token_count"));
+            if (guestCalls >= guestDailyCallLimit || guestTokens >= guestDailyTokenLimit) {
+                return BudgetCheck.fail("GUEST_BUDGET_LIMIT", "今日游客 AI 额度已用完，注册居民账号可获得更高额度。");
+            }
+        }
+        return BudgetCheck.pass();
     }
 
-    private Map<String, Object> generalAiResponse(String question, String contextSlug) {
+    private Map<String, Object> generalAiResponse(String question, String contextSlug,
+                                                  Long residentUserId, String visitorId) {
         long started = System.nanoTime();
         try {
             Map<String, Object> generated = aiClient.answerGeneralAssistant(question);
@@ -370,17 +429,23 @@ public class AssistantService {
             if (elapsed <= 0) elapsed = elapsedMs(started);
             recordEvent(question, contextSlug, "general_ai", 0, 0, true,
                     text(generated, "model"), text(generated, "request_id"),
-                    promptTokens, completionTokens, totalTokens, elapsed, null);
+                    promptTokens, completionTokens, totalTokens, elapsed, null,
+                    residentUserId, visitorId);
             Map<String, Object> result = response(answer, List.of(), "general_ai");
             result.put("actions", stringList(generated.get("actions")));
             return result;
         } catch (RuntimeException exception) {
             long elapsed = elapsedMs(started);
             recordEvent(question, contextSlug, "retrieval", 0, 0, false,
-                    null, null, 0, 0, 0, elapsed, "GENERAL_EXTERNAL_FALLBACK");
+                    null, null, 0, 0, 0, elapsed, "EXTERNAL_CALL_FAILED",
+                    residentUserId, visitorId);
             LOGGER.warn("assistant_general_fallback category={} elapsed_ms={} error_type={}",
                     questionCategory(question), elapsed, exception.getClass().getSimpleName());
-            return retrievalResponse("当前已审核发布内容中没有可靠答案，通用 AI 暂时不可用。", List.of());
+            Map<String, Object> resp = retrievalResponse(
+                    "当前已审核发布内容中没有可靠答案，通用 AI 暂时不可用。", List.of(),
+                    "EXTERNAL_CALL_FAILED");
+            resp.put("aiErrorHint", "外部 AI 调用暂时失败，已自动降级。可稍后重试。");
+            return resp;
         }
     }
 
@@ -388,14 +453,15 @@ public class AssistantService {
             String question, String contextSlug, String mode, int evidenceCount,
             int citationCount, boolean success, String model, String requestId,
             int promptTokens, int completionTokens, int totalTokens, long durationMs,
-            String errorCode) {
+            String errorCode, Long residentUserId, String visitorId) {
         jdbc.update(
                 "INSERT INTO assistant_query_event(question_category,context_slug,mode,evidence_count,"
                         + "citation_count,success,model_id,request_id,prompt_tokens,completion_tokens,"
-                        + "total_tokens,duration_ms,error_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        + "total_tokens,duration_ms,error_code,resident_user_id,visitor_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 questionCategory(question), blankToNull(contextSlug), mode, evidenceCount,
                 citationCount, success, blankToNull(model), blankToNull(requestId),
-                promptTokens, completionTokens, totalTokens, durationMs, errorCode);
+                promptTokens, completionTokens, totalTokens, durationMs, errorCode,
+                residentUserId, blankToNull(visitorId));
     }
 
     private String questionCategory(String question) {
@@ -489,7 +555,6 @@ public class AssistantService {
         if (!matches.isEmpty()) evidence.addAll(matches);
         else if (!fallback.isBlank()) evidence.add(fallback);
         if (!summary.isBlank()) evidence.add("审核摘要：" + summary);
-        // Keep this boundary aligned with ai-service AssistantEvidence.quote.
         return shorten(String.join(" ", evidence), 500);
     }
 
@@ -583,4 +648,10 @@ public class AssistantService {
     }
 
     private record RankedItem(Map<String, Object> row, int score) {}
+
+    private record BudgetCheck(boolean passed, String errorCode, String userMessage) {
+        static BudgetCheck pass() { return new BudgetCheck(true, "", ""); }
+        static BudgetCheck fail(String code, String msg) { return new BudgetCheck(false, code, msg); }
+        static BudgetCheck disabled() { return new BudgetCheck(false, "AI_DISABLED", "AI 整理能力未启用。"); }
+    }
 }
