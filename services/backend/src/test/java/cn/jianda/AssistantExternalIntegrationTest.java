@@ -84,6 +84,7 @@ class AssistantExternalIntegrationTest {
                 .andExpect(jsonPath("$.data.factCards[0].value").value("021-55556666"));
 
         assertTrue(LAST_REQUEST.get().contains("assistant-external-published"));
+        assertTrue(LAST_REQUEST.get().contains("021-55556666"));
         assertFalse(LAST_REQUEST.get().contains("assistant-external-withdrawn"));
         assertTrue(jdbc.queryForObject(
                 "SELECT COUNT(*) FROM assistant_query_event WHERE mode='ai' AND citation_count=1 AND total_tokens=180",

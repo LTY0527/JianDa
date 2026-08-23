@@ -232,8 +232,22 @@ public class AssistantService {
         return result;
     }
 
-    private static String normalizeFact(String value) {
-        return value == null ? "" : value.replaceAll("[\\s—–－-]+", "").replace('：', ':');
+    static String normalizeFact(String value) {
+        if (value == null) return "";
+        String normalized = value.replaceAll("\\s+", "").replace('：', ':');
+        Matcher dates = Pattern.compile("(\\d{4})[-/年](\\d{1,2})[-/月](\\d{1,2})日?")
+                .matcher(normalized);
+        StringBuffer canonical = new StringBuffer();
+        while (dates.find()) {
+            String replacement = String.format(
+                    Locale.ROOT, "%04d%02d%02d",
+                    Integer.parseInt(dates.group(1)),
+                    Integer.parseInt(dates.group(2)),
+                    Integer.parseInt(dates.group(3)));
+            dates.appendReplacement(canonical, replacement);
+        }
+        dates.appendTail(canonical);
+        return canonical.toString().replaceAll("[—–－-]+", "");
     }
 
     private boolean withinDailyBudget() {
@@ -325,12 +339,14 @@ public class AssistantService {
         String category = normalize(text(row, "category"));
         String summary = normalize(text(row, "summary"));
         String raw = normalize(text(row, "raw_text"));
+        String verifiedFacts = normalize(text(row, "verified_facts"));
         for (String term : terms) {
             if (term.length() < 2) continue;
             if (category.contains(term) || term.contains(category)) score += 12;
             if (title.contains(term)) score += 8;
             if (summary.contains(term)) score += 4;
             if (raw.contains(term)) score += 2;
+            if (verifiedFacts.contains(term)) score += 10;
         }
         return score;
     }
@@ -343,29 +359,45 @@ public class AssistantService {
         result.put("category", row.get("category"));
         result.put("sourceName", row.get("source_name"));
         result.put("publishedAt", row.get("published_at"));
-        result.put("quote", bestQuote(text(row, "raw_text"), text(row, "summary"), terms));
+        result.put("quote", bestQuote(
+                text(row, "raw_text"), text(row, "summary"),
+                text(row, "verified_facts"), terms));
         return result;
     }
 
-    private String bestQuote(String rawText, String summary, Set<String> terms) {
+    private String bestQuote(
+            String rawText, String summary, String verifiedFacts, Set<String> terms) {
         String source = rawText.isBlank() ? summary : rawText;
         BreakIterator iterator = BreakIterator.getSentenceInstance(Locale.CHINA);
         iterator.setText(source);
         int start = iterator.first();
         String fallback = source;
+        List<String> matches = new ArrayList<>();
         for (int end = iterator.next(); end != BreakIterator.DONE; start = end, end = iterator.next()) {
             String sentence = source.substring(start, end).trim();
             if (terms.stream().anyMatch(term -> term.length() >= 2 && normalize(sentence).contains(term))) {
-                return shorten(sentence);
+                matches.add(sentence);
+                if (matches.size() >= 4) break;
             }
             if (fallback.equals(source) && !sentence.isBlank()) fallback = sentence;
         }
-        return shorten(fallback);
+        List<String> evidence = new ArrayList<>();
+        if (!verifiedFacts.isBlank()) evidence.add("已审核字段：" + verifiedFacts);
+        if (!matches.isEmpty()) evidence.addAll(matches);
+        else if (!fallback.isBlank()) evidence.add(fallback);
+        if (!summary.isBlank()) evidence.add("审核摘要：" + summary);
+        // Keep this boundary aligned with ai-service AssistantEvidence.quote.
+        return shorten(String.join(" ", evidence), 500);
     }
 
     private String shorten(String value) {
+        return shorten(value, 140);
+    }
+
+    private String shorten(String value, int maxLength) {
         String compact = value.replaceAll("\\s+", " ").trim();
-        return compact.length() <= 140 ? compact : compact.substring(0, 137) + "…";
+        return compact.length() <= maxLength
+                ? compact : compact.substring(0, Math.max(0, maxLength - 3)) + "…";
     }
 
     private Set<String> terms(String value) {
