@@ -559,3 +559,14 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] Docker 四服务 healthy，四个健康接口 HTTP 200，V23—V25 已在 MySQL 实际应用。
 - [x] 17 张修改后产品化截图和索引、Phase 9.5 产品报告、测试报告及迁移说明完成。
 - [ ] 真实大场镇网页 External AI → 审核 → 发布仍需单次显式授权的受控人工验收；本轮未调用真实 DeepSeek。
+
+## Phase 9.6 — 真实全链路验收、真实配图、助手升级与商业视觉跃迁（进行中）
+
+- [x] 审计 Phase 9.5 本地与远端基线；本地与远端 ahead/behind 均为 0。
+- [x] 从 `0e1c64b` 建立 `feat/phase9-6-real-acceptance-v1`，未覆盖 Phase 7.3 的 15 张现有修改截图。
+- [x] 建立 `PHASE9_6_BASELINE_AUDIT.md`、`PHASE9_6_CHECKLIST.md`、真实验收截图目录和问题台账。
+- [ ] 先完成真实网页图片候选、审核、缓存、公开封面和历史图片追溯审计。
+- [ ] 保存 before 截图，并建立不拦截 API 的真实 Docker Playwright 验收套件。
+- [ ] 完成大场镇网页与官方 PDF 的真实 External → 审核 → 发布闭环。
+- [ ] 完成真实图片优先首页、助手多轮引用、真实调度、居民治理、提醒和运营指标验收。
+- [ ] 分别汇报 Regression Tests 与 REAL ACCEPTANCE；未满足全部真实门禁时不得标记 PASS。
