@@ -87,7 +87,7 @@ public class ImageCandidateService {
         jdbc.update("UPDATE image_candidate SET review_status='IGNORED',updated_at=CURRENT_TIMESTAMP "
                 + "WHERE document_id=? AND id<>? AND review_status='PENDING'", documentId, candidateId);
         Map<String, Object> policy = sourcePolicy(documentId);
-        if (Boolean.TRUE.equals(policy.get("image_cache_allowed"))) {
+        if (booleanValue(policy.get("image_cache_allowed"))) {
             cacheApprovedCandidate(candidate, sourceName.trim(), usageBasis.trim(), documentId);
         } else {
             jdbc.update("UPDATE source_document SET cover_image_url=NULL,cover_image_type='CATEGORY_DEFAULT',"
@@ -180,6 +180,8 @@ public class ImageCandidateService {
                 target.toString(), asset.contentType(), "cached-cover" + extension, documentId);
         jdbc.update("UPDATE published_item SET cover_image_url=CONCAT('/api/public/items/',slug,'/cover') "
                 + "WHERE document_id=? AND status='PUBLISHED'", documentId);
+        jdbc.update("UPDATE image_candidate SET image_cached=TRUE,image_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                sha256(asset.bytes()), candidate.get("id"));
     }
 
     private static String extension(String contentType) {
@@ -227,6 +229,12 @@ public class ImageCandidateService {
 
     private static Integer number(Object value) {
         return value instanceof Number number ? number.intValue() : null;
+    }
+
+    private static boolean booleanValue(Object value) {
+        if (value instanceof Boolean bool) return bool;
+        if (value instanceof Number number) return number.intValue() != 0;
+        return "true".equalsIgnoreCase(text(value)) || "1".equals(text(value));
     }
 
     private static int relevance(Object value) {

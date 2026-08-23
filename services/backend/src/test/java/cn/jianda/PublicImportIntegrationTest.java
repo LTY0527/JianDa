@@ -498,6 +498,10 @@ class PublicImportIntegrationTest {
                         .header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sourceName\":\"新华网原网页\",\"usageBasis\":\"经人工核对可作为本条资讯封面\"}"))
                 .andExpect(status().isOk());
+        mvc.perform(get("/api/web-articles/{id}/image-candidates", documentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].image_cached").value(true));
         mvc.perform(post("/api/web-articles/{id}/cover/confirm", documentId)
                         .header("Authorization", auth))
                 .andExpect(status().isOk());
