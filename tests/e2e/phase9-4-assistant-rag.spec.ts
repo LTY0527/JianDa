@@ -66,6 +66,7 @@ test.beforeEach(async ({ context }) => {
             ? "不要提供短信验证码。[1]"
             : "请先查看公安机关发布的反诈提醒。",
           actions: ai ? ["停止当前操作。", "通过官方渠道核实。[1]"] : [],
+          factCards: ai ? [{ type: "phone", label: "咨询电话", value: "021-55556666" }] : [],
           citations: [citation],
           disclaimer: "仅帮助理解，正式要求以原文为准。",
           mode: ai ? "ai" : "retrieval",
@@ -84,6 +85,8 @@ test("AI 回答展示行动建议和可访问引用，注入式问题不能移�
   await expect(page.getByText("已审核内容 + AI 整理")).toBeVisible();
   await expect(page.getByRole("heading", { name: "你现在可以怎么做" })).toBeVisible();
   await expect(page.getByText("停止当前操作。")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "已核对关键信息" })).toBeVisible();
+  await expect(page.getByText("021-55556666")).toBeVisible();
   const source = page.locator(".assistant-citation");
   await expect(source).toHaveCount(1);
   await expect(source).toContainText("公安机关反诈提醒");

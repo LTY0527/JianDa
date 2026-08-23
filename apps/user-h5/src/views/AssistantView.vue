@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
-import { AssistantApiError, askAssistant, fetchAssistantSuggestions, fetchDetail, type AssistantCitation } from "../api";
+import { AssistantApiError, askAssistant, fetchAssistantSuggestions, fetchDetail, type AssistantCitation, type AssistantFactCard } from "../api";
 import { createUuid } from "../utils/visitorId";
 import SpeechRateSelector from "../components/SpeechRateSelector.vue";
 import { useSpeechPlayer } from "../composables/useSpeechPlayer";
@@ -14,6 +14,7 @@ interface ConversationMessage {
   role: "user" | "assistant";
   text: string;
   actions?: string[];
+  factCards?: AssistantFactCard[];
   citations?: AssistantCitation[];
   disclaimer?: string;
   mode?: "status" | "retrieval" | "ai" | "general_ai";
@@ -75,6 +76,7 @@ async function submit(value = question.value, recordUser = true) {
       role: "assistant",
       text: reply.answer,
       actions: reply.actions,
+      factCards: reply.factCards,
       citations: reply.citations,
       disclaimer: reply.disclaimer,
       mode: reply.mode,
@@ -197,6 +199,14 @@ onMounted(async () => {
           <section v-if="message.actions?.length" class="assistant-actions">
             <h3>你现在可以怎么做</h3>
             <ol><li v-for="action in message.actions" :key="action">{{ action }}</li></ol>
+          </section>
+          <section v-if="message.factCards?.length" class="assistant-facts" aria-label="已核对关键信息">
+            <h3>已核对关键信息</h3>
+            <dl>
+              <div v-for="fact in message.factCards" :key="`${fact.type}-${fact.label}-${fact.value}`">
+                <dt>{{ fact.label }}</dt><dd>{{ fact.value }}</dd>
+              </div>
+            </dl>
           </section>
           <div v-if="message.role === 'assistant'" class="assistant-speech">
             <button type="button" @click="toggleAnswerSpeech(message)">

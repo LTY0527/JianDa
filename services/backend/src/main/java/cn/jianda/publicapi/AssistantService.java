@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +23,11 @@ public class AssistantService {
     private static final Logger LOGGER = LoggerFactory.getLogger(AssistantService.class);
     private static final String DISCLAIMER = "仅帮助理解，正式要求以原文为准。涉及医疗、金融或政策决定时，请向主管部门或专业人员核实。";
     private static final int MAX_CITATIONS = 3;
+    private static final List<Pattern> GROUNDED_FACT_PATTERNS = List.of(
+            Pattern.compile("\\d{4}年\\d{1,2}月\\d{1,2}日|\\d{1,2}月\\d{1,2}日"),
+            Pattern.compile("\\d{1,2}[:：]\\d{2}(?:\\s*[-—至]\\s*\\d{1,2}[:：]\\d{2})?"),
+            Pattern.compile("(?:0\\d{2,3}[-— ]?)?\\d{7,8}"),
+            Pattern.compile("\\d+(?:\\.\\d+)?\\s*(?:元|万元|块)"));
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
     private final PublishedContentRetriever retriever;
@@ -136,6 +143,9 @@ public class AssistantService {
             if (generatedAnswer.isBlank() || usedCitations.isEmpty()) {
                 throw new IllegalStateException("assistant response missing citations");
             }
+            if (!factsCoveredByEvidence(generatedAnswer, usedCitations)) {
+                throw new IllegalStateException("assistant response contains unsupported factual value");
+            }
             int promptTokens = number(generated.get("prompt_tokens"));
             int completionTokens = number(generated.get("completion_tokens"));
             int totalTokens = number(generated.get("total_tokens"));
@@ -146,6 +156,7 @@ public class AssistantService {
                     promptTokens, completionTokens, totalTokens, elapsed, null);
             Map<String, Object> response = response(generatedAnswer, usedCitations, "ai");
             response.put("actions", stringList(generated.get("actions")));
+            response.put("factCards", factCards(ranked, used));
             return response;
         } catch (RuntimeException exception) {
             long elapsed = elapsedMs(started);
@@ -171,6 +182,58 @@ public class AssistantService {
         result.put("disclaimer", DISCLAIMER);
         result.put("mode", mode);
         return result;
+    }
+
+    private boolean factsCoveredByEvidence(
+            String answer, List<Map<String, Object>> citations) {
+        String evidence = citations.stream().map(item -> text(item, "quote"))
+                .reduce((left, right) -> left + " " + right).orElse("");
+        String normalizedEvidence = normalizeFact(evidence);
+        for (Pattern pattern : GROUNDED_FACT_PATTERNS) {
+            Matcher matcher = pattern.matcher(answer);
+            while (matcher.find()) {
+                if (!normalizedEvidence.contains(normalizeFact(matcher.group()))) return false;
+            }
+        }
+        return true;
+    }
+
+    private List<Map<String, Object>> factCards(List<RankedItem> ranked, List<Integer> usedIndexes) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (Integer usedIndex : usedIndexes) {
+            if (usedIndex == null || usedIndex < 1 || usedIndex > ranked.size()) continue;
+            Object documentId = ranked.get(usedIndex - 1).row().get("document_id");
+            if (!(documentId instanceof Number number)) continue;
+            List<Map<String, Object>> fields = jdbc.queryForList(
+                    "SELECT field_type,field_label,field_value FROM extracted_field WHERE document_id=? "
+                            + "AND review_status IN ('CONFIRMED','MODIFIED') "
+                            + "AND field_type IN ('START_DATE','END_DATE','LOCATION','CONTACT','FEE','MATERIAL') "
+                            + "ORDER BY id",
+                    number.longValue());
+            for (Map<String, Object> field : fields) {
+                String type = text(field, "field_type");
+                String value = text(field, "field_value").trim();
+                if (value.isBlank() || !seen.add(type + "\u0000" + value)) continue;
+                result.add(Map.of(
+                        "type", switch (type) {
+                            case "START_DATE", "END_DATE" -> "deadline";
+                            case "LOCATION" -> "location";
+                            case "CONTACT" -> "phone";
+                            case "FEE" -> "fee";
+                            case "MATERIAL" -> "material";
+                            default -> "fact";
+                        },
+                        "label", text(field, "field_label"),
+                        "value", value));
+                if (result.size() >= 6) return result;
+            }
+        }
+        return result;
+    }
+
+    private static String normalizeFact(String value) {
+        return value == null ? "" : value.replaceAll("[\\s—–－-]+", "").replace('：', ':');
     }
 
     private boolean withinDailyBudget() {

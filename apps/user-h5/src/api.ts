@@ -57,9 +57,16 @@ export interface AssistantCitation {
 export interface AssistantReply {
   answer: string;
   actions?: string[];
+  factCards?: AssistantFactCard[];
   citations: AssistantCitation[];
   disclaimer: string;
   mode: "status" | "retrieval" | "ai" | "general_ai";
+}
+
+export interface AssistantFactCard {
+  type: "deadline" | "location" | "phone" | "fee" | "material" | "fact";
+  label: string;
+  value: string;
 }
 
 export type AssistantFailureReason =

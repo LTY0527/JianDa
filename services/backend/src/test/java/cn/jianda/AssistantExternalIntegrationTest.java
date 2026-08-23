@@ -34,6 +34,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 class AssistantExternalIntegrationTest {
     private static final AtomicBoolean FAIL = new AtomicBoolean();
+    private static final AtomicBoolean HALLUCINATE = new AtomicBoolean();
     private static final AtomicReference<String> LAST_REQUEST = new AtomicReference<>("");
     private static final HttpServer SERVER = startServer();
 
@@ -49,6 +50,7 @@ class AssistantExternalIntegrationTest {
     @BeforeEach
     void prepare() {
         FAIL.set(false);
+        HALLUCINATE.set(false);
         LAST_REQUEST.set("");
         jdbc.update("DELETE FROM assistant_query_event");
         jdbc.update("DELETE FROM published_item WHERE slug LIKE 'assistant-external-%'");
@@ -56,6 +58,9 @@ class AssistantExternalIntegrationTest {
         long published = insertDocument("外部助手测试-公开", "公安机关提醒：不要向陌生人提供短信验证码。");
         long withdrawn = insertDocument("外部助手测试-撤回", "撤回内容中的电话不应作为依据。");
         insertPublished(published, "assistant-external-published", "短信验证码反诈提醒", "不要提供短信验证码", "PUBLISHED");
+        jdbc.update("INSERT INTO extracted_field(document_id,field_type,field_label,field_value,page_no,source_quote,"
+                        + "confidence,review_status) VALUES (?,'CONTACT','咨询电话','021-55556666',1,"
+                        + "'咨询电话：021-55556666',1.0,'CONFIRMED')", published);
         insertPublished(withdrawn, "assistant-external-withdrawn", "已撤回提醒", "不应引用", "WITHDRAWN");
     }
 
@@ -74,7 +79,9 @@ class AssistantExternalIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.mode").value("ai"))
                 .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("[1]")))
-                .andExpect(jsonPath("$.data.citations[0].slug").value("assistant-external-published"));
+                .andExpect(jsonPath("$.data.citations[0].slug").value("assistant-external-published"))
+                .andExpect(jsonPath("$.data.factCards[0].type").value("phone"))
+                .andExpect(jsonPath("$.data.factCards[0].value").value("021-55556666"));
 
         assertTrue(LAST_REQUEST.get().contains("assistant-external-published"));
         assertFalse(LAST_REQUEST.get().contains("assistant-external-withdrawn"));
@@ -118,6 +125,24 @@ class AssistantExternalIntegrationTest {
                 Integer.class) == 1);
     }
 
+    @Test
+    void rejectsUnsupportedPhoneAndFallsBackToPublishedRetrieval() throws Exception {
+        HALLUCINATE.set(true);
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"陌生人索要短信验证码怎么办？"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
+                .andExpect(jsonPath("$.data.answer", org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("021-12345678"))))
+                .andExpect(jsonPath("$.data.citations[0].slug").value("assistant-external-published"));
+        assertTrue(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM assistant_query_event WHERE mode='retrieval' "
+                        + "AND error_code='EXTERNAL_FALLBACK'", Integer.class) == 1);
+    }
+
     private long insertDocument(String title, String rawText) {
         jdbc.update("INSERT INTO source_document(organization_id,title,file_name,file_type,storage_path,raw_text,page_count,processing_status,created_by) "
                 + "VALUES (1,?,NULL,'HTML',NULL,?,1,'PUBLISHED',1)", title, rawText);
@@ -140,6 +165,11 @@ class AssistantExternalIntegrationTest {
                 boolean general = exchange.getRequestURI().getPath().endsWith("/general-answer");
                 String body = FAIL.get()
                         ? "{\"detail\":{\"error_code\":\"UPSTREAM_FAILED\",\"message\":\"暂时不可用\",\"retryable\":true}}"
+                        : HALLUCINATE.get()
+                        ? "{\"answer\":\"请拨打021-12345678并停止操作。[1]\",\"actions\":[],"
+                        + "\"used_citation_indexes\":[1],\"model\":\"deepseek-v4-flash\","
+                        + "\"request_id\":\"unsafe-request\",\"prompt_tokens\":140,"
+                        + "\"completion_tokens\":40,\"total_tokens\":180,\"elapsed_ms\":25}"
                         : general
                         ? "{\"answer\":\"这是通用知识的通俗解释。\",\"actions\":[\"如需深入了解，请查阅可靠科普资料。\"],"
                         + "\"model\":\"deepseek-v4-flash\",\"request_id\":\"mock-general-1\","
