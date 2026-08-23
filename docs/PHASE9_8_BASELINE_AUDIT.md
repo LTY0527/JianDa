@@ -33,3 +33,12 @@ Docker volumes 保留，不执行 `docker compose down -v`。
 `BASELINE_STATUS: DONE`
 
 从 AI rewrite 可恢复和 PDF/图片提取开始，不扩大到无关功能。
+
+## 2026-08-23 续跑复核（不改写历史基线）
+
+- 当前分支仍为 `feat/phase9-8-core-reliability-v1`，续跑起点 HEAD `62dcd9a`。
+- V27–V29 已在真实 MySQL 应用；Docker 四项服务健康。
+- 真实环境安全核验为 External provider / `deepseek-v4-flash` 且 Key 已配置；没有输出 Key 值。
+- 基线第 1 项已由真实批测修复：每页质量评分、OCR 比较、人工复核和 POOR 文本拒绝均有 Docker/Tesseract 证据。
+- 基线第 2–4 项仍以各专项真实验收 Gate 为准；实现存在不等同于最终 PASS。
+- 原有 15 张 `artifacts/phase7-3` 用户截图修改继续保持未暂存、未覆盖、未删除。
