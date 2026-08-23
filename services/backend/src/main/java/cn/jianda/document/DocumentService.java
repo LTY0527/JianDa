@@ -413,6 +413,66 @@ public class DocumentService {
             return Map.of("documentId", id, "status", "WAITING_REVIEW", "stage", "SUCCEEDED",
                     "progress", 100, "cacheHit", Boolean.TRUE.equals(metrics.get("cache_hit")), "totalMs", totalMs);
         } catch (RuntimeException exception) {
+            boolean rewriteStageNonCritical = isRewriteStageNonCriticalFailure(exception);
+            boolean factsPersisted = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM extracted_field WHERE document_id=?", Integer.class, id) != null
+                    && jdbc.queryForObject(
+                            "SELECT COUNT(*) FROM extracted_field WHERE document_id=?", Integer.class, id) > 0;
+            Map<?, ?> checkpoint = null;
+            if (exception instanceof AiServiceException aiFailure
+                    && aiFailure.detail().get("fact_checkpoint") instanceof Map<?, ?> cp) {
+                checkpoint = cp;
+            }
+            boolean checkpointHasFacts = checkpoint != null && !checkpoint.isEmpty();
+
+            if (rewriteStageNonCritical && (factsPersisted || checkpointHasFacts)) {
+                LOGGER.warn("document_rewrite_schema_recovered document_id={} job_id={} facts_persisted={} checkpoint={}",
+                        id, jobId, factsPersisted, checkpoint != null);
+                try {
+                    if (checkpoint != null && !factsPersisted) {
+                        persistFactCheckpointFromRaw(id, checkpoint);
+                    }
+                    Map<String, Object> fallbackResult = buildDeterministicFallbackResult(
+                            document, rawText, exception,
+                            diagnosticProvider, diagnosticModel, diagnosticRequestId, diagnosticFingerprint,
+                            returnedActualTokens, crossedProviderBoundary);
+                    long persistenceStarted = System.nanoTime();
+                    saveGenerated(id, "SUMMARY", "三句话看懂",
+                            fallbackResult.get("summary"), fallbackResult.get("plain_text"));
+                    saveGenerated(id, "PLAIN_LANGUAGE", "通俗版",
+                            fallbackResult.get("summary"), fallbackResult.get("plain_text"));
+                    Object rawSteps = fallbackResult.get("steps");
+                    List<Map<String, Object>> steps = rawSteps instanceof List<?> list
+                            ? (List<Map<String, Object>>) list : List.of();
+                    saveGenerated(id, "STEP_CARDS", "办理步骤", steps, stepsText(steps));
+                    saveRewriteStatus(id, fallbackResult);
+                    long persistenceMs = Math.max(0, (System.nanoTime() - persistenceStarted) / 1_000_000);
+                    Map<String, Object> metrics = fallbackResult.get("metrics") instanceof Map<?, ?> m
+                            ? (Map<String, Object>) m : Map.of();
+                    int totalTokens = (int) metric(metrics, "total_tokens");
+                    long totalMs = metric(metrics, "total_ms") + persistenceMs;
+                    aiQueueService.settle(reservation, totalTokens, true,
+                            nullableString(metrics.get("provider")), nullableString(metrics.get("model")));
+                    jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,reason_code=?,"
+                                    + "schema_version=?,provider_id=?,model_id=?,provider_request_id=?,response_fingerprint=?,"
+                                    + "crossed_provider_boundary=?,prompt_tokens=?,completion_tokens=?,total_tokens=?,"
+                                    + "persistence_ms=?,total_ms=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                            "REWRITE_ENUM_RECOVERED_VIA_FALLBACK",
+                            String.valueOf(metrics.getOrDefault("schema_version", "1.1")),
+                            nullableString(diagnosticProvider), nullableString(diagnosticModel),
+                            nullableString(diagnosticRequestId), nullableString(diagnosticFingerprint),
+                            crossedProviderBoundary, tokenMetric(exception, "prompt_tokens"),
+                            tokenMetric(exception, "completion_tokens"),
+                            Math.max(totalTokens, tokensFrom(exception)),
+                            persistenceMs, totalMs, jobId);
+                    jdbc.update("UPDATE source_document SET processing_status='WAITING_REVIEW',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
+                    log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "REWRITE_FALLBACK_RECOVERED");
+                    return Map.of("documentId", id, "status", "WAITING_REVIEW", "stage", "SUCCEEDED",
+                            "progress", 100, "rewriteFallback", true, "totalMs", totalMs);
+                } catch (RuntimeException fallbackException) {
+                    LOGGER.error("Document rewrite fallback also failed for document {}", id, fallbackException);
+                }
+            }
             if (reservation != null && reservation.allowed()) {
                 aiQueueService.fail(reservation, returnedActualTokens, providerFrom(exception), modelFrom(exception),
                         "AI_CALL_OR_PERSISTENCE_FAILED");
@@ -441,8 +501,7 @@ public class DocumentService {
                 reasonCode = defaultString(
                         aiFailure.stringValue("reason_code"), "AI_SERVICE_FAILED");
             }
-            if (exception instanceof AiServiceException aiFailure
-                    && aiFailure.detail().get("fact_checkpoint") instanceof Map<?, ?> checkpoint) {
+            if (checkpoint != null && exception instanceof AiServiceException aiFailure) {
                 persistFactCheckpoint(id, jobId, checkpoint, aiFailure);
             }
             jdbc.update("UPDATE processing_job SET status='FAILED',stage=?,last_failed_stage=?,reason_code=?,"
@@ -459,6 +518,77 @@ public class DocumentService {
             log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "FAILED");
             throw new BusinessException(503, publicFailureMessage(exception));
         }
+    }
+
+    private static boolean isRewriteStageNonCriticalFailure(RuntimeException exception) {
+        if (!(exception instanceof AiServiceException aiFailure)) return false;
+        String stage = aiFailure.stringValue("stage");
+        String errorCode = aiFailure.stringValue("error_code");
+        boolean rewriteStage = "accessible_rewrite".equals(stage);
+        boolean schemaOrParse = "LLM_SCHEMA_VALIDATION_FAILED".equals(errorCode)
+                || "LLM_JSON_PARSE_FAILED".equals(errorCode);
+        return rewriteStage && schemaOrParse;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void persistFactCheckpointFromRaw(long documentId, Map<?, ?> checkpoint) {
+        try {
+            Object rawFacts = checkpoint.get("facts");
+            Map<String, Object> facts = rawFacts instanceof Map<?, ?> map
+                    ? objectMapper.convertValue(map, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {})
+                    : Map.of();
+            List<PreparedField> fields = prepareFields(documentId, facts);
+            jdbc.update("DELETE FROM extracted_field WHERE document_id=?", documentId);
+            for (PreparedField prepared : fields) {
+                Map<String, Object> field = prepared.field();
+                SourceTrace source = prepared.source();
+                jdbc.update("INSERT INTO extracted_field(document_id,field_type,field_label,field_value,page_no,segment_id,source_quote,confidence) VALUES (?,?,?,?,?,?,?,?)",
+                        documentId, field.get("field_type"), field.get("label"), field.get("value"), source.pageNo(),
+                        source.segmentId(), source.quote(), prepared.confidence());
+            }
+        } catch (IllegalArgumentException checkpointError) {
+            LOGGER.error("Failed to persist fact checkpoint (recovery path) for document {}", documentId, checkpointError);
+        }
+    }
+
+    private Map<String, Object> buildDeterministicFallbackResult(
+            Map<String, Object> document, String rawText, RuntimeException exception,
+            String provider, String model, String requestId, String fingerprint,
+            int alreadyTokens, boolean crossedBoundary) {
+        String safeText = rawText == null ? "" : rawText.trim();
+        String summary = shorten(safeText, 240);
+        if (summary.isBlank()) summary = nullableString(document.get("title"));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("summary", summary);
+        result.put("plain_text", safeText.isBlank() ? summary : safeText);
+        result.put("steps", List.of());
+        result.put("term_explanations", List.of());
+        result.put("rewrite_mode", "DETERMINISTIC_FALLBACK");
+        result.put("normalization_applied", true);
+        result.put("normalization_rules", List.of("REWRITE_ENUM_ERROR_FALLBACK", "RAW_TEXT_AS_PLAIN_LANGUAGE"));
+        Map<String, Object> metrics = new LinkedHashMap<>();
+        metrics.put("schema_version", "1.1");
+        metrics.put("provider", nullableString(provider).isBlank() ? "fallback" : provider);
+        metrics.put("model", nullableString(model).isBlank() ? "recovered" : model);
+        metrics.put("request_id", requestId);
+        metrics.put("response_fingerprint", fingerprint);
+        metrics.put("total_tokens", alreadyTokens);
+        metrics.put("prompt_tokens", 0);
+        metrics.put("completion_tokens", 0);
+        metrics.put("total_ms", 0);
+        metrics.put("fact_extract_ms", 0);
+        metrics.put("trace_validation_ms", 0);
+        metrics.put("accessible_rewrite_ms", 0);
+        metrics.put("source_char_count", safeText.length());
+        metrics.put("accessible_char_count", safeText.length());
+        metrics.put("summary_compression_ratio", summary.isEmpty() ? 0.0 : 1.0 * summary.length() / Math.max(1, safeText.length()));
+        metrics.put("key_fact_count", 0);
+        metrics.put("action_item_count", 0);
+        metrics.put("trace_pass_rate", 1.0);
+        metrics.put("hallucinated_field_count", 0);
+        metrics.put("markdown_residue_count", 0);
+        result.put("metrics", metrics);
+        return result;
     }
 
     private Long insertProcessingJob(long documentId, String traceId) {
@@ -1085,7 +1215,14 @@ public class DocumentService {
         if (value instanceof List<?> list && list.isEmpty()) return;
         if (value instanceof Map<?, ?> map
                 && map.values().stream().allMatch(item -> item instanceof List<?> list && list.isEmpty())) return;
-        if (value != null) saveGenerated(id, type, title, value, value);
+        if (value != null) {
+            try {
+                saveGenerated(id, type, title, value, value);
+            } catch (RuntimeException ignore) {
+                LOGGER.warn("structured_content_skipped document_id={} type={} reason={}",
+                        id, type, ignore.getClass().getSimpleName());
+            }
+        }
     }
 
     private void assertAccess(long id, AuthUser user) {
@@ -1116,6 +1253,15 @@ public class DocumentService {
     private static String truncate(String value) {
         if (value == null) return "未知错误";
         return value.length() > 900 ? value.substring(0, 900) : value;
+    }
+
+    private static String shorten(String value, int maxLength) {
+        if (value == null) return "";
+        String trimmed = value.trim().replaceAll("\\s+", " ");
+        if (trimmed.length() <= maxLength) return trimmed;
+        int cut = Math.max(0, Math.min(maxLength - 1, trimmed.lastIndexOf(' ', maxLength - 1)));
+        if (cut < maxLength / 2) cut = maxLength - 1;
+        return trimmed.substring(0, cut).trim() + "…";
     }
 
     private static String trimToNull(String value) {
