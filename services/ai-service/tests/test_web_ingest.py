@@ -222,6 +222,19 @@ def test_large_navigation_banner_is_not_accepted_as_article_image(monkeypatch):
     assert result.cover_image_type == "CATEGORY_DEFAULT"
 
 
+def test_empty_alt_recommendation_after_article_does_not_borrow_article_title(monkeypatch):
+    html = """<html><head><title>老年人夏季健康提醒</title></head><body>
+    <article><p>老年人夏季应注意补水和休息，持续不适时及时就医。</p>
+    <p>本文为公开健康提示，不能替代医务人员结合个人情况作出的判断。</p>
+    <p>具体健康服务安排请以属地卫生健康部门公开信息为准。</p></article>
+    <aside class="recommendation"><p>国际体育赛事最新赛况</p>
+    <a href="/other"><img src="/unrelated.png" alt=""></a></aside>
+    </body></html>"""
+    result = _run_preview(monkeypatch, html)
+    assert not any(image.url.endswith("/unrelated.png") for image in result.images)
+    assert result.cover_image_type == "CATEGORY_DEFAULT"
+
+
 def test_wechat_identity_hints_do_not_claim_official_status(monkeypatch):
     html = """<html><head><title>社区健康提醒</title>
     <meta name="profile_nickname" content="浦江健康服务">

@@ -472,7 +472,7 @@ async def _validated_cover(
         if any(word in fingerprint for word in rejected_words):
             continue
         candidate = WebArticleImage(
-            url=url, caption=_clean(alt) or page.title,
+            url=url, caption=_clean(alt),
             context_text=_clean(context_text), discovery_method=discovery_method,
         )
         relevance_score = _image_relevance(page, candidate, discovery_method)
@@ -498,7 +498,7 @@ async def _validated_cover(
                 continue
             image_hash = hashlib.sha256(data).hexdigest()
             validated_images.append(WebArticleImage(
-                url=str(response.url), caption=_clean(alt) or page.title,
+                url=str(response.url), caption=_clean(alt),
                 context_text=_clean(context_text), relevance_score=relevance_score,
                 discovery_method=discovery_method, mime_type=content_type,
                 width=width, height=height, image_hash=image_hash,
