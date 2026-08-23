@@ -73,3 +73,27 @@ Phase 9.6 真实补图必须按顺序执行：先为明确范围的来源开启�
 - 首页首屏真实视觉覆盖率：`0%`
 
 以上为真实基线，不是估算值。最终覆盖率将在历史重扫、权利审核、缓存和浏览器自然尺寸验证后更新。
+
+## 历史网页真实重扫
+
+执行范围：新华网来源、4 篇已发布网页文章。测试期间只临时开启 `allow_image_candidates`；`allow_image_cache`、`image_cache_allowed`、`auto_approve_images` 始终关闭，结束后候选开关恢复关闭。
+
+第一次真实重扫：
+
+- scanned：4
+- failed：0
+- candidates：3
+- auto approved：0
+- cached：0
+- 发现问题：3 个候选中有 2 个是文章底部其他推荐内容；空 alt 被当前文章标题替代，导致相关性虚高。
+
+修复 `17b1637` 后清空 AI 与后端 preview 缓存，使用相同 4 篇文章复扫：
+
+- scanned：4
+- failed：0
+- valid candidates：0
+- wrong candidates：0
+- auto approved：0
+- cached：0
+
+结论：当前 4 篇已发布新华网页面没有通过“属于本文 + 尺寸/MIME/比例”门禁的真实图片。系统保持分类默认图/文字 Hero，不从搜索引擎补图，也不把推荐图冒充本文图片。真实封面覆盖率仍为 0%，需从后续真实大场镇文章或官方 PDF 中寻找可追溯视觉。
