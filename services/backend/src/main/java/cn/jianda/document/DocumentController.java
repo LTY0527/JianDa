@@ -90,6 +90,13 @@ public class DocumentController {
     @GetMapping("/{id}/generated")
     public ApiResponse<List<Map<String, Object>>> generated(@PathVariable long id) { return ApiResponse.ok(service.generated(id, UserContext.current())); }
 
+    @PutMapping("/{id}/generated/{contentType}")
+    public ApiResponse<Void> updateGenerated(@PathVariable long id, @PathVariable String contentType,
+            @Valid @RequestBody GeneratedContentRequest request) {
+        service.updateGenerated(id, contentType, request.plainText(), request.contentJson(), UserContext.current());
+        return ApiResponse.ok(null);
+    }
+
     @PutMapping("/{documentId}/fields/{fieldId}")
     public ApiResponse<Void> updateField(@PathVariable long documentId, @PathVariable long fieldId,
                                          @Valid @RequestBody FieldRequest request) {
@@ -129,6 +136,7 @@ public class DocumentController {
             String evidenceType,
             Integer pageNo) {}
     public record FieldRequest(@NotBlank(message = "字段内容不能为空") String value, boolean confirmed) {}
+    public record GeneratedContentRequest(String plainText, Object contentJson) {}
     public record ReviewRequest(String comment) {}
     public record PublishRequest(@NotBlank(message = "请输入标题") String title,
                                  @NotBlank(message = "请选择分类") String category,

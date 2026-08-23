@@ -119,6 +119,17 @@ class SourceRegistryOperationsIntegrationTest {
         mvc.perform(put("/api/source-registries/{id}/enabled", id).header("Authorization", platformAuth)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.enabled").value(false));
+
+        mvc.perform(put("/api/source-registries/{id}/image-candidates-enabled", id)
+                        .header("Authorization", platformAuth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.allow_image_candidates").value(true));
+        mvc.perform(put("/api/source-registries/{id}/image-candidates-enabled", id)
+                        .header("Authorization", platformAuth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.allow_image_candidates").value(false));
     }
 
     @Test

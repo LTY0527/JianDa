@@ -132,6 +132,16 @@ public class SourceRegistryService {
     }
 
     @Transactional
+    public Map<String, Object> setImageCandidatesEnabled(long id, boolean enabled, AuthUser user) {
+        int changed = jdbc.update(
+                "UPDATE source_registry SET allow_image_candidates=?,operator_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                enabled, user.id(), id);
+        if (changed == 0) throw new BusinessException(404, "权威来源不存在");
+        log(user, enabled ? "ENABLE_IMAGE_CANDIDATES" : "DISABLE_IMAGE_CANDIDATES", id);
+        return get(id);
+    }
+
+    @Transactional
     public Map<String, Object> confirmQuickSource(
             QuickSourceConfirmation request, Map<String, Object> preview, AuthUser user) {
         if (request == null || !request.officialConfirmed()) {

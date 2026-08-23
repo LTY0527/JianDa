@@ -80,6 +80,12 @@ public class SourceRegistryController {
         return ApiResponse.ok(service.setEnabled(id, request.enabled(), UserContext.current()));
     }
 
+    @PutMapping("/{id}/image-candidates-enabled")
+    public ApiResponse<Map<String, Object>> imageCandidatesEnabled(
+            @PathVariable long id, @RequestBody EnabledRequest request) {
+        return ApiResponse.ok(service.setImageCandidatesEnabled(id, request.enabled(), UserContext.current()));
+    }
+
     @PostMapping("/{id}/discover")
     public ApiResponse<Map<String, Object>> discover(@PathVariable long id, @RequestBody DiscoveryRequest request) {
         return ApiResponse.ok(discoveryService.discover(id, request.method(), request.entryUrl(),

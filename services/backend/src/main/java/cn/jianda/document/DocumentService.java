@@ -771,6 +771,30 @@ public class DocumentService {
         return jdbc.queryForList("SELECT * FROM generated_content WHERE document_id=? ORDER BY id", id);
     }
 
+    @Transactional
+    public void updateGenerated(long id, String contentType, String plainText, Object contentJson, AuthUser user) {
+        assertAccess(id, user);
+        String type = contentType == null ? "" : contentType.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!Set.of("SUMMARY", "PLAIN_LANGUAGE", "FAQ", "UNCERTAINTIES", "AUDIO_SCRIPT").contains(type)) {
+            throw new BusinessException(400, "该生成内容不支持人工修改");
+        }
+        String serialized = null;
+        if (contentJson != null) {
+            try { serialized = objectMapper.writeValueAsString(contentJson); }
+            catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+                throw new BusinessException(400, "结构化内容格式不正确");
+            }
+        }
+        int changed = jdbc.update("UPDATE generated_content SET plain_text=COALESCE(?,plain_text),content_json=COALESCE(?,content_json),"
+                        + "status=CASE WHEN status='PUBLISHED' THEN 'PUBLISHED' ELSE 'REVIEWED' END WHERE document_id=? AND content_type=?",
+                plainText == null ? null : plainText.trim(), serialized, id, type);
+        if (changed == 0) throw new BusinessException(404, "生成内容不存在");
+        if ("SUMMARY".equals(type) && plainText != null) {
+            jdbc.update("UPDATE published_item SET summary=? WHERE document_id=?", plainText.trim(), id);
+        }
+        log(user, "UPDATE_GENERATED_CONTENT", "SOURCE_DOCUMENT", id, "SUCCESS");
+    }
+
     public List<Map<String, Object>> segments(long id, AuthUser user) {
         assertAccess(id, user);
         List<Map<String, Object>> result = jdbc.queryForList("SELECT * FROM document_segment WHERE document_id=? ORDER BY page_no,segment_no", id);
