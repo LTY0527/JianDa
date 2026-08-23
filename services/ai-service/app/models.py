@@ -445,6 +445,7 @@ class ArticleDiscoveryCandidate(BaseModel):
 class ArticleDiscoveryResponse(BaseModel):
     candidates: list[ArticleDiscoveryCandidate] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    filtered_navigation_count: int = 0
 
 
 class WebArticleRequest(BaseModel):

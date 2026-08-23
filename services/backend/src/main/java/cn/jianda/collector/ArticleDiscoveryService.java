@@ -65,9 +65,14 @@ public class ArticleDiscoveryService {
                 errors.isEmpty() ? null : safeError(errors), sourceId);
         return Map.of("sourceId", sourceId, "method", selectedMethod, "candidates", candidates,
                 "duplicateCount", duplicates,
+                "filtered_navigation_count", integer(response.get("filtered_navigation_count")),
                 "filtered_external_count", sanitized.filteredCount(),
                 "filtered_external_domains", sanitized.filteredDomains(),
                 "errors", errors.stream().limit(100).map(String::valueOf).toList());
+    }
+
+    private static int integer(Object value) {
+        return value instanceof Number number ? Math.max(0, number.intValue()) : 0;
     }
 
     private List<Map<String, Object>> filterCandidates(

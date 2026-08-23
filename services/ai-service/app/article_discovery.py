@@ -24,6 +24,23 @@ MAX_SITEMAP_CHILDREN = 20
 MAX_SECTION_LINKS = 200
 MAX_REDIRECTS = 5
 ARTICLE_TYPES = {"Article", "NewsArticle", "ReportageNewsArticle", "BlogPosting"}
+ARTICLE_PATH_PATTERN = re.compile(
+    r"(?:^|[-_/])(article|detail|content|news|notice|view|story|post)(?:[-_/.]|$)", re.IGNORECASE
+)
+ARTICLE_QUERY_KEYS = {
+    "articleid", "article_id", "contentid", "content_id", "docid", "doc_id", "infoid", "newsid", "postid"
+}
+DIRECTORY_PATH_PATTERN = re.compile(
+    r"(?:^|[-_/])(category|categories|channel|directory|guide|index|list|nav|search|sitemap)(?:[-_/.]|$)",
+    re.IGNORECASE,
+)
+DIRECTORY_QUERY_KEYS = {"cate", "category", "channel", "column", "dept", "department", "menu", "type"}
+NAVIGATION_TITLES = {
+    "首页", "返回首页", "政务公开", "信息公开", "信息公开目录", "按部门分类", "按主题分类",
+    "上一页", "下一页", "更多", "更多信息", "网站地图", "联系我们", "登录", "注册",
+    "home", "back", "previous", "next", "more", "menu", "navigation",
+}
+DATE_PATTERN = re.compile(r"(?<!\d)(20\d{2})[-年/.](0?[1-9]|1[0-2])[-月/.](0?[1-9]|[12]\d|3[01])日?(?!\d)")
 
 
 @dataclass(frozen=True)
@@ -55,21 +72,30 @@ class ArticleCandidate:
 class DiscoveryResult:
     candidates: list[ArticleCandidate] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    filtered_navigation_count: int = 0
 
 
 class _SectionParser(HTMLParser):
     def __init__(self, base_url: str) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
-        self.links: list[tuple[str, str]] = []
+        self.links: list[tuple[str, str, str | None]] = []
         self.json_ld: list[object] = []
         self._href = ""
         self._text: list[str] = []
         self._json_ld = False
         self._script: list[str] = []
+        self._row_depth = 0
+        self._row_links: list[tuple[str, str]] = []
+        self._row_text: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = dict(attrs)
+        if tag == "tr":
+            self._row_depth += 1
+            if self._row_depth == 1:
+                self._row_links = []
+                self._row_text = []
         if tag == "a" and values.get("href") and len(self.links) < MAX_SECTION_LINKS:
             self._href = urljoin(self.base_url, values["href"] or "")
             self._text = []
@@ -82,10 +108,16 @@ class _SectionParser(HTMLParser):
             self._text.append(data)
         if self._json_ld:
             self._script.append(data)
+        if self._row_depth:
+            self._row_text.append(data)
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "a" and self._href:
-            self.links.append((self._href, re.sub(r"\s+", " ", "".join(self._text)).strip()))
+            link = (self._href, re.sub(r"\s+", " ", "".join(self._text)).strip())
+            if self._row_depth:
+                self._row_links.append(link)
+            else:
+                self.links.append((*link, None))
             self._href = ""
             self._text = []
         if tag == "script" and self._json_ld:
@@ -95,6 +127,47 @@ class _SectionParser(HTMLParser):
                 pass
             self._json_ld = False
             self._script = []
+        if tag == "tr" and self._row_depth:
+            if self._row_depth == 1:
+                row_text = re.sub(r"\s+", " ", "".join(self._row_text)).strip()
+                match = DATE_PATTERN.search(row_text)
+                published = "-".join(match.groups()) if match else None
+                self.links.extend((url, title, published) for url, title in self._row_links)
+                self._row_links = []
+                self._row_text = []
+            self._row_depth -= 1
+
+
+def _article_link_score(url: str, title: str, page_url: str) -> int:
+    """Rank generic article-like links without depending on a specific website."""
+    parsed = urlparse(url)
+    page = urlparse(page_url)
+    path = parsed.path.lower()
+    query_keys = {item.split("=", 1)[0].lower() for item in parsed.query.split("&") if item}
+    normalized_title = re.sub(r"\s+", " ", title).strip()
+    lowered_title = normalized_title.lower()
+    score = 0
+    if ARTICLE_PATH_PATTERN.search(path):
+        score += 60
+    if query_keys & ARTICLE_QUERY_KEYS:
+        score += 50
+    if re.search(r"/20\d{2}/(?:0?[1-9]|1[0-2])(?:/|$)", path):
+        score += 30
+    if path.endswith((".html", ".htm", ".shtml", ".pdf")):
+        score += 8
+    if len(normalized_title) >= 8:
+        score += 10
+    if path.startswith("/service") and len(normalized_title) >= 6:
+        score += 15
+    if lowered_title in NAVIGATION_TITLES or len(normalized_title) <= 2:
+        score -= 80
+    if DIRECTORY_PATH_PATTERN.search(path):
+        score -= 55
+    if query_keys & DIRECTORY_QUERY_KEYS and not (query_keys & ARTICLE_QUERY_KEYS):
+        score -= 55
+    if parsed.path == page.path and parsed.query == page.query:
+        score -= 100
+    return score
 
 
 def normalize_url(raw_url: str, base_url: str | None = None) -> str:
@@ -270,11 +343,14 @@ def parse_html(content: bytes, page_url: str, source: DiscoverySource) -> Discov
                 ))
             except (ValueError, TypeError) as exc:
                 result.errors.append(str(exc))
-    for url, title in parser.links:
+    for url, title, published in parser.links:
         try:
             if not title or url.startswith(("mailto:", "tel:", "javascript:")):
                 continue
-            result.candidates.append(_candidate(source, url, title, None, "SECTION", page_url))
+            if _article_link_score(url, title, page_url) < 10:
+                result.filtered_navigation_count += 1
+                continue
+            result.candidates.append(_candidate(source, url, title, published, "SECTION", page_url))
         except ValueError as exc:
             result.errors.append(str(exc))
         if len(result.candidates) >= MAX_CANDIDATES:
@@ -347,6 +423,7 @@ async def discover_articles(source: DiscoverySource, entry_url: str, method: str
                 child_result, _ = parse_sitemap(child_content, child_url, source)
                 result.candidates.extend(child_result.candidates)
                 result.errors.extend(child_result.errors)
+                result.filtered_navigation_count += child_result.filtered_navigation_count
             except (httpx.HTTPError, ValueError) as exc:
                 result.errors.append(str(exc))
         return _deduplicate(result)

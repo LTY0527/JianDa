@@ -76,6 +76,25 @@ def test_json_ld_and_section_links_share_candidate_shape_and_dedup():
     assert empty.candidates == []
 
 
+def test_directory_navigation_is_filtered_and_table_article_dates_are_kept():
+    navigation = "".join(
+        f'<a href="/guide/list.html?dept={index}">区属部门{index}</a>' for index in range(30)
+    )
+    articles = """<table><tbody>
+      <tr><td><a href="/article.html?infoid=first-article">社区服务开放日安排</a></td><td>2026-08-14</td></tr>
+      <tr><td><a href="/content/view.html?contentid=second-article">长者助餐服务调整通知</a></td><td>2026年8月13日</td></tr>
+    </tbody></table>"""
+    result = parse_html(
+        f"<html><body><nav><a href='/'>首页</a>{navigation}</nav>{articles}</body></html>".encode(),
+        "https://fixture.example/directory/index.html?dept=community",
+        SOURCE,
+    )
+
+    assert [item.title for item in result.candidates] == ["社区服务开放日安排", "长者助餐服务调整通知"]
+    assert [item.published_time for item in result.candidates] == ["2026-08-14", "2026-8-13"]
+    assert result.filtered_navigation_count == 31
+
+
 def test_invalid_protocol_malformed_xml_and_oversized_content_are_rejected():
     with pytest.raises(ValueError, match="HTTP/HTTPS"):
         normalize_url("file:///etc/passwd")

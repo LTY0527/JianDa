@@ -63,7 +63,8 @@ class ArticleDiscoveryIntegrationTest {
                                 candidate("https://news.discovery-fixture-enabled.example/three", "three"),
                                 candidate("https://approved-cdn.example/four", "four"),
                                 candidate("https://outside.example/five", "five")),
-                        "errors", List.of("一个条目缺少地址")));
+                        "errors", List.of("一个条目缺少地址"),
+                        "filtered_navigation_count", 12));
     }
 
     @Test
@@ -75,6 +76,7 @@ class ArticleDiscoveryIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.candidates.length()").value(4))
                 .andExpect(jsonPath("$.data.filtered_external_count").value(1))
+                .andExpect(jsonPath("$.data.filtered_navigation_count").value(12))
                 .andExpect(jsonPath("$.data.filtered_external_domains[0]").value("outside.example"))
                 .andExpect(jsonPath("$.data.candidates[0].source_id").value(enabledId))
                 .andExpect(jsonPath("$.data.candidates[0].canonical_url")

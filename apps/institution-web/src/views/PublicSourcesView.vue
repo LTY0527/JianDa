@@ -799,6 +799,12 @@ onUnmounted(() => {
           已过滤 {{ discoveryResult.data.filtered_external_count }}
           个不属于当前来源范围的外部链接。
         </div>
+        <div
+          v-if="discoveryResult.data.filtered_navigation_count"
+          class="safe-note"
+        >
+          已过滤 {{ discoveryResult.data.filtered_navigation_count }} 条导航或目录链接。
+        </div>
         <table class="data-table">
           <thead><tr><th>选择</th><th>发现文章</th><th>方式</th><th>状态</th><th>受控操作</th></tr></thead>
           <tbody>

@@ -275,6 +275,7 @@ export interface ArticleDiscoveryResult {
   duplicateCount: number;
   errors: string[];
   filtered_external_count?: number;
+  filtered_navigation_count?: number;
   filtered_external_domains?: string[];
 }
 

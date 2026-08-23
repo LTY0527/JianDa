@@ -245,6 +245,7 @@ async def article_discovery(request: ArticleDiscoveryRequest) -> ArticleDiscover
         return ArticleDiscoveryResponse(
             candidates=[candidate.__dict__ for candidate in result.candidates],
             errors=result.errors,
+            filtered_navigation_count=result.filtered_navigation_count,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
