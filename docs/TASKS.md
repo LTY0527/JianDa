@@ -589,3 +589,14 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [ ] PARTIAL：当前 Codex 进程未注入受保护平台/居民密码，一键 REAL Playwright 的 2 个认证场景明确跳过，不计 PASS。
 - [ ] 未来公网或商业部署前重新进行真实图片版权审核；当前使用依据只覆盖本地、局域网和课堂 Demo。
 - [x] 已分别输出 Regression Tests 与 REAL ACCEPTANCE；当前最终结论为 `REAL ACCEPTANCE: PARTIAL`，未把 Mock/fixture 通过数计入真实验收。
+# Phase 9.7 商业化首页与管理员极简收口（2026-08-23）
+
+- [x] H5 强搜索、8 频道、真实图片/文字 Hero、5 个高频服务和连续混合 Feed。
+- [x] 频道状态恢复且切换不重复请求首页数据。
+- [x] 来源卡减为 3 个默认操作，专业能力收入高级管理。
+- [x] 共享 HelpTip 和集中术语表支持鼠标、触屏和键盘。
+- [x] 平台管理员和居民真实表单登录用例不再 skip。
+- [x] 修复无依据高风险问题召回无关电话/金额证据的问题。
+- [x] AI 105 项、Backend 75 项、两端 typecheck/build、Playwright 110 项通过；Docker 四服务 healthy。
+- [ ] `BLOCKED`：大场镇官网实时 discover 未在验收窗口返回，来源已恢复停用，没有创建材料或发布数据。
+- [ ] `DEVICE_ACCEPTANCE: PENDING_USER_MANUAL_CHECK`：仅剩 iPhone/Android 的触控、系统声音、拨号器和主观观感。
