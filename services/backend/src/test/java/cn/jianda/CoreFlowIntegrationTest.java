@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -72,10 +73,17 @@ class CoreFlowIntegrationTest {
         when(aiClient.extractText(any(Path.class), anyString(), anyString())).thenReturn(Map.of(
                 "text", "第一页真实正文\n第二页真实正文",
                 "page_count", 2,
+                "ocr_page_count", 1,
+                "extraction_method", "pymupdf+ocr",
+                "quality_pages", List.of(
+                        Map.of("page_no", 1, "quality", "GOOD", "selected_method", "pymupdf"),
+                        Map.of("page_no", 2, "quality", "POOR", "selected_method", "ocr")),
                 "segments", List.of(
                         Map.of("page_no", 1, "segment_no", 1, "text", "第一页真实正文",
+                                "raw_text", "第一页真实正文 原始",
                                 "start_offset", 0, "end_offset", 7),
                         Map.of("page_no", 2, "segment_no", 1, "text", "第二页真实正文",
+                                "raw_text", "第二页真实正文 原始",
                                 "start_offset", 8, "end_offset", 15))));
         when(aiClient.previewMetadata(any(Path.class), anyString(), anyString())).thenReturn(Map.of(
                 "title", "秋冬季流感疫苗集中接种登记说明",
@@ -220,12 +228,18 @@ class CoreFlowIntegrationTest {
         mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(pdf).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.raw_text").value("第一页真实正文\n第二页真实正文"))
-                .andExpect(jsonPath("$.data.page_count").value(2));
+                .andExpect(jsonPath("$.data.page_count").value(2))
+                .andExpect(jsonPath("$.data.extraction_method").value("pymupdf+ocr"))
+                .andExpect(jsonPath("$.data.ocr_page_count").value(1));
         mvc.perform(get("/api/documents/{id}/segments", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(2))
                 .andExpect(jsonPath("$.data[0].text").value("第一页真实正文"))
+                .andExpect(jsonPath("$.data[0].raw_text").value("第一页真实正文 原始"))
                 .andExpect(jsonPath("$.data[1].page_no").value(2));
+        String qualityJson = jdbc.queryForObject(
+                "SELECT extraction_quality_json FROM source_document WHERE id=?", String.class, documentId);
+        org.junit.jupiter.api.Assertions.assertTrue(qualityJson.contains("selected_method"));
 
         when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap())).thenReturn(Map.of(
                 "fields", List.of(Map.of(
@@ -486,8 +500,11 @@ class CoreFlowIntegrationTest {
             mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(image)
                             .header("Authorization", auth))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.file_name").value("材料." + extension));
+                    .andExpect(jsonPath("$.data.file_name").value("材料." + extension))
+                    .andExpect(jsonPath("$.data.extraction_method").value("pymupdf+ocr"))
+                    .andExpect(jsonPath("$.data.ocr_page_count").value(1));
         }
+        verify(aiClient, times(2)).extractText(any(Path.class), anyString(), anyString());
 
         String created = mvc.perform(post("/api/documents").header("Authorization", auth)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"非法格式验收\"}"))
@@ -499,6 +516,47 @@ class CoreFlowIntegrationTest {
                         .header("Authorization", auth))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("仅支持 PDF、PNG、JPG 文件"));
+    }
+
+    @Test
+    void deterministicRewriteFallbackRemainsReviewableAndPersistsStatus() throws Exception {
+        String auth = "Bearer " + login();
+        String created = mvc.perform(post("/api/documents").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"适老化降级验收\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+        mvc.perform(multipart("/api/documents/{id}/upload", documentId)
+                        .file(new MockMultipartFile("file", "降级.pdf", "application/pdf", "%PDF".getBytes()))
+                        .header("Authorization", auth).param("manualText", "办理地点：社区服务中心。"))
+                .andExpect(status().isOk());
+
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
+                .thenReturn(Map.ofEntries(
+                        Map.entry("fields", List.of()),
+                        Map.entry("summary", List.of("请到社区服务中心办理。")),
+                        Map.entry("plain_text", "请到社区服务中心办理。"),
+                        Map.entry("steps", List.of()),
+                        Map.entry("term_explanations", Map.of()),
+                        Map.entry("warnings", List.of()),
+                        Map.entry("audio_script", "请到社区服务中心办理。"),
+                        Map.entry("rewrite_mode", "DETERMINISTIC_FALLBACK"),
+                        Map.entry("normalization_applied", true),
+                        Map.entry("normalization_rules", List.of("action_checklist.priority"))));
+
+        mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.processing_status").value("WAITING_REVIEW"));
+        mvc.perform(get("/api/documents/{id}/jobs", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.data[0].reason_code").value("DETERMINISTIC_FALLBACK"));
+        Integer rewriteStatusCount = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM generated_content WHERE document_id=? AND content_type='REWRITE_STATUS'",
+                Integer.class, documentId);
+        org.junit.jupiter.api.Assertions.assertEquals(1, rewriteStatusCount);
     }
 
     private String login() throws Exception {

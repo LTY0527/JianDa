@@ -160,15 +160,18 @@ public class DocumentService {
         ExtractedDocument extracted = extractDocument(target, original, file.getContentType(), manualText);
         jdbc.update("DELETE FROM document_segment WHERE document_id=?", id);
         for (ExtractedSegment segment : extracted.segments()) {
-            jdbc.update("INSERT INTO document_segment(document_id,page_no,segment_no,text,start_offset,end_offset) VALUES (?,?,?,?,?,?)",
-                    id, segment.pageNo(), segment.segmentNo(), segment.text(), segment.startOffset(), segment.endOffset());
+            jdbc.update("INSERT INTO document_segment(document_id,page_no,segment_no,text,raw_text,start_offset,end_offset) VALUES (?,?,?,?,?,?,?)",
+                    id, segment.pageNo(), segment.segmentNo(), segment.text(), segment.rawText(),
+                    segment.startOffset(), segment.endOffset());
         }
         String mimeType = file.getContentType() == null ? mimeTypeFor(extension) : file.getContentType();
         jdbc.update("UPDATE source_document SET file_name=?,file_type=?,source_type=?,original_filename=?,mime_type=?,file_size=?,file_sha256=?,"
-                        + "storage_path=?,raw_text=?,page_count=?,extraction_method=?,processing_status='UPLOADED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        + "storage_path=?,raw_text=?,page_count=?,extraction_method=?,ocr_page_count=?,extraction_quality_json=?,"
+                        + "processing_status='UPLOADED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 original, mimeType, "pdf".equals(extension) ? "PDF" : "IMAGE",
                 original, mimeType, Files.size(target), sha256(target),
-                target.toString(), extracted.text(), extracted.pageCount(), extracted.method(), id);
+                target.toString(), extracted.text(), extracted.pageCount(), extracted.method(),
+                extracted.ocrPageCount(), extracted.qualityJson(), id);
         log(user, "UPLOAD_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
         return detail(id, user);
     }
@@ -367,6 +370,7 @@ public class DocumentService {
                 saveGenerated(id, "SOURCE_INFO", "来源信息", source, source.get("source_name"));
             }
             saveGenerated(id, "AUDIO_SCRIPT", "语音稿", null, result.get("audio_script"));
+            saveRewriteStatus(id, result);
             long persistenceMs = Math.max(0, (System.nanoTime() - persistenceStarted) / 1_000_000);
             Map<String, Object> metrics = result.get("metrics") instanceof Map<?, ?> rawMetrics
                     ? (Map<String, Object>) rawMetrics : Map.of();
@@ -374,12 +378,14 @@ public class DocumentService {
             long totalMs = metric(metrics, "total_ms") + persistenceMs;
             aiQueueService.settle(reservation, returnedActualTokens, true,
                     nullableString(metrics.get("provider")), nullableString(metrics.get("model")));
-            jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,"
+            jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,reason_code=?,"
                             + "schema_version=?,cache_hit=?,text_extract_ms=?,fact_extract_ms=?,trace_validation_ms=?,"
                             + "accessible_rewrite_ms=?,persistence_ms=?,total_ms=?,prompt_tokens=?,completion_tokens=?,"
                             + "total_tokens=?,source_char_count=?,accessible_char_count=?,summary_compression_ratio=?,"
                             + "key_fact_count=?,action_item_count=?,trace_pass_rate=?,hallucinated_field_count=?,"
                             + "markdown_residue_count=?,prompt_version=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    "DETERMINISTIC_FALLBACK".equals(result.get("rewrite_mode"))
+                            ? "DETERMINISTIC_FALLBACK" : null,
                     String.valueOf(metrics.getOrDefault("schema_version", "1.0")),
                     Boolean.TRUE.equals(metrics.get("cache_hit")),
                     metric(metrics, "text_extract_ms"),
@@ -690,9 +696,11 @@ public class DocumentService {
             returnedActualTokens = (int) metric(metrics, "total_tokens");
             aiQueueService.settle(reservation, returnedActualTokens, true,
                     nullableString(metrics.get("provider")), nullableString(metrics.get("model")));
-            jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,accessible_rewrite_ms=?,"
+            jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,reason_code=?,accessible_rewrite_ms=?,"
                             + "prompt_tokens=?,completion_tokens=?,total_tokens=?,provider_id=?,model_id=?,provider_request_id=?,"
                             + "response_fingerprint=?,crossed_provider_boundary=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    "DETERMINISTIC_FALLBACK".equals(result.get("rewrite_mode"))
+                            ? "DETERMINISTIC_FALLBACK" : null,
                     metric(metrics, "accessible_rewrite_ms"), metric(metrics, "prompt_tokens"),
                     metric(metrics, "completion_tokens"), metric(metrics, "total_tokens"),
                     diagnosticProvider, diagnosticModel, diagnosticRequestId, diagnosticFingerprint,
@@ -751,6 +759,17 @@ public class DocumentService {
         }
         if (result.get("warnings") != null) saveGenerated(id, "RISK_WARNING", "风险提示", result.get("warnings"), result.get("warnings"));
         saveGenerated(id, "AUDIO_SCRIPT", "语音稿", null, result.get("audio_script"));
+        saveRewriteStatus(id, result);
+    }
+
+    private void saveRewriteStatus(long id, Map<String, Object> result) {
+        if (!"DETERMINISTIC_FALLBACK".equals(result.get("rewrite_mode"))) return;
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("rewrite_mode", "DETERMINISTIC_FALLBACK");
+        status.put("normalization_applied", result.getOrDefault("normalization_applied", false));
+        status.put("normalization_rules", result.getOrDefault("normalization_rules", List.of()));
+        saveGenerated(id, "REWRITE_STATUS", "生成状态", status,
+                "已生成基础易读版本；AI自然化表达暂未成功，可稍后重新优化。");
     }
 
     public List<Map<String, Object>> jobs(long id, AuthUser user) {
@@ -1180,15 +1199,18 @@ public class DocumentService {
     private ExtractedDocument extractDocument(Path target, String fileName, String contentType, String manualText) {
         if (manualText != null && !manualText.isBlank()) {
             String text = manualText.trim();
-            return new ExtractedDocument(text, 1, "manual", List.of(new ExtractedSegment(1, 1, text, 0, text.length())));
+            return new ExtractedDocument(text, 1, "manual", 0, "[]",
+                    List.of(new ExtractedSegment(1, 1, text, text, 0, text.length())));
         }
-        if (!fileName.toLowerCase().endsWith(".pdf")) {
-            return new ExtractedDocument("", 1, "manual_required", List.of());
+        String lowerName = fileName.toLowerCase(java.util.Locale.ROOT);
+        if (!(lowerName.endsWith(".pdf") || lowerName.endsWith(".png")
+                || lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg"))) {
+            throw new BusinessException(400, "仅支持 PDF、PNG、JPG 文件");
         }
         Map<String, Object> result = aiClient.extractText(target, fileName, contentType);
         String text = String.valueOf(result.getOrDefault("text", "")).trim();
         if (text.isBlank()) {
-            throw new BusinessException(400, "PDF 未提取到可读文本，请检查文件是否为扫描件");
+            throw new BusinessException(400, "文件未提取到可读文本，请检查清晰度、页面方向或 OCR 语言包");
         }
         List<ExtractedSegment> segments = new ArrayList<>();
         for (Map<String, Object> item : (List<Map<String, Object>>) result.getOrDefault("segments", List.of())) {
@@ -1196,13 +1218,21 @@ public class DocumentService {
                     number(item.get("page_no")),
                     number(item.get("segment_no")),
                     String.valueOf(item.get("text")),
+                    String.valueOf(item.getOrDefault("raw_text", item.get("text"))),
                     number(item.get("start_offset")),
                     number(item.get("end_offset"))));
         }
         int pageCount = number(result.getOrDefault("page_count", segments.size()));
         String method = String.valueOf(result.getOrDefault("extraction_method", "pymupdf"));
         if (!Set.of("pymupdf", "ocr", "pymupdf+ocr").contains(method)) method = "unknown";
-        return new ExtractedDocument(text, pageCount, method, segments);
+        int ocrPageCount = number(result.getOrDefault("ocr_page_count", 0));
+        String qualityJson;
+        try {
+            qualityJson = objectMapper.writeValueAsString(result.getOrDefault("quality_pages", List.of()));
+        } catch (JsonProcessingException exception) {
+            qualityJson = "[]";
+        }
+        return new ExtractedDocument(text, pageCount, method, ocrPageCount, qualityJson, segments);
     }
 
     private List<PreparedField> prepareFields(long documentId, Map<String, Object> result) {
@@ -1317,9 +1347,11 @@ public class DocumentService {
         return value instanceof Number number ? number.intValue() : Integer.parseInt(String.valueOf(value));
     }
 
-    private record ExtractedDocument(String text, int pageCount, String method, List<ExtractedSegment> segments) {}
+    private record ExtractedDocument(String text, int pageCount, String method, int ocrPageCount,
+                                     String qualityJson, List<ExtractedSegment> segments) {}
 
-    private record ExtractedSegment(int pageNo, int segmentNo, String text, int startOffset, int endOffset) {}
+    private record ExtractedSegment(int pageNo, int segmentNo, String text, String rawText,
+                                    int startOffset, int endOffset) {}
 
     private record SourceTrace(long segmentId, int pageNo, String quote) {}
 

@@ -167,6 +167,55 @@ def test_mixed_pdf_only_ocr_scanned_page(monkeypatch) -> None:
         pdf_path.unlink(missing_ok=True)
 
 
+def test_thin_fake_text_layer_with_dominant_image_uses_ocr(monkeypatch) -> None:
+    pdf_path = Path(__file__).with_name("_generated-thin-layer.pdf")
+    try:
+        document = fitz.open()
+        page = document.new_page(width=595, height=842)
+        pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 900, 1200), False)
+        pixmap.clear_with(255)
+        page.insert_image(page.rect, stream=pixmap.tobytes("png"))
+        page.insert_text((20, 20), "fake")
+        document.save(pdf_path)
+        document.close()
+        monkeypatch.setattr(
+            extraction, "_ocr_page_text",
+            lambda page: "大场镇公开通知：请居民按时到社区服务中心办理。",
+        )
+
+        result = extract_file(pdf_path)
+
+        assert result.extraction_method == "ocr"
+        assert result.ocr_page_count == 1
+        assert result.quality_pages[0].selected_source == "OCR"
+        assert "社区服务中心" in result.text
+        assert result.segments[0].raw_text == "fake"
+    finally:
+        pdf_path.unlink(missing_ok=True)
+
+
+def test_png_upload_enters_real_ocr_pipeline(monkeypatch) -> None:
+    image_path = Path(__file__).with_name("_generated-notice.png")
+    try:
+        pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 800, 600), False)
+        pixmap.clear_with(255)
+        image_path.write_bytes(pixmap.tobytes("png"))
+        monkeypatch.setattr(
+            extraction, "_ocr_page_text",
+            lambda page: "图片通知：8月25日在大场镇社区服务中心办理。",
+        )
+
+        result = extract_file(image_path)
+
+        assert result.page_count == 1
+        assert result.extraction_method == "ocr"
+        assert result.ocr_page_count == 1
+        assert result.segments[0].page_no == 1
+        assert "8月25日" in result.text
+    finally:
+        image_path.unlink(missing_ok=True)
+
+
 def test_scanned_pdf_reports_local_ocr_failure(monkeypatch) -> None:
     pdf_path = Path(__file__).with_name("_generated-ocr-failure.pdf")
     try:
