@@ -13,10 +13,10 @@
 | 7 | 大场镇调度、10+ 高价值内容 | PARTIAL |
 | 8 | 全部登记官方来源图片候选/缓存开关与历史回填 | FAILED |
 | 9 | “立即检查”进度、结果、失败和下一步引导 | PARTIAL |
-| 10 | 助手 External 状态与邻里意图检索 | PARTIAL |
+| 10 | 助手 External 状态与邻里意图检索 | BLOCKED |
 | 11 | 办事卡片 Markdown/长文和视觉收口 | PARTIAL |
 | 12 | 居民独立登录注册、SmsProvider 抽象与图文帖子 | PARTIAL |
-| 13 | REAL E2E、截图、数字报告和最终门禁 | FAILED |
+| 13 | REAL E2E、截图、数字报告和最终门禁 | PARTIAL |
 
 ## 2026-08-23 续跑证据
 
@@ -34,3 +34,11 @@
 - 当前大场/宝山相关 WEB_ARTICLE 为 4，已发布 1；官方门户存在更多真实居民价值候选，但未未经确认批量保存、调用 AI 或发布，10+ 目标仍未达到。
 - WEB_ARTICLE 共 31，真实文章图/自定义封面 1，默认图或待补齐 30；缓存成功 1，候选 PENDING 1、APPROVED 1，覆盖率约 3.23%，任务 8 保持 FAILED。
 - 详细证据见 `PHASE9_8_CRAWL_RELIABILITY_REPORT.md` 与 `PHASE9_8_IMAGE_BACKFILL_REPORT.md`。
+
+## 2026-08-24 真实 Browser / Gate 复核
+
+- 真实 Assistant Playwright：高风险无依据拒答 1 项通过；上下文 External 组合因当日 `BUDGET_LIMIT` 全部 retrieval fallback，任务 10 调整为 BLOCKED。
+- 真实 H5 居民浏览器：独立注册、PNG 上传、带图发帖和 feed 可见通过；MySQL 记录真实非 DEMO 帖子 ID 6、1 条 PNG 媒体。点赞/评论/举报/治理同帖闭环未执行，任务 12 保持 PARTIAL。
+- 部署管理员隐藏/恢复 mock 回归 1 passed，不计 REAL；真实 Admin 凭据未注入，任务 13 调整为 PARTIAL、Admin Gate 保持 BLOCKED。
+- 公开内容浏览验收中，官方封面和多视口字号通过；真实文档 67 端到端因平台密码缺失跳过。
+- 七项 Gate 和证据见 `PHASE9_8_REAL_ACCEPTANCE_REPORT.md`、`PHASE9_8_ASSISTANT_REPORT.md`、`PHASE9_8_UX_REPORT.md`。
