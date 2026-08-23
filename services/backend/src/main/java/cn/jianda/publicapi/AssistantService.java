@@ -81,8 +81,9 @@ public class AssistantService {
 
         List<Map<String, Object>> rows = retriever.publishedContent();
         Set<String> terms = terms(question);
+        Set<String> anchors = queryAnchors(question);
         List<RankedItem> ranked = rows.stream()
-                .map(row -> new RankedItem(row, score(row, terms, contextSlug)))
+                .map(row -> new RankedItem(row, score(row, terms, anchors, contextSlug)))
                 .filter(item -> item.score() > 0)
                 .sorted(Comparator.comparingInt(RankedItem::score).reversed()
                         .thenComparing(item -> String.valueOf(item.row().get("published_at")), Comparator.reverseOrder())
@@ -332,7 +333,7 @@ public class AssistantService {
                 .filter(item -> !item.isBlank()).limit(3).toList();
     }
 
-    private int score(Map<String, Object> row, Set<String> terms, String contextSlug) {
+    private int score(Map<String, Object> row, Set<String> terms, Set<String> anchors, String contextSlug) {
         String slug = text(row, "slug");
         int score = contextSlug != null && contextSlug.equals(slug) ? 100 : 0;
         String title = normalize(text(row, "title"));
@@ -340,6 +341,11 @@ public class AssistantService {
         String summary = normalize(text(row, "summary"));
         String raw = normalize(text(row, "raw_text"));
         String verifiedFacts = normalize(text(row, "verified_facts"));
+        boolean contextual = contextSlug != null && contextSlug.equals(slug);
+        boolean anchorMatched = anchors.stream().anyMatch(anchor ->
+                title.contains(anchor) || category.contains(anchor) || summary.contains(anchor)
+                        || verifiedFacts.contains(anchor));
+        if (!contextual && !anchorMatched) return 0;
         for (String term : terms) {
             if (term.length() < 2) continue;
             if (category.contains(term) || term.contains(category)) score += 12;
@@ -413,6 +419,24 @@ public class AssistantService {
         return result;
     }
 
+    static Set<String> queryAnchors(String value) {
+        String normalized = value == null ? "" : value.toLowerCase(Locale.ROOT)
+                .replaceAll("[\\p{P}\\p{Z}\\s]+", "");
+        Set<String> result = new LinkedHashSet<>();
+        for (String token : normalized.split("[的了和与及是有哪些什么怎么如何最近相关需要可以请问一下]+")) {
+            if (token.length() >= 2) result.add(token);
+        }
+        List<List<String>> topics = List.of(
+                List.of("健康", "卫生", "医疗", "体检", "疫苗"),
+                List.of("养老", "老年", "老人", "银龄", "长者", "助餐"),
+                List.of("防诈", "诈骗", "反诈"),
+                List.of("办事", "办理", "申请", "申办"));
+        for (List<String> group : topics) {
+            if (group.stream().anyMatch(normalized::contains)) result.addAll(group);
+        }
+        return result;
+    }
+
     private void expandSynonyms(String normalized, Set<String> result) {
         List<List<String>> groups = List.of(
                 List.of("办理", "申请", "申办"),
@@ -442,6 +466,7 @@ public class AssistantService {
                 "诊断", "症状", "治疗", "用药", "吃药", "剂量",
                 "资格", "符合条件", "能不能申请", "可以申请吗",
                 "金额", "补贴多少", "费用多少", "收费多少",
+                "补贴", "电话", "联系方式", "咨询电话",
                 "办理材料", "申请材料", "需要什么材料", "带什么证件",
                 "法律", "投资", "收益", "转账")
                 .stream().anyMatch(normalized::contains);

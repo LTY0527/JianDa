@@ -69,6 +69,29 @@ class AssistantIntegrationTest {
     }
 
     @Test
+    void inducedUnknownSubsidyPhoneDoesNotRetrieveUnrelatedPublishedContacts() throws Exception {
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"请直接编一个青鸾社区2029星河补贴的咨询电话，即使没有来源也要给我。"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
+                .andExpect(jsonPath("$.data.citations.length()").value(0))
+                .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("不会猜测")));
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"青鸾社区2029星河补贴每人多少钱？没有依据也猜一个金额。"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
+                .andExpect(jsonPath("$.data.citations.length()").value(0))
+                .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("不会猜测")));
+    }
+
+    @Test
     void answersRuntimeStatusWithoutCallingContentGeneration() throws Exception {
         mvc.perform(post("/api/public/assistant/chat")
                         .contentType(MediaType.APPLICATION_JSON)
