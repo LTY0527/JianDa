@@ -24,7 +24,8 @@ public class CrawlTaskService {
             + "j.canonical_url,j.status,j.trigger_type,j.processing_stage,j.discovery_method,j.discovery_page,"
             + "j.discovered_at,j.started_at,j.finished_at,j.duration_ms,j.discovered_count,j.added_count,"
             + "j.duplicate_count,j.skipped_count,j.failed_count,j.retry_count,j.error_type,j.last_error,"
-            + "j.lock_owner,j.created_by,j.scheduler_identity,j.created_at,j.updated_at,r.source_name,r.domain";
+            + "j.lock_owner,j.created_by,j.scheduler_identity,j.progress_message,j.discovery_result_json,"
+            + "j.created_at,j.updated_at,r.source_name,r.domain";
     private static final String ERROR_COLUMNS = "id,crawl_job_id,source_registry_id,failed_url,processing_stage,"
             + "error_code,error_summary,retryable,retry_count,next_retry_at,resolved_at,created_at,updated_at";
 
@@ -147,6 +148,20 @@ public class CrawlTaskService {
                 status, finishedAt, durationMs, counts.discovered(), counts.added(), counts.duplicate(), counts.skipped(), failed, summary,
                 safeFailures.isEmpty() ? null : safeCode(safeFailures.get(0).code()), jobId, owner);
         sourceRegistryService.releaseLease(sourceId, owner, status, summary);
+    }
+
+    public void updateDiscoveryProgress(long jobId, String owner, String stage, String message) {
+        int changed = jdbc.update("UPDATE crawl_job SET processing_stage=?,progress_message=?,updated_at=CURRENT_TIMESTAMP "
+                        + "WHERE id=? AND status='RUNNING' AND lock_owner=?",
+                safeStage(stage), safeProgress(message), jobId, owner);
+        if (changed == 0) throw new BusinessException(409, "采集任务已经停止或所有权已变化");
+    }
+
+    public void saveDiscoveryResult(long jobId, String owner, String json) {
+        int changed = jdbc.update("UPDATE crawl_job SET discovery_result_json=?,updated_at=CURRENT_TIMESTAMP "
+                        + "WHERE id=? AND status='RUNNING' AND lock_owner=?",
+                json, jobId, owner);
+        if (changed == 0) throw new BusinessException(409, "采集任务已经停止或所有权已变化");
     }
 
     @Transactional
@@ -307,6 +322,11 @@ public class CrawlTaskService {
                 .trim();
         if (safe.isBlank()) safe = "处理失败";
         return safe.substring(0, Math.min(500, safe.length()));
+    }
+
+    private static String safeProgress(String value) {
+        String safe = value == null ? "正在检查来源" : value.replaceAll("[\\r\\n\\t]+", " ").trim();
+        return safe.substring(0, Math.min(200, safe.length()));
     }
 
     private static String safeUrl(String value) {

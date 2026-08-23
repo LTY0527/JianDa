@@ -20,12 +20,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class SourceRegistryController {
     private final SourceRegistryService service;
     private final ArticleDiscoveryService discoveryService;
+    private final ArticleDiscoveryJobService discoveryJobService;
     private final WebArticleService webArticleService;
 
     public SourceRegistryController(SourceRegistryService service, ArticleDiscoveryService discoveryService,
+                                    ArticleDiscoveryJobService discoveryJobService,
                                     WebArticleService webArticleService) {
         this.service = service;
         this.discoveryService = discoveryService;
+        this.discoveryJobService = discoveryJobService;
         this.webArticleService = webArticleService;
     }
 
@@ -98,6 +101,20 @@ public class SourceRegistryController {
                 new ArticleDiscoveryService.DiscoveryOptions(
                         request.recentDays(), request.maxArticles(), request.includeKeywords(),
                         request.excludeKeywords(), request.onlyUnimported())));
+    }
+
+    @PostMapping("/{id}/discover-jobs")
+    public ApiResponse<Map<String, Object>> startDiscoveryJob(
+            @PathVariable long id, @RequestBody DiscoveryRequest request) {
+        return ApiResponse.ok(discoveryJobService.start(id, request.method(), request.entryUrl(),
+                new ArticleDiscoveryService.DiscoveryOptions(
+                        request.recentDays(), request.maxArticles(), request.includeKeywords(),
+                        request.excludeKeywords(), request.onlyUnimported()), UserContext.current()));
+    }
+
+    @GetMapping("/discover-jobs/{jobId}")
+    public ApiResponse<Map<String, Object>> discoveryJob(@PathVariable long jobId) {
+        return ApiResponse.ok(discoveryJobService.detail(jobId));
     }
 
     @PostMapping("/{id}/shadow")

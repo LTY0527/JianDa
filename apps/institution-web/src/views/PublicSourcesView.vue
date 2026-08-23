@@ -34,6 +34,8 @@ const taskSourceId = ref<number | undefined>();
 const retrying = ref<number | null>(null);
 const operatingSourceId = ref<number | null>(null);
 const discoveryResult = ref<{ source: WebSourceRegistry; data: ArticleDiscoveryResult } | null>(null);
+const discoveryJob = ref<CrawlJob | null>(null);
+const activeDiscoverySource = ref<WebSourceRegistry | null>(null);
 const shadowPreview = ref<{
   source: WebSourceRegistry;
   article: ArticleDiscoveryCandidate;
@@ -87,6 +89,7 @@ const backfillForm = reactive({
 const backfillPreview = ref<{ total: number; byType: Record<string, number> } | null>(null);
 const backfillJob = ref<CoverBackfillJob | null>(null);
 let backfillTimer: ReturnType<typeof setTimeout> | null = null;
+let discoveryTimer: ReturnType<typeof setTimeout> | null = null;
 const form = reactive({ name: "", type: "GOVERNMENT", url: "https://", publisher: "", notes: "" });
 const registryForm = reactive<SourceRegistryPayload>({
   name: "", domain: "", allowedHosts: "", type: "PUBLIC_INSTITUTION", authorityLevel: "B",
@@ -336,21 +339,59 @@ async function discoverArticles(source: WebSourceRegistry) {
   error.value = "";
   operationMessage.value = "";
   shadowPreview.value = null;
+  activeDiscoverySource.value = source;
+  discoveryJob.value = null;
   try {
     const entry = discoveryEntry(source);
-    const response = await publicSourceApi.discoverRegistryArticles(source.id, {
+    const response = await publicSourceApi.startRegistryDiscoveryJob(source.id, {
       method: entry.method,
       entryUrl: entry.entryUrl,
       ...scanForm,
     });
-    discoveryResult.value = { source, data: response.data.data };
-    selectedUrls.value = [];
-    operationMessage.value = `发现完成：${response.data.data.candidates.length} 个 URL，未创建材料、未调用 AI。`;
+    applyDiscoveryJob(response.data.data);
   } catch (cause) {
     error.value = apiMessage(cause);
-  } finally {
     operatingSourceId.value = null;
   }
+}
+
+function applyDiscoveryJob(job: CrawlJob) {
+  discoveryJob.value = job;
+  if (job.status === "PENDING" || job.status === "RUNNING") {
+    operationMessage.value = job.progress_message || `正在检查“${activeDiscoverySource.value?.source_name || "官方来源"}”`;
+    if (discoveryTimer) clearTimeout(discoveryTimer);
+    discoveryTimer = setTimeout(() => pollDiscoveryJob(job.id), 1200);
+    return;
+  }
+  operatingSourceId.value = null;
+  if ((job.status === "SUCCESS" || job.status === "PARTIAL_SUCCESS") && job.discoveryResult && activeDiscoverySource.value) {
+    discoveryResult.value = { source: activeDiscoverySource.value, data: job.discoveryResult };
+    selectedUrls.value = [];
+    operationMessage.value = `检查完成：发现 ${job.discovered_count} 篇，已有 ${job.duplicate_count} 篇，新增 ${job.added_count} 篇。未创建材料、未调用 AI。`;
+  } else if (job.status === "FAILED") {
+    operationMessage.value = "";
+  }
+  void load();
+}
+
+async function pollDiscoveryJob(jobId: number) {
+  try {
+    const response = await publicSourceApi.registryDiscoveryJob(jobId);
+    applyDiscoveryJob(response.data.data);
+  } catch (cause) {
+    operatingSourceId.value = null;
+    error.value = apiMessage(cause);
+  }
+}
+
+function failureAdvice(code?: string) {
+  if (["CONNECT_TIMEOUT", "READ_TIMEOUT", "DNS_FAILED", "HTTP_429", "HTTP_5XX", "ROBOTS_UNAVAILABLE"].includes(code || "")) {
+    return "系统会保留失败记录，可稍后重新检查；也可以直接粘贴官方文章地址继续工作。";
+  }
+  if (code === "DYNAMIC_PAGE_SUSPECTED" || code === "NO_ARTICLE_LINKS" || code === "PARSER_UNSUPPORTED") {
+    return "可改用具体文章 URL、粘贴正文或上传官方 PDF，不必等待自动扫描修复。";
+  }
+  return "请核对来源入口配置，或改用手动导入文章。";
 }
 
 function selectAllUnimported() {
@@ -530,6 +571,7 @@ async function collectArticle(source: WebSourceRegistry, article: ArticleDiscove
 onMounted(load);
 onUnmounted(() => {
   if (backfillTimer) clearTimeout(backfillTimer);
+  if (discoveryTimer) clearTimeout(discoveryTimer);
 });
 </script>
 
@@ -539,6 +581,22 @@ onUnmounted(() => {
       <button class="btn primary" @click="openNewSource"><Plus :size="17" />新增来源</button>
     </PageHeader>
     <div v-if="error" class="inline-error">{{ error }}</div>
+    <section v-if="discoveryJob?.status === 'PENDING' || discoveryJob?.status === 'RUNNING'" class="source-operation-state running" aria-live="polite">
+      <RefreshCw class="spin" :size="22" />
+      <div><b>{{ discoveryJob.progress_message || "正在连接官网" }}</b><p>检查任务 #{{ discoveryJob.id }} 已在后台运行，可以留在当前页面查看结果。</p></div>
+    </section>
+    <section v-if="discoveryJob?.status === 'FAILED'" class="source-operation-state failed" role="alert">
+      <div>
+        <b>本次检查没有完成</b>
+        <p>原因：{{ discoveryJob.errors?.[0]?.error_summary || discoveryJob.last_error || "官网暂时无法读取" }}</p>
+        <small>{{ failureAdvice(discoveryJob.errors?.[0]?.error_code) }}</small>
+        <details v-if="discoveryJob.errors?.[0]?.error_code"><summary>查看技术原因</summary><code>{{ discoveryJob.errors[0].error_code }}</code></details>
+      </div>
+      <div class="source-operation-actions">
+        <button class="btn primary" type="button" :disabled="!activeDiscoverySource" @click="activeDiscoverySource && discoverArticles(activeDiscoverySource)">重新检查</button>
+        <button class="btn secondary" type="button" @click="activeSection = 'scan'; showAdvanced = true">手动导入文章</button>
+      </div>
+    </section>
 
     <section class="source-overview" aria-label="自动采集来源">
       <article v-for="source in registries" :key="source.id" class="source-card">
@@ -913,6 +971,26 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.source-operation-state {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  border: 1px solid #c9ddd8;
+  border-radius: 10px;
+  background: #f2f8f6;
+}
+.source-operation-state b { color: #174f45; }
+.source-operation-state p { margin: 6px 0; line-height: 1.6; }
+.source-operation-state small { color: #53645f; line-height: 1.6; }
+.source-operation-state.failed { border-color: #e9c8bc; background: #fff7f3; }
+.source-operation-state.failed b { color: #8a321f; }
+.source-operation-state details { margin-top: 9px; font-size: 12px; }
+.source-operation-state code { display: inline-block; margin-top: 5px; }
+.source-operation-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.spin { animation: spin 1.2s linear infinite; color: var(--color-primary); flex: 0 0 auto; }
 .source-overview {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1077,6 +1155,8 @@ onUnmounted(() => {
 }
 
 @media (max-width: 720px) {
+  .source-operation-state { flex-direction: column; }
+  .source-operation-actions { width: 100%; flex-wrap: wrap; }
   .source-overview { grid-template-columns: 1fr; }
   .source-card dl { grid-template-columns: 1fr; }
   .source-card footer { align-items: flex-start; flex-wrap: wrap; }

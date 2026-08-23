@@ -319,6 +319,9 @@ export interface CrawlJob {
   lock_owner?: string;
   created_by?: number;
   scheduler_identity?: string;
+  progress_message?: string;
+  discoveryResult?: ArticleDiscoveryResult;
+  existing?: boolean;
   errors?: CrawlJobError[];
 }
 
@@ -417,6 +420,17 @@ export const publicSourceApi = {
     http.post<ApiResponse<ArticleDiscoveryResult>>(`/source-registries/${id}/discover`, {
       ...payload,
     }),
+  startRegistryDiscoveryJob: (id: number, payload: {
+    method: string;
+    entryUrl: string;
+    recentDays: number;
+    maxArticles: number;
+    includeKeywords: string;
+    excludeKeywords: string;
+    onlyUnimported: boolean;
+  }) => http.post<ApiResponse<CrawlJob>>(`/source-registries/${id}/discover-jobs`, payload),
+  registryDiscoveryJob: (jobId: number) =>
+    http.get<ApiResponse<CrawlJob>>(`/source-registries/discover-jobs/${jobId}`),
   shadowRegistryArticle: (id: number, url: string) =>
     http.post<ApiResponse<WebArticlePreview>>(`/source-registries/${id}/shadow`, { url }),
   collectRegistryArticle: (id: number, url: string) =>

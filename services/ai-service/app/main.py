@@ -30,7 +30,7 @@ from app.models import (
 )
 from app.providers import ExternalLlmProvider, LlmProvider, MockProvider
 from app.providers.external import ExternalProviderError
-from app.article_discovery import DiscoverySource, discover_articles
+from app.article_discovery import DiscoveryFailure, DiscoverySource, discover_articles
 from app.web_ingest import preview_web_article, download_validated_image
 
 app = FastAPI(title="简达 AI 服务", version="0.1.0")
@@ -247,8 +247,13 @@ async def article_discovery(request: ArticleDiscoveryRequest) -> ArticleDiscover
             errors=result.errors,
             filtered_navigation_count=result.filtered_navigation_count,
         )
+    except DiscoveryFailure as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail()) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+        raise HTTPException(status_code=403, detail={
+            "error_code": "ROBOTS_DENIED", "message": str(exc),
+            "retryable": False, "stage": "DISCOVERY",
+        }) from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

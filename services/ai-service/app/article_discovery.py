@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
 import re
+import random
+import socket
+import ssl
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -23,6 +27,7 @@ MAX_CANDIDATES = 100
 MAX_SITEMAP_CHILDREN = 20
 MAX_SECTION_LINKS = 200
 MAX_REDIRECTS = 5
+RETRY_DELAY_RANGES = ((2.0, 5.0), (10.0, 20.0), (30.0, 60.0))
 ARTICLE_TYPES = {"Article", "NewsArticle", "ReportageNewsArticle", "BlogPosting"}
 ARTICLE_PATH_PATTERN = re.compile(
     r"(?:^|[-_/])(article|detail|content|news|notice|view|story|post)(?:[-_/.]|$)", re.IGNORECASE
@@ -73,6 +78,96 @@ class DiscoveryResult:
     candidates: list[ArticleCandidate] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     filtered_navigation_count: int = 0
+
+
+class DiscoveryFailure(RuntimeError):
+    """Safe, stable failure contract shared with the operations UI."""
+
+    def __init__(self, code: str, message: str, *, retryable: bool, status_code: int = 502) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.status_code = status_code
+
+    def detail(self) -> dict[str, object]:
+        return {
+            "error_code": self.code,
+            "message": self.message,
+            "retryable": self.retryable,
+            "stage": "DISCOVERY",
+        }
+
+
+def _contains_cause(exc: BaseException, expected: type[BaseException]) -> bool:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, expected):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _network_failure(exc: BaseException) -> DiscoveryFailure:
+    if isinstance(exc, httpx.ConnectTimeout):
+        return DiscoveryFailure("CONNECT_TIMEOUT", "官网连接超时", retryable=True)
+    if isinstance(exc, httpx.ReadTimeout):
+        return DiscoveryFailure("READ_TIMEOUT", "官网响应读取超时", retryable=True)
+    if isinstance(exc, httpx.TooManyRedirects):
+        return DiscoveryFailure("REDIRECT_LIMIT", "官网重定向次数过多", retryable=False, status_code=400)
+    if _contains_cause(exc, socket.gaierror):
+        return DiscoveryFailure("DNS_FAILED", "官网域名暂时无法解析", retryable=True)
+    if _contains_cause(exc, ssl.SSLError):
+        return DiscoveryFailure("TLS_FAILED", "官网安全连接验证失败", retryable=True)
+    if isinstance(exc, httpx.ConnectError):
+        return DiscoveryFailure("CONNECT_TIMEOUT", "暂时无法连接官网", retryable=True)
+    return DiscoveryFailure("READ_TIMEOUT", "读取官网内容时连接中断", retryable=True)
+
+
+async def _retry_wait(attempt: int) -> None:
+    low, high = RETRY_DELAY_RANGES[min(attempt, len(RETRY_DELAY_RANGES) - 1)]
+    await asyncio.sleep(random.uniform(low, high))
+
+
+async def _send_with_retry(request: httpx.Request) -> httpx.Response:
+    last_failure: DiscoveryFailure | None = None
+    for attempt in range(len(RETRY_DELAY_RANGES) + 1):
+        try:
+            response = await _client().send(request, stream=True, follow_redirects=False)
+        except httpx.TransportError as exc:
+            last_failure = _network_failure(exc)
+            if not last_failure.retryable or attempt >= len(RETRY_DELAY_RANGES):
+                raise last_failure from exc
+            await _retry_wait(attempt)
+            continue
+        if response.status_code == 429 or response.status_code >= 500:
+            if attempt < len(RETRY_DELAY_RANGES):
+                await response.aclose()
+                await _retry_wait(attempt)
+                continue
+        return response
+    raise last_failure or DiscoveryFailure("READ_TIMEOUT", "读取官网内容时连接中断", retryable=True)
+
+
+async def _read_robots_with_retry(url: str, rate_limit_seconds: int) -> tuple[bool, str]:
+    last_transport: BaseException | None = None
+    for attempt in range(len(RETRY_DELAY_RANGES) + 1):
+        try:
+            allowed, status = await _robots(url, rate_limit_seconds)
+            if allowed or status.startswith(("DENIED", "DISALLOWED")):
+                return allowed, status
+            if not status.startswith("UNAVAILABLE") or attempt >= len(RETRY_DELAY_RANGES):
+                return allowed, status
+        except (httpx.TransportError, socket.gaierror) as exc:
+            last_transport = exc
+            if attempt >= len(RETRY_DELAY_RANGES):
+                raise
+        await _retry_wait(attempt)
+    if last_transport:
+        raise last_transport
+    return False, "UNAVAILABLE"
 
 
 class _SectionParser(HTMLParser):
@@ -373,20 +468,37 @@ async def _bounded_fetch(url: str, source: DiscoverySource) -> tuple[bytes, str,
     current = normalize_url(url)
     for redirect_count in range(MAX_REDIRECTS + 1):
         if not _same_origin(current, source):
-            raise ValueError("请求地址不属于已启用白名单来源")
-        await _assert_public_host(current)
+            raise DiscoveryFailure(
+                "CROSS_DOMAIN_BLOCKED", "官网跳转到了未登记域名，已停止访问",
+                retryable=False, status_code=400,
+            )
+        try:
+            await _assert_public_host(current)
+        except socket.gaierror as exc:
+            raise DiscoveryFailure("DNS_FAILED", "官网域名暂时无法解析", retryable=True) from exc
         await _rate_limit(source.origin_host, source.rate_limit_seconds)
         request = _client().build_request("GET", current, headers={"User-Agent": USER_AGENT})
-        response = await _client().send(request, stream=True, follow_redirects=False)
+        response = await _send_with_retry(request)
         try:
             if response.status_code in {301, 302, 303, 307, 308}:
                 if redirect_count >= MAX_REDIRECTS:
-                    raise ValueError("重定向次数超过限制")
+                    raise DiscoveryFailure(
+                        "REDIRECT_LIMIT", "官网重定向次数过多", retryable=False, status_code=400,
+                    )
                 location = response.headers.get("location")
                 if not location:
                     raise ValueError("重定向缺少目标地址")
                 current = normalize_url(location, current)
                 continue
+            status = response.status_code
+            if status == 403:
+                raise DiscoveryFailure("HTTP_403", "官网拒绝了本次访问", retryable=False, status_code=403)
+            if status == 404:
+                raise DiscoveryFailure("HTTP_404", "配置的官网入口不存在", retryable=False, status_code=404)
+            if status == 429:
+                raise DiscoveryFailure("HTTP_429", "官网访问频率受限，系统将稍后重试", retryable=True, status_code=429)
+            if status >= 500:
+                raise DiscoveryFailure("HTTP_5XX", "官网服务暂时异常", retryable=True)
             response.raise_for_status()
             declared = int(response.headers.get("content-length", "0") or 0)
             if declared > MAX_DISCOVERY_BYTES:
@@ -401,32 +513,69 @@ async def _bounded_fetch(url: str, source: DiscoverySource) -> tuple[bytes, str,
             return b"".join(chunks), current, response.headers.get("content-type", "")
         finally:
             await response.aclose()
-    raise ValueError("重定向次数超过限制")
+    raise DiscoveryFailure("REDIRECT_LIMIT", "官网重定向次数过多", retryable=False, status_code=400)
 
 
 async def discover_articles(source: DiscoverySource, entry_url: str, method: str) -> DiscoveryResult:
     normalized = normalize_url(entry_url)
     if not _same_origin(normalized, source):
         raise ValueError("发现入口不属于已启用白名单来源")
-    allowed, robots_status = await _robots(normalized, source.rate_limit_seconds)
+    try:
+        allowed, robots_status = await _read_robots_with_retry(normalized, source.rate_limit_seconds)
+    except httpx.TransportError as exc:
+        failure = _network_failure(exc)
+        raise DiscoveryFailure(
+            "ROBOTS_UNAVAILABLE", "官网访问规则暂时无法读取，系统将稍后重试",
+            retryable=True,
+        ) from failure
+    except socket.gaierror as exc:
+        raise DiscoveryFailure("DNS_FAILED", "官网域名暂时无法解析", retryable=True) from exc
     if not allowed:
-        raise PermissionError(f"robots.txt 不允许发现：{robots_status}")
+        code = "ROBOTS_DENIED" if robots_status.startswith(("DENIED", "DISALLOWED")) else "ROBOTS_UNAVAILABLE"
+        raise DiscoveryFailure(
+            code,
+            "官网公开访问规则不允许采集" if code == "ROBOTS_DENIED" else "官网访问规则暂时不可用",
+            retryable=code == "ROBOTS_UNAVAILABLE",
+            status_code=403 if code == "ROBOTS_DENIED" else 502,
+        )
     content, final_url, content_type = await _bounded_fetch(normalized, source)
+    if not content.strip():
+        raise DiscoveryFailure("EMPTY_HTML", "官网返回了空页面", retryable=True)
     selected = method.upper()
-    if selected in {"RSS", "ATOM"}:
-        return parse_feed(content, final_url, source)
-    if selected == "SITEMAP":
-        result, children = parse_sitemap(content, final_url, source)
-        for child in children:
-            try:
-                child_content, child_url, _ = await _bounded_fetch(child, source)
-                child_result, _ = parse_sitemap(child_content, child_url, source)
-                result.candidates.extend(child_result.candidates)
-                result.errors.extend(child_result.errors)
-                result.filtered_navigation_count += child_result.filtered_navigation_count
-            except (httpx.HTTPError, ValueError) as exc:
-                result.errors.append(str(exc))
-        return _deduplicate(result)
-    if selected in {"JSON_LD", "SECTION", "MIXED"} or "html" in content_type.lower():
-        return parse_html(content, final_url, source)
-    raise ValueError("发现方式与响应内容不匹配")
+    try:
+        if selected in {"RSS", "ATOM"}:
+            result = parse_feed(content, final_url, source)
+        elif selected == "SITEMAP":
+            result, children = parse_sitemap(content, final_url, source)
+            for child in children:
+                try:
+                    child_content, child_url, _ = await _bounded_fetch(child, source)
+                    child_result, _ = parse_sitemap(child_content, child_url, source)
+                    result.candidates.extend(child_result.candidates)
+                    result.errors.extend(child_result.errors)
+                    result.filtered_navigation_count += child_result.filtered_navigation_count
+                except (DiscoveryFailure, ValueError) as exc:
+                    result.errors.append(str(exc))
+            result = _deduplicate(result)
+        elif selected in {"JSON_LD", "SECTION", "MIXED"} or "html" in content_type.lower():
+            result = parse_html(content, final_url, source)
+        else:
+            raise DiscoveryFailure(
+                "PARSER_UNSUPPORTED", "当前入口格式暂不支持自动识别",
+                retryable=False, status_code=400,
+            )
+    except DiscoveryFailure:
+        raise
+    except ValueError as exc:
+        raise DiscoveryFailure(
+            "PARSER_UNSUPPORTED", "官网内容格式暂时无法识别",
+            retryable=False, status_code=400,
+        ) from exc
+    if not result.candidates:
+        dynamic = b"__NEXT_DATA__" in content or b"webpack" in content.lower() or b"window.__" in content
+        raise DiscoveryFailure(
+            "DYNAMIC_PAGE_SUSPECTED" if dynamic else "NO_ARTICLE_LINKS",
+            "页面可能需要浏览器执行脚本后才能显示文章" if dynamic else "本次没有识别到文章链接",
+            retryable=False, status_code=422,
+        )
+    return result

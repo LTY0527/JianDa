@@ -1,6 +1,7 @@
 package cn.jianda.collector;
 
 import cn.jianda.ai.AiClient;
+import cn.jianda.ai.AiServiceException;
 import cn.jianda.common.BusinessException;
 import java.net.URI;
 import java.util.ArrayList;
@@ -46,8 +47,14 @@ public class ArticleDiscoveryService {
         try {
             response = aiClient.discoverArticles(sourceId, String.valueOf(source.get("homepage_url")), selectedEntry,
                     selectedMethod, ((Number) source.get("rate_limit")).intValue());
+        } catch (AiServiceException exception) {
+            String reasonCode = safeReasonCode(exception.stringValue("error_code"));
+            String message = humanMessage(reasonCode, exception.getMessage());
+            throw new DiscoveryFailureException(
+                    exception.status(), reasonCode, message, exception.booleanValue("retryable"));
         } catch (RuntimeException exception) {
-            throw new BusinessException(502, "文章发现入口暂时无法访问或解析");
+            throw new DiscoveryFailureException(
+                    502, "READ_TIMEOUT", "读取官网内容时连接中断", true);
         }
         Object rawCandidates = response.get("candidates");
         SanitizedCandidates sanitized = rawCandidates instanceof List<?> list
@@ -221,6 +228,39 @@ public class ArticleDiscoveryService {
     private static String safeError(List<?> errors) {
         String value = errors.stream().limit(3).map(String::valueOf).reduce((a, b) -> a + "；" + b).orElse("");
         return value.length() > 500 ? value.substring(0, 500) : value;
+    }
+
+    private static String safeReasonCode(String value) {
+        String normalized = value == null ? "" : value.replaceAll("[^A-Za-z0-9_]", "_")
+                .toUpperCase(Locale.ROOT);
+        return Set.of("ROBOTS_DENIED", "ROBOTS_UNAVAILABLE", "DNS_FAILED", "CONNECT_TIMEOUT",
+                "READ_TIMEOUT", "TLS_FAILED", "HTTP_403", "HTTP_404", "HTTP_429", "HTTP_5XX",
+                "REDIRECT_LIMIT", "CROSS_DOMAIN_BLOCKED", "EMPTY_HTML", "NO_ARTICLE_LINKS",
+                "PARSER_UNSUPPORTED", "DYNAMIC_PAGE_SUSPECTED").contains(normalized)
+                ? normalized : "PARSER_UNSUPPORTED";
+    }
+
+    private static String humanMessage(String code, String fallback) {
+        return switch (code) {
+            case "ROBOTS_DENIED" -> "官网公开访问规则不允许采集";
+            case "ROBOTS_UNAVAILABLE" -> "官网访问规则暂时无法读取";
+            case "DNS_FAILED" -> "官网域名暂时无法解析";
+            case "CONNECT_TIMEOUT" -> "官网连接超时";
+            case "READ_TIMEOUT" -> "官网响应读取超时";
+            case "TLS_FAILED" -> "官网安全连接验证失败";
+            case "HTTP_403" -> "官网拒绝了本次访问";
+            case "HTTP_404" -> "配置的官网入口不存在";
+            case "HTTP_429" -> "官网访问频率受限，系统将稍后重试";
+            case "HTTP_5XX" -> "官网服务暂时异常";
+            case "REDIRECT_LIMIT" -> "官网重定向次数过多";
+            case "CROSS_DOMAIN_BLOCKED" -> "官网跳转到了未登记域名，已停止访问";
+            case "EMPTY_HTML" -> "官网返回了空页面";
+            case "NO_ARTICLE_LINKS" -> "本次没有识别到文章链接";
+            case "DYNAMIC_PAGE_SUSPECTED" -> "页面可能需要浏览器执行脚本后才能显示文章";
+            case "PARSER_UNSUPPORTED" -> fallback == null || fallback.isBlank()
+                    ? "当前入口格式暂不支持自动识别" : fallback;
+            default -> "文章发现暂时未完成";
+        };
     }
 
     private static String text(Object value) {

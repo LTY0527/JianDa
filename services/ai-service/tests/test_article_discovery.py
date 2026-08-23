@@ -6,6 +6,7 @@ import pytest
 
 from app import article_discovery
 from app.article_discovery import (
+    DiscoveryFailure,
     DiscoverySource,
     MAX_DISCOVERY_BYTES,
     discover_articles,
@@ -17,6 +18,14 @@ from app.article_discovery import (
 
 FIXTURES = Path(__file__).parent / "fixtures" / "article_discovery"
 SOURCE = DiscoverySource(17, "https://fixture.example", 0)
+
+
+@pytest.fixture(autouse=True)
+def skip_retry_delays(monkeypatch):
+    async def no_wait(_attempt: int) -> None:
+        return None
+
+    monkeypatch.setattr(article_discovery, "_retry_wait", no_wait)
 
 
 def fixture(name: str) -> bytes:
@@ -163,10 +172,11 @@ def test_private_host_gate_and_external_redirect_are_not_bypassed(monkeypatch):
     monkeypatch.setattr(article_discovery, "_rate_limit", no_wait)
     monkeypatch.setattr(article_discovery, "_robots", robots)
     try:
-        with pytest.raises(ValueError, match="白名单来源"):
+        with pytest.raises(DiscoveryFailure) as failure:
             asyncio.run(discover_articles(SOURCE, "https://fixture.example/start", "RSS"))
     finally:
         asyncio.run(client.aclose())
+    assert failure.value.code == "CROSS_DOMAIN_BLOCKED"
 
 
 def test_declared_oversized_response_and_xml_depth_are_rejected(monkeypatch):
@@ -196,3 +206,105 @@ def test_declared_oversized_response_and_xml_depth_are_rejected(monkeypatch):
             asyncio.run(discover_articles(SOURCE, "https://fixture.example/feed", "RSS"))
     finally:
         asyncio.run(client.aclose())
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "retryable"),
+    [(403, "HTTP_403", False), (404, "HTTP_404", False),
+     (429, "HTTP_429", True), (503, "HTTP_5XX", True)],
+)
+def test_http_failures_have_stable_codes(monkeypatch, status, code, retryable):
+    async def allow(_url: str) -> None:
+        return None
+
+    async def no_wait(_domain: str, _seconds: int) -> None:
+        return None
+
+    async def robots(_url: str, _seconds: int) -> tuple[bool, str]:
+        return True, "ALLOWED"
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(status)),
+        follow_redirects=False,
+    )
+    monkeypatch.setattr(article_discovery, "_client", lambda: client)
+    monkeypatch.setattr(article_discovery, "_assert_public_host", allow)
+    monkeypatch.setattr(article_discovery, "_rate_limit", no_wait)
+    monkeypatch.setattr(article_discovery, "_robots", robots)
+    try:
+        with pytest.raises(DiscoveryFailure) as failure:
+            asyncio.run(discover_articles(SOURCE, "https://fixture.example/feed", "RSS"))
+    finally:
+        asyncio.run(client.aclose())
+    assert failure.value.code == code
+    assert failure.value.retryable is retryable
+
+
+def test_empty_dynamic_and_robots_failures_are_distinguishable(monkeypatch):
+    async def allow(_url: str) -> None:
+        return None
+
+    async def no_wait(_domain: str, _seconds: int) -> None:
+        return None
+
+    async def denied(_url: str, _seconds: int) -> tuple[bool, str]:
+        return False, "DISALLOWED"
+
+    monkeypatch.setattr(article_discovery, "_assert_public_host", allow)
+    monkeypatch.setattr(article_discovery, "_rate_limit", no_wait)
+    monkeypatch.setattr(article_discovery, "_robots", denied)
+    with pytest.raises(DiscoveryFailure) as denied_failure:
+        asyncio.run(discover_articles(SOURCE, "https://fixture.example/list", "SECTION"))
+    assert denied_failure.value.code == "ROBOTS_DENIED"
+    assert denied_failure.value.retryable is False
+
+    async def allowed(_url: str, _seconds: int) -> tuple[bool, str]:
+        return True, "ALLOWED"
+
+    monkeypatch.setattr(article_discovery, "_robots", allowed)
+    for body, expected in ((b"", "EMPTY_HTML"), (b"<script>window.__DATA__={}</script>", "DYNAMIC_PAGE_SUSPECTED")):
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _request, content=body: httpx.Response(
+                200, content=content, headers={"Content-Type": "text/html"}
+            )),
+            follow_redirects=False,
+        )
+        monkeypatch.setattr(article_discovery, "_client", lambda: client)
+        try:
+            with pytest.raises(DiscoveryFailure) as failure:
+                asyncio.run(discover_articles(SOURCE, "https://fixture.example/list", "SECTION"))
+        finally:
+            asyncio.run(client.aclose())
+        assert failure.value.code == expected
+
+
+def test_retryable_http_failure_uses_bounded_attempts_and_can_recover(monkeypatch):
+    attempts = 0
+
+    async def allow(_url: str) -> None:
+        return None
+
+    async def no_wait(_domain: str, _seconds: int) -> None:
+        return None
+
+    async def robots(_url: str, _seconds: int) -> tuple[bool, str]:
+        return True, "ALLOWED"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            return httpx.Response(503)
+        return httpx.Response(200, content=fixture("rss.xml"), headers={"Content-Type": "application/rss+xml"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False)
+    monkeypatch.setattr(article_discovery, "_client", lambda: client)
+    monkeypatch.setattr(article_discovery, "_assert_public_host", allow)
+    monkeypatch.setattr(article_discovery, "_rate_limit", no_wait)
+    monkeypatch.setattr(article_discovery, "_robots", robots)
+    try:
+        result = asyncio.run(discover_articles(SOURCE, "https://fixture.example/feed", "RSS"))
+    finally:
+        asyncio.run(client.aclose())
+    assert attempts == 3
+    assert len(result.candidates) == 1
