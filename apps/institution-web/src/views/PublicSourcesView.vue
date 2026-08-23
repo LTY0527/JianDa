@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { Plus, ShieldCheck, ToggleLeft, ToggleRight, RefreshCw, ArrowRight, Settings2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
+import HelpTip from "../components/HelpTip.vue";
 import { apiMessage } from "../api/http";
 import {
   publicSourceApi,
@@ -134,6 +135,11 @@ function openNewSource() {
   showAdvanced.value = true;
   activeSection.value = "sources";
   showForm.value = true;
+}
+function moreForSource(source: WebSourceRegistry) {
+  editRegistry(source);
+  showAdvanced.value = true;
+  activeSection.value = "advanced";
 }
 
 async function load() {
@@ -536,20 +542,21 @@ onUnmounted(() => {
 
     <section class="source-overview" aria-label="自动采集来源">
       <article v-for="source in registries" :key="source.id" class="source-card">
-        <header><div><h2>{{ source.source_name }}</h2><p>{{ source.domain }}</p></div><span :class="sourceHealth(source).tone">{{ sourceHealth(source).label }}</span></header>
+        <header><div><h2>{{ source.source_name }}</h2><p>{{ source.domain }}</p></div><span :class="sourceHealth(source).tone">{{ sourceHealth(source).label }} <HelpTip term="sourceHealth" label="来源健康状态说明" /></span></header>
         <dl>
           <div><dt>上次检查</dt><dd>{{ formatDisplayDateTime(source.last_crawled_at) }}</dd></div>
           <div><dt>发现新内容</dt><dd>{{ latestJob(source)?.added_count || 0 }} 篇</dd></div>
           <div><dt>下次检查</dt><dd>{{ source.enabled ? formatDisplayDateTime(source.next_run_at) : "暂停中" }}</dd></div>
         </dl>
         <p class="source-health-note">{{ sourceHealth(source).note }}</p>
-        <footer><button class="btn secondary" type="button" :disabled="!source.enabled || operatingSourceId === source.id" @click="checkNow(source)"><RefreshCw />立即检查</button><RouterLink class="text-action strong" :to="{ path: '/documents', query: { status: 'WAITING_REVIEW' } }">查看新内容<ArrowRight /></RouterLink><label class="source-switch"><input type="checkbox" :checked="source.enabled" @change="toggleRegistry(source)" />自动更新</label></footer>
+        <div class="source-auto-state"><b>{{ source.enabled ? "自动更新已开启" : "自动更新已关闭" }}</b><HelpTip term="automaticUpdate" label="自动更新说明" /></div>
+        <footer><button class="btn secondary" type="button" :disabled="!source.enabled || operatingSourceId === source.id" @click="checkNow(source)"><RefreshCw />立即检查</button><RouterLink class="text-action strong" :to="{ path: '/documents', query: { status: 'WAITING_REVIEW' } }">查看新内容<ArrowRight /></RouterLink><button class="text-action" type="button" @click="moreForSource(source)"><Settings2 />更多</button></footer>
       </article>
       <div v-if="loading" class="empty-state">正在读取来源状态…</div>
       <div v-else-if="!registries.length" class="empty-state"><b>还没有自动采集来源</b><p>新增并核验官方来源后，可在这里查看检查状态。</p></div>
     </section>
 
-    <button class="advanced-toggle" type="button" :aria-expanded="showAdvanced" @click="showAdvanced = !showAdvanced"><Settings2 />{{ showAdvanced ? "收起高级设置" : "展开平台高级设置" }}<span>来源核验、扫描范围、AI 预算和任务记录</span></button>
+    <button class="advanced-toggle" type="button" :aria-expanded="showAdvanced" @click="showAdvanced = !showAdvanced"><Settings2 />{{ showAdvanced ? "收起高级管理" : "高级管理" }}<span>来源核验、扫描范围、AI 预算和任务记录</span></button>
 
     <div v-if="showAdvanced" class="collection-advanced">
 
