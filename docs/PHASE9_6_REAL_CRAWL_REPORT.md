@@ -42,7 +42,18 @@
 - content kind：COMMUNITY_SERVICE
 - extracted text：799 字符
 - 原始图片元素：7（其中 6 张正文 JPEG、1 个分享二维码；进入候选下载门禁后仍需过滤）
-- collect：待执行
-- scheduler：待执行
+- collect：成功创建文档 63，进入 AI 等待审批队列；没有自动审核或发布
+- AI queue：queue 19，经显式批准后执行
+- External：processing job 72，provider `external`，model `deepseek-v4-flash`，prompt `web-v1.1`，schema `1.1`
+- Token：prompt 2501、completion 1576、total 4077；耗时 10318 ms
+- review：通过业务 API 完成事实核对和生成内容修正，segment 105 可追溯
+- publish：`news-63`，地区 `310113102`，H5 `http://127.0.0.1/news/news-63`
+
+## 真实 scheduler
+
+- 初次 job 28：按正常 7 天窗口执行，正确发现 0 条。
+- 验收 job 29：临时将单一来源窗口改为 30 天并启用来源及自动采集，scheduler identity 为 `jianda-crawl-scheduler-v1`。
+- 结果：discovered 3、added 3、duplicate 0、failed 0；新材料只进入 AI 审批流，未自动 AI、审核或发布。
+- finally 恢复：`enabled=false`、`allow_auto_crawl=false`、`recent_days=7`。
 
 本报告只记录真实网络与真实 Docker 结果，不将离线 fixture 计入真实验收。

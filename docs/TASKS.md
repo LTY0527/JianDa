@@ -571,7 +571,16 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] 首页只在同一重要性分段内对真实封面加权；无真实图片或破图时使用文字 Hero，分类 SVG 不再占据主视觉。
 - [x] 对 4 篇已发布新华网文章执行真实历史重扫；首次发现并修复 2 个推荐图误候选，清缓存复扫后有效候选为 0，未伪造封面且来源开关已恢复。
 - [x] 修复真实部门目录把导航链接当文章的问题；大场镇真实 discover 在最近 30 天返回 4 篇文章、过滤 82 条导航并保留发布日期，shadow 正文长度 799、识别 7 个待验证图片元素。
-- [ ] 建立不拦截 API 的真实 Docker Playwright 验收套件。
-- [ ] 完成大场镇网页与官方 PDF 的真实 External → 审核 → 发布闭环。
-- [ ] 完成真实图片优先首页、助手多轮引用、真实调度、居民治理、提醒和运营指标验收。
-- [ ] 分别汇报 Regression Tests 与 REAL ACCEPTANCE；未满足全部真实门禁时不得标记 PASS。
+- [x] 大场镇文档 63 完成真实 collect → queue 19 → External job 72 → 自动化事实确认/人工修正 API → 发布 `news-63`；provider `external`、model `deepseek-v4-flash`、token 4077、耗时 10318 ms，无 Mock fallback。
+- [x] 网页来源地区通用传播到材料和公开内容；文档 63 为 `310113102/STREET`，并提供既有文章安全同步接口。
+- [x] 增加受全局开关控制的生产 `CrawlScheduler`；真实 job 29 发现 3、加入 3、失败 0，结束后恢复来源停用、自动采集关闭和 7 天窗口。
+- [x] 助手增加确定性事实覆盖后检和已核对 factCards；证据外电话、日期、时间和金额安全回退，不直接返回用户。
+- [x] 建立不拦截 API 的真实 Docker Playwright 套件与静态守卫；真实发布 1 passed，真实居民/邻里/提醒/运营 1 passed。
+- [x] 真实居民 id 1、帖子 id 4 完成登录、发帖、点赞、评论、举报、管理员隐藏、居民不可见和恢复；周阅读 63→64、收听 0→1、提醒 0→1。
+- [x] 本轮回归：AI 101、Maven 71、两端 typecheck/build、全量 Playwright 105 passed/13 skipped/0 failed（118 total）；Docker 四服务 healthy、四健康接口 HTTP 200。
+- [x] Phase 7.3 的 15 张用户现有修改截图在全量测试前后组合 SHA-256 不变，未覆盖、暂存或提交。
+- [ ] BLOCKED：官方 PDF 文档 67 已用 PyMuPDF 提取 8 页/8 segments，但发送给 External Provider 需要新的明确授权；当前 fields/generated 为 0/0。
+- [ ] BLOCKED：文档 63 的真实图片候选 8 因公开使用和缓存依据未确认而拒绝；当前 22 条发布内容真实封面仍为 0，不得冒充真实配图通过。
+- [ ] BLOCKED：真实 DeepSeek 助手 10+ 问题集未获本轮外部数据调用授权；自动安全回归不能替代真实助手验收。
+- [ ] PARTIAL：完整 after 多视口截图集与 iPhone/Android 人工可用性验收待完成。
+- [x] 已分别输出 Regression Tests 与 REAL ACCEPTANCE；当前最终结论为 `REAL ACCEPTANCE: PARTIAL`，未把 Mock/fixture 通过数计入真实验收。

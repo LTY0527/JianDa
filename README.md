@@ -369,6 +369,24 @@ Phase 7.4 自动化验收已覆盖助手同源 POST、检索引用、错误重�
 - 数据概览使用数据库内真实发布、阅读、收听、收藏、提醒和内容排行。H5 包含 manifest 和本地图标，但没有 Service Worker，不缓存 Token、AI、邻里或后台数据。
 - 产品化截图索引见 `artifacts/phase9-5-commercial-ux/README.md`，实现与验收结论见 `docs/PHASE9_5_COMMERCIAL_PRODUCTIZATION_REPORT.md` 和 `docs/PHASE9_5_TEST_REPORT.md`。
 
+## Phase 9.6 真实验收现状
+
+2026-08-23 已在真实 Docker、MySQL 和宝山区大场镇政府信息公开网页上完成一次受控闭环：栏目发现、影子采集、材料创建、AI 人工审批队列、External DeepSeek、事实核对、生成内容修正、发布和 H5 `news-63` 均通过。生产 scheduler 已实际触发一次，并在验收后恢复来源停用、自动采集关闭和正常 7 天窗口；任何材料都没有自动审核或自动发布。
+
+助手会对 External 回答中的日期、时间、电话和金额执行引用覆盖校验，不被已发布证据支持的值会触发安全检索回退。H5 的“已核对关键信息”只来自已确认或人工修正字段。真实居民 DEMO 流程也已通过登录、邻里发帖、点赞、评论、举报、平台治理、提醒和运营指标增长验证。
+
+当前 `REAL ACCEPTANCE` 结论仍为 `PARTIAL`：官方 PDF 已完成 8 页真实提取，但尚未获得发送其正文到 External Provider 的单独授权；网页真实图片候选因公开使用依据未确认而拒绝，22 条发布内容仍没有合法真实封面；真实 External 助手问题集与 iPhone/Android 人工验收也未完成。系统会诚实使用文字 Hero 或分类回退，不把未授权图片、Mock 或 fixture 冒充真实通过。
+
+Phase 9.6 报告入口：
+
+- `docs/PHASE9_6_REAL_ACCEPTANCE_REPORT.md`
+- `docs/PHASE9_6_REAL_CRAWL_REPORT.md`
+- `docs/PHASE9_6_REAL_IMAGE_AUDIT.md`
+- `docs/PHASE9_6_ASSISTANT_EVAL.md`
+- `docs/PHASE9_6_UX_REDESIGN_REPORT.md`
+- `docs/PHASE9_6_TEST_REPORT.md`
+- `docs/PHASE9_6_ISSUES_FOUND.md`
+
 ## Phase 9.4 验收冲刺
 
 - 当前社区试点为“上海市 → 宝山区 → 大场镇”。H5 地区面板展示上海各区和宝山区街镇，

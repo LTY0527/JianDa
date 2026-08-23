@@ -141,6 +141,7 @@ URL，不使用图片 URL。
 - `POST|DELETE /api/public/items/{id}/favorite`
 - `GET /api/public/assistant/suggestions`：根据当前已发布分类返回稳定推荐问题。
 - `POST /api/public/assistant/chat`：状态问题由后端直接回答；公共服务问题通过可替换检索器仅召回 `PUBLISHED` 内容，并返回回答、行动建议、来源引用、安全提示和 `mode`。`mode` 为 `status`、`retrieval`、`ai` 或 `general_ai`；显式启用且未超过每日次数/Token 预算时，有依据问题可返回 `ai`，低风险无依据问题可返回明确标注的 `general_ai`，External 失败安全降级。医疗诊断、政策资格、金额、办理材料等高风险问题无依据时拒绝猜测。
+- 助手响应可包含 `factCards`，类型为 deadline/location/phone/fee/material，只从已确认或人工修正字段生成。External 回答中的日期、时间、电话和金额必须被实际引用 quote 覆盖，否则整体安全回退为 retrieval。
 - `POST /api/public/items/{id}/view`：仅对仍为 `PUBLISHED` 的内容记录一次匿名浏览事件，不保存用户问题或身份信息。
 - `GET /api/public/service-directory?regionCode=310113102`：只聚合当前区域已审核发布内容中的真实地点、电话、时间与官方来源；缺失字段不返回伪造兜底。
 - `GET /api/public/reminders`、`POST /api/public/items/{id}/reminder`、`DELETE /api/public/reminders/{id}`：按匿名游客 ID 保存、读取和删除内容时间提醒。
@@ -185,6 +186,14 @@ AI 服务内部接口：
   采集/重复/失败、AI 队列和 Token 预算、待审图片候选、待审/已发布内容、平均采集和
   AI 耗时、最近未解决错误及失败来源，并保留浏览、收藏、助手引用和人工修改率等运营
   聚合。读取时按日期幂等保存 `daily_operation_snapshot`，无数据返回 0。
+
+Phase 9.6 地区同步与调度接口（均要求平台管理员）：
+
+- `POST /api/web-articles/{documentId}/region/sync`：按文档关联的来源登记同步省、市、区、街镇、`region_code` 和 `local_scope`；已发布内容同步更新，不接受调用方直接提交任意地区值。
+- `PUT /api/source-registries/{id}/auto-crawl-enabled`：单独启停来源自动采集；来源总开关和全局 scheduler 开关仍同时生效。
+- `POST /api/crawl-tasks/scheduler/sources/{sourceId}/run-now`：人工触发与生产 scheduler 相同的执行服务，用于受控验收；继续执行 lease、robots、SSRF、限速、条数、预算、重试和去重门禁。
+
+生产 scheduler 只处理 `enabled=true`、`allow_auto_crawl=true` 且到期的来源。采集结果进入 AI 审批队列，不自动 AI、审核或发布。
 
 本地服务文档与健康检查：
 
