@@ -54,7 +54,7 @@ public class ArticleDiscoveryService {
                     exception.status(), reasonCode, message, exception.booleanValue("retryable"));
         } catch (RuntimeException exception) {
             throw new DiscoveryFailureException(
-                    502, "READ_TIMEOUT", "读取官网内容时连接中断", true);
+                    500, "UNEXPECTED_ERROR", "文章发现过程发生未知错误", true);
         }
         Object rawCandidates = response.get("candidates");
         SanitizedCandidates sanitized = rawCandidates instanceof List<?> list

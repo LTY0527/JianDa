@@ -145,6 +145,24 @@ class ArticleDiscoveryIntegrationTest {
                         .value("官网访问频率受限，系统将稍后重试"));
     }
 
+    @Test
+    void unknownRuntimeFailureIsNotReportedAsReadTimeout() throws Exception {
+        when(aiClient.discoverArticles(anyLong(), anyString(), anyString(), anyString(), anyInt()))
+                .thenThrow(new IllegalStateException("unexpected fixture failure"));
+        String response = mvc.perform(post("/api/source-registries/{id}/discover-jobs", enabledId)
+                        .header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"method\":\"RSS\",\"entryUrl\":\"https://discovery-fixture-enabled.example/rss.xml\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andReturn().getResponse().getContentAsString();
+        long jobId = objectMapper.readTree(response).path("data").path("id").asLong();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
+                        "/api/source-registries/discover-jobs/{jobId}", jobId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.errors[0].error_code").value("UNEXPECTED_ERROR"))
+                .andExpect(jsonPath("$.data.errors[0].error_code").value(org.hamcrest.Matchers.not("READ_TIMEOUT")));
+    }
+
     private Map<String, Object> candidate(String url, String key) {
         OffsetDateTime published = OffsetDateTime.now(ZoneOffset.UTC).minusDays(1);
         return Map.ofEntries(

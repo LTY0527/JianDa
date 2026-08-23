@@ -29,7 +29,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:jianda-crawl-task-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1"
+        "spring.datasource.url=jdbc:h2:mem:jianda-crawl-task-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
+        "jianda.crawl.max-failure-retries=2"
 })
 @AutoConfigureMockMvc
 class CrawlTaskOperationsIntegrationTest {
@@ -86,6 +87,10 @@ class CrawlTaskOperationsIntegrationTest {
         long nonRetryable = ((Number) errors.get(2).get("id")).longValue();
         long retryJob = service.retryError(firstError, user);
         assertEquals("PENDING", service.detail(retryJob).get("status"));
+        assertFalse(service.pendingRetryJobs().contains(retryJob));
+        jdbc.update("UPDATE crawl_job SET discovered_at=DATEADD('MINUTE', -1, CURRENT_TIMESTAMP) WHERE id=?", retryJob);
+        assertTrue(service.pendingRetryJobs().contains(retryJob));
+        assertEquals(user.id(), service.retryUser(retryJob).id());
         assertThrows(BusinessException.class, () -> service.retryError(firstError, user));
         assertThrows(BusinessException.class, () -> service.retryError(nonRetryable, user));
         List<Long> batch = service.retryBatch(job, user);
@@ -96,8 +101,18 @@ class CrawlTaskOperationsIntegrationTest {
         service.finish(maxJob, "worker-max-retry", new CrawlTaskService.Counts(1, 0, 0, 0, 1), List.of(
                 new CrawlTaskService.Failure("https://task-fixture.example/max", "FETCH", "TIMEOUT", "请求超时", true)));
         long maxError = ((Number) service.errors(maxJob).get(0).get("id")).longValue();
-        jdbc.update("UPDATE crawl_job_error SET retry_count=3 WHERE id=?", maxError);
+        jdbc.update("UPDATE crawl_job_error SET retry_count=2 WHERE id=?", maxError);
+        jdbc.update("UPDATE source_registry SET max_retries=0 WHERE id=?", sourceId);
         assertThrows(BusinessException.class, () -> service.retryError(maxError, user));
+
+        jdbc.update("UPDATE source_registry SET max_retries=1 WHERE id=?", sourceId);
+        long sourceLimitJob = running("source-max-retry");
+        service.finish(sourceLimitJob, "worker-source-max-retry", new CrawlTaskService.Counts(1, 0, 0, 0, 1), List.of(
+                new CrawlTaskService.Failure("https://task-fixture.example/source-max", "FETCH", "TIMEOUT", "请求超时", true)));
+        long sourceLimitError = ((Number) service.errors(sourceLimitJob).get(0).get("id")).longValue();
+        jdbc.update("UPDATE crawl_job_error SET retry_count=1 WHERE id=?", sourceLimitError);
+        assertThrows(BusinessException.class, () -> service.retryError(sourceLimitError, user));
+        jdbc.update("UPDATE source_registry SET max_retries=3 WHERE id=?", sourceId);
 
         long duplicateOne = service.create(sourceId, "https://task-fixture.example/duplicate",
                 "https://task-fixture.example/duplicate", "MANUAL", "RSS", "https://task-fixture.example/feed", user, null);

@@ -18,10 +18,13 @@ import org.springframework.web.bind.annotation.RestController;
 @PreAuthorize("hasRole('PLATFORM_ADMIN')")
 public class CrawlTaskController {
     private final CrawlTaskService service;
+    private final ArticleDiscoveryJobService discoveryJobService;
     private final CrawlScheduler scheduler;
 
-    public CrawlTaskController(CrawlTaskService service, CrawlScheduler scheduler) {
+    public CrawlTaskController(CrawlTaskService service,
+            ArticleDiscoveryJobService discoveryJobService, CrawlScheduler scheduler) {
         this.service = service;
+        this.discoveryJobService = discoveryJobService;
         this.scheduler = scheduler;
     }
 
@@ -45,12 +48,12 @@ public class CrawlTaskController {
 
     @PostMapping("/errors/{errorId}/retry")
     public ApiResponse<Map<String, Object>> retryError(@PathVariable long errorId) {
-        return ApiResponse.ok(Map.of("jobId", service.retryError(errorId, UserContext.current())));
+        return ApiResponse.ok(discoveryJobService.retryError(errorId, UserContext.current()));
     }
 
     @PostMapping("/{id}/retry-failures")
     public ApiResponse<Map<String, Object>> retryFailures(@PathVariable long id) {
-        List<Long> jobIds = service.retryBatch(id, UserContext.current());
+        List<Long> jobIds = discoveryJobService.retryFailures(id, UserContext.current());
         return ApiResponse.ok(Map.of("jobIds", jobIds, "count", jobIds.size()));
     }
 

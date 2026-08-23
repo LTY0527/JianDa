@@ -159,11 +159,17 @@ def _remove_repeated_headers_and_footers(pages: list[str]) -> list[str]:
 
 
 def _quality_model(
-    page_no: int, quality: _QualityScore, selected_source: str
+    page_no: int,
+    quality: _QualityScore,
+    selected_source: str,
+    *,
+    ocr_attempted: bool,
+    ocr_error: str | None = None,
 ) -> PageExtractionQuality:
     return PageExtractionQuality(
         page_no=page_no,
         quality=quality.label,
+        score=round(max(0.0, min(1.0, quality.score)), 4),
         selected_source=selected_source,
         text_char_count=quality.text_char_count,
         valid_chinese_ratio=quality.valid_chinese_ratio,
@@ -173,6 +179,9 @@ def _quality_model(
         image_area_ratio=quality.image_area_ratio,
         text_block_count=quality.text_block_count,
         suspicious_garbage_ratio=quality.suspicious_garbage_ratio,
+        ocr_attempted=ocr_attempted,
+        ocr_error=ocr_error,
+        needs_human_review=quality.label != "GOOD",
     )
 
 
@@ -192,26 +201,39 @@ def extract_file(path: Path) -> ExtractTextResult:
             selected_text = raw_text
             selected_quality = text_quality
             selected_source = "TEXT_LAYER"
+            ocr_attempted = False
+            ocr_error: str | None = None
             should_ocr = suffix != ".pdf" or text_quality.label != "GOOD"
             if should_ocr:
+                ocr_attempted = True
                 try:
                     ocr_text = _ocr_page_text(page)
-                except OcrUnavailableError:
-                    if text_quality.label == "UNCERTAIN" and raw_text.strip():
-                        ocr_text = ""
-                    else:
+                except OcrUnavailableError as exc:
+                    ocr_error = str(exc)
+                    ocr_text = ""
+                    if text_quality.label != "UNCERTAIN" or not raw_text.strip():
                         raise
                 if ocr_text:
                     ocr_quality = _quality_score(page, ocr_text)
-                    if text_quality.label == "POOR" or ocr_quality.score > text_quality.score:
+                    if ocr_quality.label != "POOR" and (
+                        text_quality.label == "POOR"
+                        or ocr_quality.score > text_quality.score
+                    ):
                         selected_text = ocr_text
                         selected_quality = ocr_quality
                         selected_source = "OCR"
                         ocr_page_count += 1
             raw_pages.append(raw_text)
-            selected_pages.append(_clean_page_text(selected_text))
+            selected_pages.append(
+                _clean_page_text(selected_text)
+                if selected_quality.label != "POOR" else ""
+            )
             page_quality.append(_quality_model(
-                page_index + 1, selected_quality, selected_source
+                page_index + 1,
+                selected_quality,
+                selected_source,
+                ocr_attempted=ocr_attempted,
+                ocr_error=ocr_error,
             ))
         page_count = document.page_count
 

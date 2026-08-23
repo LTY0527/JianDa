@@ -19,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class CrawlTaskService {
     public static final Set<String> STATUSES = Set.of(
             "PENDING", "RUNNING", "SUCCESS", "PARTIAL_SUCCESS", "FAILED", "CANCELLED", "DISABLED");
-    private static final int MAX_RETRIES = 3;
     private static final String JOB_COLUMNS = "j.id,j.parent_job_id,j.source_registry_id,j.document_id,j.original_url,"
             + "j.canonical_url,j.status,j.trigger_type,j.processing_stage,j.discovery_method,j.discovery_page,"
             + "j.discovered_at,j.started_at,j.finished_at,j.duration_ms,j.discovered_count,j.added_count,"
@@ -31,10 +30,13 @@ public class CrawlTaskService {
 
     private final JdbcTemplate jdbc;
     private final SourceRegistryService sourceRegistryService;
+    private final CrawlProperties properties;
 
-    public CrawlTaskService(JdbcTemplate jdbc, SourceRegistryService sourceRegistryService) {
+    public CrawlTaskService(JdbcTemplate jdbc, SourceRegistryService sourceRegistryService,
+            CrawlProperties properties) {
         this.jdbc = jdbc;
         this.sourceRegistryService = sourceRegistryService;
+        this.properties = properties;
     }
 
     public List<Map<String, Object>> jobs(String status, Long sourceId) {
@@ -53,6 +55,23 @@ public class CrawlTaskService {
         }
         sql.append("ORDER BY j.created_at DESC,j.id DESC LIMIT 200");
         return jdbc.queryForList(sql.toString(), parameters.toArray());
+    }
+
+    public List<Long> pendingRetryJobs() {
+        return jdbc.queryForList("SELECT id FROM crawl_job WHERE status='PENDING' AND trigger_type='RETRY' "
+                        + "AND discovered_at<=CURRENT_TIMESTAMP ORDER BY discovered_at,id LIMIT 20", Long.class);
+    }
+
+    public AuthUser retryUser(long jobId) {
+        return jdbc.queryForObject(
+                "SELECT u.id,u.organization_id,u.username,u.display_name,u.role,o.name organization_name "
+                        + "FROM crawl_job j JOIN staff_user u ON u.id=j.created_by "
+                        + "JOIN organization o ON o.id=u.organization_id WHERE j.id=?",
+                (resultSet, rowNum) -> new AuthUser(
+                        resultSet.getLong("id"), resultSet.getLong("organization_id"),
+                        resultSet.getString("username"), resultSet.getString("display_name"),
+                        resultSet.getString("role"), resultSet.getString("organization_name")),
+                jobId);
     }
 
     public Map<String, Object> detail(long jobId) {
@@ -187,10 +206,16 @@ public class CrawlTaskService {
                 "SELECT id FROM crawl_job WHERE source_registry_id=? AND canonical_url=? AND status='SUCCESS'", sourceId, url);
         if (!successful.isEmpty()) throw new BusinessException(409, "该地址已经成功处理，无需重试");
         long parentId = ((Number) error.get("crawl_job_id")).longValue();
+        Map<String, Object> parent = job(parentId);
         int retryCount = ((Number) error.get("retry_count")).intValue() + 1;
-        long childId = insertJob(parentId, sourceId, url, url, "PENDING", "RETRY", null, null, user.id(), null, retryCount);
+        Timestamp retryAt = nextRetry(retryCount);
+        long childId = insertJob(parentId, sourceId, url, url, "PENDING", "RETRY",
+                text(parent.get("discovery_method")), text(parent.get("discovery_page")),
+                user.id(), null, retryCount);
+        jdbc.update("UPDATE crawl_job SET processing_stage=?,discovered_at=? WHERE id=?",
+                safeStage(String.valueOf(error.get("processing_stage"))), retryAt, childId);
         jdbc.update("UPDATE crawl_job_error SET retry_count=?,next_retry_at=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                retryCount, nextRetry(retryCount), errorId);
+                retryCount, retryAt, errorId);
         return childId;
     }
 
@@ -221,7 +246,14 @@ public class CrawlTaskService {
     private void validateRetry(Map<String, Object> error) {
         if (!Boolean.TRUE.equals(error.get("retryable"))) throw new BusinessException(409, "该错误不可重试");
         if (error.get("resolved_at") != null) throw new BusinessException(409, "该失败条目已经进入重试流程");
-        if (((Number) error.get("retry_count")).intValue() >= MAX_RETRIES) throw new BusinessException(409, "已达到最大重试次数");
+        Integer sourceMaxRetries = jdbc.queryForObject(
+                "SELECT max_retries FROM source_registry WHERE id=?", Integer.class,
+                ((Number) error.get("source_registry_id")).longValue());
+        int configuredMaxRetries = sourceMaxRetries != null && sourceMaxRetries > 0
+                ? sourceMaxRetries : Math.max(1, properties.maxFailureRetries());
+        if (((Number) error.get("retry_count")).intValue() >= configuredMaxRetries) {
+            throw new BusinessException(409, "已达到最大重试次数");
+        }
     }
 
     private long createDisabled(long sourceId, String originalUrl, String canonicalUrl, String trigger,
@@ -289,6 +321,10 @@ public class CrawlTaskService {
     private void detailExists(long id) {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM crawl_job WHERE id=?", Integer.class, id);
         if (count == null || count == 0) throw new BusinessException(404, "采集任务不存在");
+    }
+
+    private static String text(Object value) {
+        return value == null ? null : String.valueOf(value).trim();
     }
 
     private static String normalizeTrigger(String value) {
