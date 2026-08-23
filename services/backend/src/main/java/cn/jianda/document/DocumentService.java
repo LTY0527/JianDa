@@ -956,7 +956,8 @@ public class DocumentService {
         }
         String raw = nullableString(document.get("extracted_text"));
         int readingMinutes = Math.max(1, (int) Math.ceil(raw.length() / 500.0));
-        boolean local = nullableString(document.get("source_domain")).endsWith("shanghai.gov.cn");
+        boolean local = !nullableString(document.get("region_code")).isBlank()
+                || nullableString(document.get("source_domain")).endsWith("shanghai.gov.cn");
         int importance = switch (contentKind) {
             case "ANTI_FRAUD", "SERVICE_NOTICE" -> 90;
             case "HEALTH_EDUCATION", "POLICY_NEWS" -> 80;

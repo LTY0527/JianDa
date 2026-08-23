@@ -51,7 +51,8 @@ class PublicImportIntegrationTest {
         jdbc.update("DELETE FROM ai_budget_usage");
         jdbc.update("DELETE FROM ai_processing_queue");
         jdbc.update("UPDATE source_registry SET allow_image_cache=FALSE,image_cache_allowed=FALSE,"
-                + "allow_image_candidates=FALSE "
+                + "allow_image_candidates=FALSE,province=NULL,city=NULL,district=NULL,"
+                + "street_or_town=NULL,region_code=NULL "
                 + "WHERE domain='www.news.cn'");
         when(aiClient.fetchImage(anyString())).thenReturn(
                 new AiClient.ImageAsset(new byte[] {(byte) 0x89, 0x50, 0x4e, 0x47},
@@ -108,6 +109,7 @@ class PublicImportIntegrationTest {
                                     : url.contains("candidates-without-cache") ? "9".repeat(64)
                                     : url.contains("organization-import") ? "d".repeat(64)
                                     : url.contains("platform-owned") ? "e".repeat(64)
+                                    : url.contains("region-import") ? "7".repeat(64)
                                     : url.contains("one-off") ? "f".repeat(64)
                                     : "b".repeat(64)),
                     Map.entry("content_kind", "HEALTH_EDUCATION"),
@@ -284,6 +286,37 @@ class PublicImportIntegrationTest {
                 .andExpect(status().isConflict());
         mvc.perform(post("/api/web-articles/{id}/cover/category-default", id).header("Authorization", auth))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void registeredArticleInheritsRegionAndCanSafelyResyncPublishedMetadata() throws Exception {
+        String auth = "Bearer " + login("platform_admin");
+        jdbc.update("UPDATE source_registry SET province='上海市',city='上海市',district='宝山区',"
+                + "street_or_town='大场镇',region_code='310113102' WHERE domain='www.news.cn'");
+        String url = "https://www.news.cn/test/region-import.html";
+        String imported = mvc.perform(post("/api/web-articles/import").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("url", url))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(imported).path("data").path("documentId").asLong();
+
+        Map<String, Object> stored = jdbc.queryForMap(
+                "SELECT province,district,street_or_town,region_code,local_scope FROM source_document WHERE id=?",
+                documentId);
+        org.junit.jupiter.api.Assertions.assertEquals("上海市", stored.get("province"));
+        org.junit.jupiter.api.Assertions.assertEquals("宝山区", stored.get("district"));
+        org.junit.jupiter.api.Assertions.assertEquals("大场镇", stored.get("street_or_town"));
+        org.junit.jupiter.api.Assertions.assertEquals("310113102", stored.get("region_code"));
+        org.junit.jupiter.api.Assertions.assertEquals("STREET", stored.get("local_scope"));
+
+        jdbc.update("UPDATE source_document SET region_code=NULL,local_scope='UNSPECIFIED' WHERE id=?", documentId);
+        mvc.perform(post("/api/web-articles/{id}/region/sync", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.regionCode").value("310113102"))
+                .andExpect(jsonPath("$.data.localScope").value("STREET"));
+        org.junit.jupiter.api.Assertions.assertEquals("310113102", jdbc.queryForObject(
+                "SELECT region_code FROM source_document WHERE id=?", String.class, documentId));
     }
 
     @Test

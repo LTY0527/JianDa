@@ -97,6 +97,7 @@ public class WebArticleService {
                 ? registry.get("source_name") : text(result.get("source_name")));
         result.put("authority_level", registry.get("authority_level"));
         result.put("source_registry_id", registry.get("id"));
+        copyRegion(registry, result);
         boolean allowImageCache = Boolean.TRUE.equals(registry.get("allow_image_cache"));
         boolean allowImageCandidates = webImageCandidatesEnabled
                 && Boolean.TRUE.equals(registry.get("allow_image_candidates"));
@@ -394,9 +395,10 @@ public class WebArticleService {
                             + "cover_image_type,image_source_name,image_source_url,image_alt_text,image_cached,"
                             + "image_license_note,image_width,image_height,image_hash,image_reviewed,original_html,"
                             + "extracted_text,crawl_status,robots_status,original_page_available,external_source_verified,"
-                            + "content_kind,prompt_version,schema_version) "
+                            + "content_kind,prompt_version,schema_version,province,city,district,street_or_town,"
+                            + "region_code,local_scope) "
                             + "VALUES (?,?,?,'text/html',?,1,'UPLOADED',?,?,?,?,?,?,'WEB_URL','WEB_ARTICLE',?,?,?,?,?,?,?,?,"
-                            + "?,?,?,?,?,?,?,?,?,?,?,?,?,'SUCCEEDED',?,?,?,?,'web-v1.1','1.1')",
+                            + "?,?,?,?,?,?,?,?,?,?,?,?,?,'SUCCEEDED',?,?,?,?,'web-v1.1','1.1',?,?,?,?,?,?)",
                     new String[] {"id"});
             int index = 1;
             statement.setLong(index++, user.organizationId());
@@ -433,7 +435,13 @@ public class WebArticleService {
             statement.setString(index++, text(preview.get("robots_status")));
             statement.setBoolean(index++, !Boolean.FALSE.equals(preview.get("original_page_available")));
             statement.setBoolean(index++, Boolean.TRUE.equals(preview.get("external_source_verified")));
-            statement.setString(index, contentKind);
+            statement.setString(index++, contentKind);
+            statement.setString(index++, nullable(preview.get("province")));
+            statement.setString(index++, nullable(preview.get("city")));
+            statement.setString(index++, nullable(preview.get("district")));
+            statement.setString(index++, nullable(preview.get("street_or_town")));
+            statement.setString(index++, nullable(preview.get("region_code")));
+            statement.setString(index, localScope(preview));
             return statement;
         }, keys);
         Number generatedDocumentId = keys.getKey();
@@ -464,6 +472,56 @@ public class WebArticleService {
         log(user, "IMPORT_WEB_ARTICLE", documentId, "SUCCESS");
         return Map.of("documentId", documentId, "status", "UPLOADED", "contentKind", contentKind,
                 "imageReviewRequired", !categoryDefault, "aiQueueStatus", queued.get("status"));
+    }
+
+    @Transactional
+    public Map<String, Object> syncRegionFromRegistry(long documentId, AuthUser user) {
+        assertAccess(documentId, user);
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT r.province,r.city,r.district,r.street_or_town,r.region_code "
+                        + "FROM crawl_job j JOIN source_registry r ON r.id=j.source_registry_id "
+                        + "WHERE j.document_id=? ORDER BY j.id DESC LIMIT 1",
+                documentId);
+        if (rows.isEmpty()) {
+            throw new BusinessException(400, "该材料没有可同步的登记来源地区信息");
+        }
+        Map<String, Object> region = rows.get(0);
+        if (text(region.get("region_code")).isBlank()) {
+            throw new BusinessException(400, "来源登记尚未配置地区编码");
+        }
+        String scope = localScope(region);
+        jdbc.update("UPDATE source_document SET province=?,city=?,district=?,street_or_town=?,region_code=?,"
+                        + "local_scope=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                region.get("province"), region.get("city"), region.get("district"),
+                region.get("street_or_town"), region.get("region_code"), scope, documentId);
+        jdbc.update("UPDATE published_item SET province=?,city=?,district=?,street_or_town=?,region_code=?,"
+                        + "local_scope=?,is_local=TRUE WHERE document_id=?",
+                region.get("province"), region.get("city"), region.get("district"),
+                region.get("street_or_town"), region.get("region_code"), scope, documentId);
+        log(user, "SYNC_SOURCE_REGION", documentId, "SUCCESS");
+        return Map.of(
+                "documentId", documentId,
+                "province", text(region.get("province")),
+                "city", text(region.get("city")),
+                "district", text(region.get("district")),
+                "streetOrTown", text(region.get("street_or_town")),
+                "regionCode", text(region.get("region_code")),
+                "localScope", scope);
+    }
+
+    private static void copyRegion(Map<String, Object> source, Map<String, Object> target) {
+        for (String key : List.of("province", "city", "district", "street_or_town", "region_code")) {
+            target.put(key, source.get(key));
+        }
+        target.put("local_scope", localScope(source));
+    }
+
+    private static String localScope(Map<String, Object> region) {
+        if (!text(region.get("street_or_town")).isBlank()) return "STREET";
+        if (!text(region.get("district")).isBlank()) return "DISTRICT";
+        if (!text(region.get("city")).isBlank()) return "CITY";
+        if (!text(region.get("province")).isBlank()) return "PROVINCE";
+        return "UNSPECIFIED";
     }
 
     @Transactional

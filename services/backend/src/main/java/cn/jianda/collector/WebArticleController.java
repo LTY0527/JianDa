@@ -113,6 +113,12 @@ public class WebArticleController {
         return ApiResponse.ok(service.recrawl(documentId, UserContext.current()));
     }
 
+    @PostMapping("/{documentId}/region/sync")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN')")
+    public ApiResponse<Map<String, Object>> syncRegion(@PathVariable long documentId) {
+        return ApiResponse.ok(service.syncRegionFromRegistry(documentId, UserContext.current()));
+    }
+
     @GetMapping("/{documentId}/image-candidates")
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN','REVIEWER')")
     public ApiResponse<List<Map<String, Object>>> imageCandidates(@PathVariable long documentId) {
