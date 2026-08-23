@@ -5,6 +5,7 @@ import cn.jianda.common.BusinessException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -12,9 +13,14 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,17 +28,65 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 public class ResidentCommunityController {
     private static final String DACHANG_REGION = "310113102";
+    private static final Pattern USERNAME = Pattern.compile("[A-Za-z0-9_]{4,30}");
     private final JdbcTemplate jdbc;
     private final PasswordEncoder passwordEncoder;
+    private final SmsProvider smsProvider;
+    private final CommunityMediaService mediaService;
 
-    public ResidentCommunityController(JdbcTemplate jdbc, PasswordEncoder passwordEncoder) {
+    public ResidentCommunityController(JdbcTemplate jdbc, PasswordEncoder passwordEncoder,
+                                       SmsProvider smsProvider, CommunityMediaService mediaService) {
         this.jdbc = jdbc;
         this.passwordEncoder = passwordEncoder;
+        this.smsProvider = smsProvider;
+        this.mediaService = mediaService;
+    }
+
+    @GetMapping("/api/public/resident/registration-capabilities")
+    public ApiResponse<Map<String, Object>> registrationCapabilities() {
+        return ApiResponse.ok(Map.of("usernamePassword", true, "sms", smsProvider.status()));
+    }
+
+    @PostMapping("/api/public/resident/register")
+    public ApiResponse<Map<String, Object>> register(@RequestBody RegisterRequest request) {
+        String username = clean(request.username(), 30);
+        String password = request.password() == null ? "" : request.password();
+        String nickname = clean(request.nickname(), 60);
+        if (!USERNAME.matcher(username).matches()) throw new BusinessException(400, "用户名需为 4-30 位字母、数字或下划线");
+        if (password.length() < 8 || password.length() > 72 || !password.matches(".*[A-Za-z].*") || !password.matches(".*\\d.*")) {
+            throw new BusinessException(400, "密码需为 8-72 位，且同时包含字母和数字");
+        }
+        if (nickname.length() < 2) throw new BusinessException(400, "昵称至少需要 2 个字");
+        Integer duplicate = jdbc.queryForObject("SELECT COUNT(*) FROM resident_user WHERE username=?", Integer.class, username);
+        if (duplicate != null && duplicate > 0) throw new BusinessException(409, "该用户名已被注册");
+        jdbc.update("INSERT INTO resident_user(username,password_hash,nickname,district,street_or_town,region_code) VALUES (?,?,?,?,?,?)",
+                username, passwordEncoder.encode(password), nickname, "宝山区", "大场镇", DACHANG_REGION);
+        return login(new LoginRequest(username, password));
+    }
+
+    @PostMapping(value = "/api/public/community/media", consumes = "multipart/form-data")
+    public ApiResponse<Map<String, Object>> uploadMedia(
+            @RequestHeader("X-Resident-Token") String token, @RequestPart("file") MultipartFile file) throws java.io.IOException {
+        return ApiResponse.ok(mediaService.upload(resident(token), file));
+    }
+
+    @GetMapping("/api/public/community/media/{id}")
+    public ResponseEntity<Resource> media(@PathVariable long id) {
+        CommunityMediaService.MediaFile file = mediaService.load(id, false);
+        return ResponseEntity.ok().contentType(file.mediaType()).body(file.resource());
+    }
+
+    @GetMapping("/api/public/community/media/{id}/thumbnail")
+    public ResponseEntity<Resource> thumbnail(@PathVariable long id) {
+        CommunityMediaService.MediaFile file = mediaService.load(id, true);
+        return ResponseEntity.ok().contentType(file.mediaType()).body(file.resource());
     }
 
     @PostMapping("/api/public/resident/login")
@@ -74,12 +128,14 @@ public class ResidentCommunityController {
                 + "FROM community_post p JOIN resident_user u ON u.id=p.resident_user_id "
                 + "WHERE p.region_code=? AND p.status IN ('VISIBLE','REPORTED') " + filter
                 + "ORDER BY p.created_at DESC,p.id DESC LIMIT 100";
-        return ApiResponse.ok("最新".equals(category)
+        List<Map<String, Object>> result = "最新".equals(category)
                 ? jdbc.queryForList(sql, regionCode)
-                : jdbc.queryForList(sql, regionCode, category));
+                : jdbc.queryForList(sql, regionCode, category);
+        return ApiResponse.ok(mediaService.mediaForPosts(result));
     }
 
     @PostMapping("/api/public/community/posts")
+    @Transactional
     public ApiResponse<Map<String, Object>> createPost(
             @RequestHeader("X-Resident-Token") String token,
             @RequestBody PostRequest request) {
@@ -88,10 +144,24 @@ public class ResidentCommunityController {
         if (content.length() < 2) throw new BusinessException(400, "帖子内容至少需要 2 个字");
         String category = request.category() == null ? "最新" : request.category().trim();
         if (!List.of("最新", "互助", "活动").contains(category)) throw new BusinessException(400, "请选择正确的帖子分类");
-        jdbc.update("INSERT INTO community_post(resident_user_id,category,content,region_code,district,street_or_town,is_demo) "
-                        + "VALUES (?,?,?,?,?,?,?)", user.get("id"), category, content, user.get("region_code"),
-                user.get("district"), user.get("street_or_town"), user.get("is_demo"));
-        long id = jdbc.queryForObject("SELECT MAX(id) FROM community_post WHERE resident_user_id=?", Long.class, user.get("id"));
+        GeneratedKeyHolder keys = new GeneratedKeyHolder();
+        jdbc.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO community_post(resident_user_id,category,content,region_code,district,street_or_town,is_demo) "
+                            + "VALUES (?,?,?,?,?,?,?)", new String[]{"id"});
+            statement.setObject(1, user.get("id"));
+            statement.setString(2, category);
+            statement.setString(3, content);
+            statement.setObject(4, user.get("region_code"));
+            statement.setObject(5, user.get("district"));
+            statement.setObject(6, user.get("street_or_town"));
+            statement.setObject(7, user.get("is_demo"));
+            return statement;
+        }, keys);
+        Number generatedId = keys.getKey();
+        if (generatedId == null) throw new IllegalStateException("创建帖子后未返回 ID");
+        long id = generatedId.longValue();
+        mediaService.bind(((Number) user.get("id")).longValue(), id, request.mediaIds());
         recordUsage(user.get("id"), "POST_CREATE");
         return ApiResponse.ok(Map.of("id", id));
     }
@@ -101,8 +171,9 @@ public class ResidentCommunityController {
             @PathVariable long id, @RequestHeader("X-Resident-Token") String token) {
         Map<String, Object> user = resident(token);
         visiblePost(id);
-        int count = jdbc.queryForObject("SELECT COUNT(*) FROM community_post_like WHERE community_post_id=? AND resident_user_id=?",
+        Integer countValue = jdbc.queryForObject("SELECT COUNT(*) FROM community_post_like WHERE community_post_id=? AND resident_user_id=?",
                 Integer.class, id, user.get("id"));
+        int count = countValue == null ? 0 : countValue;
         boolean liked = count == 0;
         if (liked) jdbc.update("INSERT INTO community_post_like(community_post_id,resident_user_id) VALUES (?,?)", id, user.get("id"));
         else jdbc.update("DELETE FROM community_post_like WHERE community_post_id=? AND resident_user_id=?", id, user.get("id"));
@@ -178,8 +249,9 @@ public class ResidentCommunityController {
     }
 
     private void visiblePost(long id) {
-        int count = jdbc.queryForObject("SELECT COUNT(*) FROM community_post WHERE id=? AND status IN ('VISIBLE','REPORTED')",
+        Integer countValue = jdbc.queryForObject("SELECT COUNT(*) FROM community_post WHERE id=? AND status IN ('VISIBLE','REPORTED')",
                 Integer.class, id);
+        int count = countValue == null ? 0 : countValue;
         if (count == 0) throw new BusinessException(404, "帖子不存在或已隐藏");
     }
 
@@ -210,7 +282,8 @@ public class ResidentCommunityController {
     }
 
     public record LoginRequest(String username, String password) {}
-    public record PostRequest(String category, String content) {}
+    public record RegisterRequest(String username, String password, String nickname) {}
+    public record PostRequest(String category, String content, List<Long> mediaIds) {}
     public record CommentRequest(String content) {}
     public record ReportRequest(String reason) {}
     public record ModerateRequest(String status) {}
