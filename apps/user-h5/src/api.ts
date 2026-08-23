@@ -19,7 +19,7 @@ export interface PublicItem {
   source_url?: string;
   content_kind?: string;
   cover_image_url?: string;
-  cover_image_type?: "ORIGINAL_COVER" | "ARTICLE_IMAGE" | "CATEGORY_DEFAULT" | "AI_ILLUSTRATION" | "EDITOR_UPLOAD";
+  cover_image_type?: "ORIGINAL_COVER" | "ARTICLE_IMAGE" | "CATEGORY_DEFAULT" | "AI_ILLUSTRATION" | "EDITOR_UPLOAD" | "UPLOADED_ORIGINAL" | "PDF_FIRST_PAGE";
   image_source_name?: string;
   image_source_url?: string;
   image_alt_text?: string;

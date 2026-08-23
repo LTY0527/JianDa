@@ -25,6 +25,7 @@ export interface CoverItem {
   slug?: string;
   title?: string;
   cover_image_url?: string;
+  cover_image_type?: string;
   content_kind?: string;
   category?: string;
 }
@@ -52,4 +53,21 @@ export function categoryDefaultCover(item: CoverItem, alternate = 0): string {
 
 export function articleCover(item: CoverItem): string {
   return item.cover_image_url || categoryDefaultCover(item);
+}
+
+const realCoverScores: Record<string, number> = {
+  ORIGINAL_COVER: 30,
+  EDITOR_UPLOAD: 28,
+  UPLOADED_ORIGINAL: 28,
+  ARTICLE_IMAGE: 25,
+  PDF_FIRST_PAGE: 18,
+};
+
+export function realCoverScore(item: CoverItem): number {
+  if (!item.cover_image_url) return 0;
+  return realCoverScores[item.cover_image_type || ""] || 0;
+}
+
+export function hasRealCover(item: CoverItem): boolean {
+  return realCoverScore(item) > 0;
 }

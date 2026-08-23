@@ -99,6 +99,8 @@ export interface ImageCandidate {
   image_hash?: string;
   image_cached: boolean;
   discovery_method: "OPEN_GRAPH" | "JSON_LD" | "ARTICLE_IMAGE";
+  context_text?: string;
+  relevance_score?: number;
   priority_rank: number;
   rights_status: string;
   review_status: string;

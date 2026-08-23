@@ -7,17 +7,31 @@ import { fetchItems, type PublicItem } from "../api";
 import { contentKind, importanceScore, normalizeTitle, truncateSummary } from "../content";
 import { readerPreferences } from "../library";
 import { Search, Landmark, HeartPulse, HandHeart, ShieldAlert, Drama, ChevronRight, Volume2, Type, CalendarDays, BellRing, ArrowRight, WifiOff, Utensils, Building2, PhoneCall } from "lucide-vue-next";
-import { articleCover, categoryDefaultCover } from "../utils/coverImage";
+import { articleCover, categoryDefaultCover, hasRealCover, realCoverScore } from "../utils/coverImage";
 import { activeRegion } from "../region";
 const items = ref<PublicItem[]>([]);
 const loading = ref(true);
 const error = ref("");
+const featuredCoverFailed = ref(false);
 const cats = [["健康", HeartPulse, "健康"], ["养老政策", Landmark, "养老政策"], ["防诈", ShieldAlert, "防诈"], ["社区服务", HandHeart, "社区服务"], ["文化学习", Drama, "文化学习"]] as const;
 const today = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
 const hour = new Date().getHours();
 const greeting = hour < 11 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
-const todayReads = computed(() => { const preferred = readerPreferences().channels.map((item) => item === "政策" ? "养老政策" : item === "生活" ? "社区服务" : item); return [...items.value].filter((item) => contentKind(item) === "news").sort((a,b) => (importanceScore(b) + (preferred.includes(b.category) ? 15 : 0)) - (importanceScore(a) + (preferred.includes(a.category) ? 15 : 0))).slice(0,7); });
+function homePriority(item: PublicItem) {
+  const preferred = readerPreferences().channels.map((value) => value === "政策" ? "养老政策" : value === "生活" ? "社区服务" : value);
+  return importanceScore(item) + (preferred.includes(item.category) ? 15 : 0);
+}
+const todayReads = computed(() => [...items.value]
+  .filter((item) => contentKind(item) === "news")
+  .sort((a, b) => {
+    const aPriority = homePriority(a);
+    const bPriority = homePriority(b);
+    const bandDifference = Math.floor(bPriority / 10) - Math.floor(aPriority / 10);
+    if (bandDifference) return bandDifference;
+    return (bPriority + realCoverScore(b)) - (aPriority + realCoverScore(a));
+  }).slice(0, 7));
 const featured = computed(() => todayReads.value[0]);
+const featuredHasVisual = computed(() => Boolean(featured.value && hasRealCover(featured.value) && !featuredCoverFailed.value));
 const alerts = computed(() => [...items.value]
   .filter((item) => item.id !== featured.value?.id && ["反诈", "健康", "生活服务", "社区服务"].includes(item.category))
   .sort((a,b) => importanceScore(b)-importanceScore(a)).slice(0,2));
@@ -36,7 +50,7 @@ function fallbackCover(event: Event, item: PublicItem) {
   const fallback = categoryDefaultCover(item, attempt);
   if (!image.src.endsWith(fallback)) image.src = fallback;
 }
-async function load() { loading.value = true; error.value = ""; try { items.value = await fetchItems(undefined, activeRegion.value.region_code); } catch { error.value = "暂时无法读取权威内容，请稍后再试"; } finally { loading.value = false; } }
+async function load() { loading.value = true; error.value = ""; featuredCoverFailed.value = false; try { items.value = await fetchItems(undefined, activeRegion.value.region_code); } catch { error.value = "暂时无法读取权威内容，请稍后再试"; } finally { loading.value = false; } }
 onMounted(load);
 </script>
 <template><div class="h5-page"><H5Header /><main class="h5-main home-main">
@@ -45,8 +59,8 @@ onMounted(load);
   <div v-else-if="error" class="home-error" role="status"><WifiOff /><div><b>内容暂时没有加载成功</b><p>{{ error }}</p></div><button type="button" @click="load">重新加载</button></div>
   <template v-else>
     <header v-if="featured" class="stream-heading home-recommend-heading"><div><h2>今天要紧的事</h2><p>按本地相关、重要程度和截止时间整理</p></div></header>
-    <section v-if="featured" class="featured-story">
-      <img :src="articleCover(featured)" :alt="featured.image_alt_text || `${featured.title}配图`" fetchpriority="high" decoding="async" referrerpolicy="no-referrer" @error="fallbackCover($event, featured)"/>
+    <section v-if="featured" class="featured-story" :class="{ 'featured-story--text': !featuredHasVisual }">
+      <img v-if="featuredHasVisual" :src="articleCover(featured)" :alt="featured.image_alt_text || `${featured.title}配图`" fetchpriority="high" decoding="async" referrerpolicy="no-referrer" @error="featuredCoverFailed = true"/>
       <div><span>{{featured.category}}{{featured.is_local?" · 本地":""}}</span><h2>{{normalizeTitle(featured.title)}}</h2><p>{{truncateSummary(featured.summary)}}</p><small>权威来源 · {{featured.source_name}} · {{String(featured.published_at).slice(0,10)}} · {{featured.reading_minutes||1}}分钟阅读</small><RouterLink :to="`/news/${featured.slug}`">查看适老版<ArrowRight/></RouterLink></div>
     </section>
     <section v-if="alerts.length" class="important-alerts"><header><BellRing /><div><h2>重要提醒</h2><p>请优先留意安全、健康和公共服务变化</p></div></header><article v-for="alert in alerts" :key="alert.id"><span>{{ alert.category }}</span><div><h3>{{ normalizeTitle(alert.title) }}</h3><p>{{ truncateSummary(alert.summary, 100) }}</p><small>{{ alert.source_name }} · {{ String(alert.published_at).slice(0,10) }}</small></div><RouterLink :to="`/${contentKind(alert)}/${alert.slug}`">立即查看<ArrowRight /></RouterLink></article></section>

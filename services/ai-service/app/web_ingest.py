@@ -109,7 +109,7 @@ class _ParsedPage:
 
 
 class _ArticleParser(HTMLParser):
-    BLOCK_TAGS = {"p", "h1", "h2", "h3", "h4", "li", "blockquote"}
+    BLOCK_TAGS = {"p", "h1", "h2", "h3", "h4", "li", "blockquote", "figcaption"}
     SKIP_TAGS = {"script", "style", "noscript", "svg", "nav", "footer", "form", "button"}
 
     def __init__(self, base_url: str) -> None:
@@ -124,6 +124,8 @@ class _ArticleParser(HTMLParser):
         self._title_text: list[str] = []
         self._json_ld_text: list[str] = []
         self._in_json_ld = False
+        self._last_block_text = ""
+        self._pending_image_indexes: list[int] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr = {key.lower(): value or "" for key, value in attrs}
@@ -159,6 +161,11 @@ class _ArticleParser(HTMLParser):
                 self.page.blocks.append(text)
                 if self._preferred_depth:
                     self.page.preferred_blocks.append(text)
+                for index in self._pending_image_indexes:
+                    image = self.page.images[index]
+                    image.context_text = _clean(f"{image.context_text} {text}")[:500]
+                self._pending_image_indexes = []
+                self._last_block_text = text
             self._block_tag = ""
             self._block_text = []
         if tag in {"article", "main"} and self._preferred_depth:
@@ -221,6 +228,13 @@ class _ArticleParser(HTMLParser):
         width = int(attr.get("width", "0")) if attr.get("width", "").isdigit() else None
         height = int(attr.get("height", "0")) if attr.get("height", "").isdigit() else None
         caption = (attr.get("alt") or attr.get("title") or "").strip()
+        dom_hint = " ".join(filter(None, (
+            " ".join(self._stack[-5:]),
+            attr.get("class", ""),
+            attr.get("id", ""),
+            attr.get("role", ""),
+        )))
+        context_text = _clean(f"{self._last_block_text} {caption} {dom_hint}")[:500]
         known = {image.url for image in self.page.images}
         for source in sources:
             source = source.strip()
@@ -230,15 +244,18 @@ class _ArticleParser(HTMLParser):
             if resolved in known:
                 continue
             known.add(resolved)
+            image_index = len(self.page.images)
             self.page.images.append(
                 WebArticleImage(
                     url=resolved,
                     caption=caption,
+                    context_text=context_text,
                     discovery_method="ARTICLE_IMAGE",
                     width=width,
                     height=height,
                 )
             )
+            self._pending_image_indexes.append(image_index)
 
     def _parse_json_ld(self, value: str) -> None:
         try:
@@ -271,6 +288,33 @@ def _looks_like_chrome(value: str) -> bool:
     normalized = value.replace(" ", "")
     chrome = ("首页", "登录", "注册", "客户端下载", "相关推荐", "责任编辑", "版权所有", "网站地图")
     return len(normalized) < 80 and sum(item in normalized for item in chrome) >= 2
+
+
+def _topic_tokens(value: str) -> set[str]:
+    """Build small language-neutral tokens without a site-specific dictionary."""
+    normalized = _clean(value).lower()
+    tokens = set(re.findall(r"[a-z0-9]{3,}", normalized))
+    for run in re.findall(r"[\u3400-\u9fff]{2,}", normalized):
+        tokens.update(run[index:index + 2] for index in range(len(run) - 1))
+    return tokens
+
+
+def _image_relevance(
+    page: _ParsedPage, image: WebArticleImage, discovery_method: str,
+) -> int:
+    base = {"OPEN_GRAPH": 80, "JSON_LD": 70, "ARTICLE_IMAGE": 10}[discovery_method]
+    evidence = _clean(f"{image.caption} {image.context_text}")
+    overlap = _topic_tokens(page.title).intersection(_topic_tokens(evidence))
+    score = base + min(24, len(overlap) * 4)
+    context = evidence.lower()
+    if "article" in context or "main" in context:
+        score += 15
+    unrelated = (
+        "header", "footer", "navbar", "navigation", "sidebar", "download-app",
+        "copyright", "login", "register", "页头", "页脚", "导航", "登录", "版权",
+    )
+    score -= sum(20 for word in unrelated if word in context)
+    return max(0, min(100, score))
 
 
 def _json_ld_metadata(page: _ParsedPage) -> None:
@@ -410,21 +454,29 @@ async def _validated_cover(
     # clients use JianDa's local category artwork.
     if not allow_image_candidates:
         return "", "CATEGORY_DEFAULT", page.title, None, None, "", False
-    candidates: list[tuple[str, str, str, str]] = []
+    candidates: list[tuple[str, str, str, str, str]] = []
     if page.cover_image_url:
-        candidates.append((page.cover_image_url, page.cover_image_type, page.title, "OPEN_GRAPH"))
+        candidates.append((page.cover_image_url, page.cover_image_type, page.title, "OPEN_GRAPH", "OpenGraph 封面"))
     if page.json_ld_image_url and page.json_ld_image_url != page.cover_image_url:
-        candidates.append((page.json_ld_image_url, "ORIGINAL_COVER", page.title, "JSON_LD"))
-    candidates.extend((image.url, "ARTICLE_IMAGE", image.caption, "ARTICLE_IMAGE") for image in page.images)
+        candidates.append((page.json_ld_image_url, "ORIGINAL_COVER", page.title, "JSON_LD", "JSON-LD 封面"))
+    candidates.extend((image.url, "ARTICLE_IMAGE", image.caption, "ARTICLE_IMAGE", image.context_text) for image in page.images)
     rejected_words = (
         "logo", "icon", "avatar", "qrcode", "qr_code", "qr-code", "tracking", "pixel",
         "banner-ad", "advert", "广告", "二维码", "头像", "图标", "统计",
     )
     validated_images: list[WebArticleImage] = []
     selected: tuple[str, str, str, int, int, str, bool] | None = None
-    for rank, (url, image_type, alt, discovery_method) in enumerate(candidates[:8]):
-        fingerprint = f"{url} {alt}".lower()
+    validated_ranked: list[tuple[int, str, str, str, int, int, str]] = []
+    for rank, (url, image_type, alt, discovery_method, context_text) in enumerate(candidates[:12]):
+        fingerprint = f"{url} {alt} {context_text}".lower()
         if any(word in fingerprint for word in rejected_words):
+            continue
+        candidate = WebArticleImage(
+            url=url, caption=_clean(alt) or page.title,
+            context_text=_clean(context_text), discovery_method=discovery_method,
+        )
+        relevance_score = _image_relevance(page, candidate, discovery_method)
+        if discovery_method == "ARTICLE_IMAGE" and relevance_score < 20:
             continue
         try:
             await _assert_public_host(url)
@@ -447,18 +499,22 @@ async def _validated_cover(
             image_hash = hashlib.sha256(data).hexdigest()
             validated_images.append(WebArticleImage(
                 url=str(response.url), caption=_clean(alt) or page.title,
+                context_text=_clean(context_text), relevance_score=relevance_score,
                 discovery_method=discovery_method, mime_type=content_type,
                 width=width, height=height, image_hash=image_hash,
                 image_cached=False, candidate_status="VALID",
             ))
-            if selected is None:
-                selected = (
-                    str(response.url), image_type, _clean(alt) or page.title,
-                    width, height, image_hash, True,
-                )
+            validated_ranked.append((
+                relevance_score, str(response.url), image_type,
+                _clean(alt) or page.title, width, height, image_hash,
+            ))
         except (httpx.HTTPError, OSError, ValueError):
             continue
+    validated_images.sort(key=lambda image: image.relevance_score, reverse=True)
     page.images = validated_images
+    if validated_ranked:
+        best = max(validated_ranked, key=lambda item: item[0])
+        selected = (best[1], best[2], best[3], best[4], best[5], best[6], True)
     return selected or ("", "CATEGORY_DEFAULT", page.title, None, None, "", False)
 
 

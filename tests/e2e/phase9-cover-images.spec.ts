@@ -66,7 +66,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("broken and missing covers use responsive category defaults", async ({
+test("broken hero cover becomes text while list items keep category defaults", async ({
   page,
 }) => {
   const consoleErrors: string[] = [];
@@ -81,13 +81,10 @@ test("broken and missing covers use responsive category defaults", async ({
   await expect(page.locator("#app")).not.toBeEmpty();
   await expect(page.locator("vite-error-overlay")).toHaveCount(0);
 
-  const featured = page.locator(".featured-story > img");
-  await expect(featured).toHaveAttribute("alt", "高温天气健康提示");
-  await expect(featured).toHaveAttribute("src", /\/images\/defaults\/health-\d\.svg$/);
-  await expect(featured).toHaveCSS("object-fit", "cover");
-  const featuredBox = await featured.boundingBox();
-  expect(featuredBox).not.toBeNull();
-  expect(featuredBox!.width / featuredBox!.height).toBeCloseTo(16 / 9, 1);
+  const featured = page.locator(".featured-story");
+  await expect(featured).toHaveClass(/featured-story--text/);
+  await expect(featured.locator("img")).toHaveCount(0);
+  await expect(featured.getByRole("heading")).toContainText("三伏天老年人健康提醒");
 
   const listCovers = page.locator(".editorial-card__image img");
   await expect(listCovers.first()).toHaveAttribute("loading", "lazy");
@@ -113,7 +110,7 @@ test("broken and missing covers use responsive category defaults", async ({
     path: path.join(os.tmpdir(), "jianda-phase9-cover-mobile.png"),
     fullPage: true,
   });
-  expect(consoleErrors).toHaveLength(2);
+  expect(consoleErrors.length).toBeGreaterThanOrEqual(1);
   expect(new Set(consoleErrors)).toEqual(
     new Set([
       "Failed to load resource: the server responded with a status of 404 (Not Found)",

@@ -74,6 +74,8 @@ class PublicImportIntegrationTest {
                             Map.ofEntries(
                                     Map.entry("url", "https://www.news.cn/image/cover.png"),
                                     Map.entry("caption", "老年人进行适量运动"),
+                                    Map.entry("context_text", "OpenGraph 封面 老年人科学减重"),
+                                    Map.entry("relevance_score", 92),
                                     Map.entry("discovery_method", "OPEN_GRAPH"),
                                     Map.entry("mime_type", "image/png"),
                                     Map.entry("width", 1200), Map.entry("height", 675),
@@ -82,6 +84,8 @@ class PublicImportIntegrationTest {
                             Map.ofEntries(
                                     Map.entry("url", "https://www.news.cn/image/article.png"),
                                     Map.entry("caption", "正文运动示意"),
+                                    Map.entry("context_text", "article 老年人保持吃动平衡"),
+                                    Map.entry("relevance_score", 44),
                                     Map.entry("discovery_method", "ARTICLE_IMAGE"),
                                     Map.entry("mime_type", "image/png"),
                                     Map.entry("width", 900), Map.entry("height", 600),
@@ -442,6 +446,8 @@ class PublicImportIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(2))
                 .andExpect(jsonPath("$.data[0].discovery_method").value("OPEN_GRAPH"))
+                .andExpect(jsonPath("$.data[0].relevance_score").value(92))
+                .andExpect(jsonPath("$.data[0].context_text").value("OpenGraph 封面 老年人科学减重"))
                 .andExpect(jsonPath("$.data[1].discovery_method").value("ARTICLE_IMAGE"));
         String candidatesBody = mvc.perform(get("/api/web-articles/{id}/image-candidates", documentId)
                         .header("Authorization", auth))

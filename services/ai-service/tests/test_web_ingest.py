@@ -196,6 +196,32 @@ def test_candidate_download_switch_is_independent_from_public_cache_permission(m
     assert result.images[0].candidate_status == "VALID"
 
 
+def test_article_image_records_nearby_context_and_relevance(monkeypatch):
+    html = """<html><head><title>大场镇长者助餐服务开放</title></head><body><article>
+    <h1>大场镇长者助餐服务开放</h1>
+    <p>大场镇社区食堂为老年居民提供午餐和助餐咨询。</p>
+    <figure><img src="/canteen.png" alt="长者在大场镇社区食堂用餐">
+    <figcaption>社区工作人员介绍助餐服务安排</figcaption></figure>
+    <p>具体开放时间和申请条件请以属地官方公告为准。</p>
+    </article></body></html>"""
+    result = _run_preview(monkeypatch, html)
+    candidate = next(image for image in result.images if image.url.endswith("/canteen.png"))
+    assert "社区食堂" in candidate.context_text
+    assert candidate.relevance_score >= 20
+
+
+def test_large_navigation_banner_is_not_accepted_as_article_image(monkeypatch):
+    html = """<html><head><title>社区健康服务通知</title></head><body>
+    <header class="navigation"><img src="/portal-banner.png" alt="网站服务导航"></header>
+    <article><p>社区卫生服务中心发布健康服务通知，请居民关注属地官方安排。</p>
+    <p>本文说明服务时间变化，具体事项以社区卫生服务中心公开信息为准。</p>
+    <p>如有疑问请通过官方联系电话咨询，不要相信非官方收费链接。</p></article>
+    </body></html>"""
+    result = _run_preview(monkeypatch, html)
+    assert not any(image.url.endswith("/portal-banner.png") for image in result.images)
+    assert result.cover_image_type == "CATEGORY_DEFAULT"
+
+
 def test_wechat_identity_hints_do_not_claim_official_status(monkeypatch):
     html = """<html><head><title>社区健康提醒</title>
     <meta name="profile_nickname" content="浦江健康服务">

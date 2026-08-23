@@ -457,6 +457,8 @@ class WebArticleRequest(BaseModel):
 class WebArticleImage(BaseModel):
     url: str
     caption: str = ""
+    context_text: str = ""
+    relevance_score: int = 0
     discovery_method: Literal["OPEN_GRAPH", "JSON_LD", "ARTICLE_IMAGE"] = "ARTICLE_IMAGE"
     mime_type: str = ""
     width: int | None = None

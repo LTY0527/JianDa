@@ -38,8 +38,8 @@ public class ImageCandidateService {
         assertAccess(documentId, user);
         return jdbc.queryForList("SELECT id,document_id,candidate_url,source_page_url,source_name,alt_text,width,height,"
                 + "mime_type,image_hash,image_cached,discovery_method,priority_rank,candidate_status,rights_status,"
-                + "review_status,rejection_reason,usage_basis,created_at,updated_at,reviewed_at,reviewer_id "
-                + "FROM image_candidate WHERE document_id=? ORDER BY priority_rank,id", documentId);
+                + "review_status,rejection_reason,usage_basis,context_text,relevance_score,created_at,updated_at,reviewed_at,reviewer_id "
+                + "FROM image_candidate WHERE document_id=? ORDER BY relevance_score DESC,priority_rank,id", documentId);
     }
 
     @Transactional
@@ -63,11 +63,13 @@ public class ImageCandidateService {
             if (List.of("logo", "icon", "avatar", "qrcode", "qr-code", "tracking", "pixel", "advert", "广告", "二维码", "头像", "图标")
                     .stream().anyMatch(fingerprint::contains)) continue;
             jdbc.update("INSERT INTO image_candidate(document_id,candidate_url,source_page_url,source_name,alt_text,width,height,"
-                            + "mime_type,image_hash,image_cached,discovery_method,priority_rank,candidate_status,rights_status,review_status) "
-                            + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'VALID','UNKNOWN','PENDING')",
+                            + "mime_type,image_hash,image_cached,discovery_method,priority_rank,context_text,relevance_score,"
+                            + "candidate_status,rights_status,review_status) "
+                            + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'VALID','UNKNOWN','PENDING')",
                     documentId, url, sourcePage, "原网页", text(image.get("caption")), width, height,
                     nullable(image.get("mime_type")), nullable(image.get("image_hash")),
-                    Boolean.TRUE.equals(image.get("image_cached")), method(image.get("discovery_method")), rank++);
+                    Boolean.TRUE.equals(image.get("image_cached")), method(image.get("discovery_method")), rank++,
+                    truncate(text(image.get("context_text")), 1000), relevance(image.get("relevance_score")));
         }
     }
 
@@ -108,7 +110,7 @@ public class ImageCandidateService {
         }
         List<Map<String, Object>> pending = jdbc.queryForList(
                 "SELECT id FROM image_candidate WHERE document_id=? AND review_status='PENDING' "
-                        + "ORDER BY priority_rank,id LIMIT 1", documentId);
+                        + "ORDER BY relevance_score DESC,priority_rank,id LIMIT 1", documentId);
         if (pending.isEmpty()) return false;
         long candidateId = ((Number) pending.get(0).get("id")).longValue();
         approve(candidateId, text(policy.get("source_name")),
@@ -225,6 +227,15 @@ public class ImageCandidateService {
 
     private static Integer number(Object value) {
         return value instanceof Number number ? number.intValue() : null;
+    }
+
+    private static int relevance(Object value) {
+        Integer score = number(value);
+        return score == null ? 0 : Math.max(0, Math.min(100, score));
+    }
+
+    private static String truncate(String value, int maxLength) {
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 
     private static String nullable(Object value) {
