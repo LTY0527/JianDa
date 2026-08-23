@@ -10,7 +10,7 @@ import {
   Volume2,
 } from "lucide-vue-next";
 const username = ref("org_admin"),
-  password = ref("Jianda@123"),
+  password = ref(""),
   loading = ref(false),
   error = ref("");
 const router = useRouter();
@@ -79,7 +79,7 @@ async function login() {
           {{ loading ? "正在登录…" : "登录" }}
         </button>
         <div class="demo-note">
-          <b>演示账号</b><span>org_admin / Jianda@123</span>
+          <b>课程验收</b><span>请使用分配的机构账号与密码</span>
         </div>
       </form>
     </section>

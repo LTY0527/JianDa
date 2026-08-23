@@ -68,15 +68,12 @@ test("首页清理技术文本并保持紧凑资讯布局", async ({ page }) => 
   );
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto(h5Url);
-  await expect(page.getByRole("heading", { name: "今天要紧的事" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "推荐内容" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "老年人夏季健康提醒" }).first()).toBeVisible();
   await expect(page.getByText(/###|\*\*/)).toHaveCount(0);
-  const order = await page.locator("main section, main header").evaluateAll((nodes) =>
-    nodes.map((node) => node.textContent || "").filter((text) =>
-      ["今天要紧的事", "重要提醒", "大场通知", "长辈常用", "最近更新", "按分类查看"]
-        .some((label) => text.includes(label))),
-  );
-  expect(order.join("|")).toMatch(/今天要紧的事.*重要提醒.*大场通知.*长辈常用.*最近更新.*按分类查看/);
+  await expect(page.locator(".commercial-hero")).toBeVisible();
+  await expect(page.locator(".quick-tasks")).toBeVisible();
+  await expect(page.locator(".mixed-feed")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.screenshot({
     path: path.join(os.tmpdir(), "jianda-product-home-mobile.png"),

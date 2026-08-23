@@ -47,8 +47,8 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     for (const label of ["首页", "邻里", "简达助手", "办事", "我的"]) {
       await expect(navigation.getByRole("link", { name: label, exact: true })).toBeVisible();
     }
-    await expect(page.getByRole("heading", { name: "重要提醒" })).toBeVisible();
-    await page.getByRole("link", { name: "查看全部权威资讯" }).click();
+    await expect(page.getByRole("heading", { name: "推荐内容" })).toBeVisible();
+    await page.getByRole("link", { name: "查看全部" }).click();
     await expect(page.getByRole("heading", { name: "权威资讯" })).toBeVisible();
     await page.getByRole("button", { name: "健康", exact: true }).click();
     await page.getByRole("button", { name: "重要", exact: true }).click();

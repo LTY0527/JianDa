@@ -22,7 +22,7 @@ test.describe("H5 LAN HTTP compatibility", () => {
     page,
   }) => {
     await page.goto(h5Url);
-    await expect(page.getByRole("heading", { name: "重要提醒" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "推荐内容" })).toBeVisible();
 
     await page.goto(`${h5Url}/news`);
     await expect(page.getByRole("heading", { name: "权威资讯" })).toBeVisible();
@@ -52,7 +52,7 @@ test.describe("H5 LAN HTTP compatibility", () => {
     await page.goto(h5Url);
     await expect(page.getByText("内容暂时没有加载成功")).toBeVisible();
     await page.getByRole("button", { name: "重新加载" }).click();
-    await expect(page.getByRole("heading", { name: "重要提醒" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "推荐内容" })).toBeVisible();
   });
 
   test("falls back to getRandomValues and reuses the stored visitor ID", async ({

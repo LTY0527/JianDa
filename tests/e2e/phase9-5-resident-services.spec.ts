@@ -31,14 +31,18 @@ async function mocks(page: Page, calls: string[]) {
   });
 }
 
-test("首页形成要紧事项、大场通知、长辈常用和最近更新", async ({ page }) => {
+test("首页形成强搜索、频道、单一 Hero、快捷任务和连续内容流", async ({ page }) => {
   await mocks(page, []);
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto(h5Url);
-  for (const title of ["今天要紧的事", "大场通知", "长辈常用", "最近更新"]) {
-    await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  }
-  await expect(page.getByText(/今天有 3 件事值得留意/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "搜索通知、办事和社区服务" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "首页频道" })).toBeVisible();
+  await expect(page.locator(".commercial-hero")).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "高频服务" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "推荐内容" })).toBeVisible();
+  await page.getByRole("button", { name: "防诈", exact: true }).click();
+  await expect(page).toHaveURL(/channel=fraud/);
+  await expect(page.getByRole("heading", { name: "防诈内容" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
 

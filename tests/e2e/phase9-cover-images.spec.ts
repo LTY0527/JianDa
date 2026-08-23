@@ -66,7 +66,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("broken hero cover becomes text while list items keep category defaults", async ({
+test("broken hero cover becomes text while category defaults stay as text feed", async ({
   page,
 }) => {
   const consoleErrors: string[] = [];
@@ -81,23 +81,21 @@ test("broken hero cover becomes text while list items keep category defaults", a
   await expect(page.locator("#app")).not.toBeEmpty();
   await expect(page.locator("vite-error-overlay")).toHaveCount(0);
 
-  const featured = page.locator(".featured-story");
-  await expect(featured).toHaveClass(/featured-story--text/);
+  const featured = page.locator(".commercial-hero");
+  await expect(featured).toHaveClass(/commercial-hero--text/);
   await expect(featured.locator("img")).toHaveCount(0);
   await expect(featured.getByRole("heading")).toContainText("三伏天老年人健康提醒");
 
-  const listCovers = page.locator(".editorial-card__image img");
-  await expect(listCovers.first()).toHaveAttribute("loading", "lazy");
-  await expect(listCovers.first()).toHaveAttribute("src", /\/images\/defaults\/policy-\d\.svg$/);
-  await expect(listCovers.first()).toHaveCSS("object-fit", "cover");
-  const beforeReload = await listCovers.evaluateAll((images) =>
-    images.map((image) => (image as HTMLImageElement).getAttribute("src")),
+  const feedEntries = page.locator(".mixed-feed .feed-entry");
+  await expect(feedEntries).toHaveCount(2);
+  await expect(feedEntries.locator("img")).toHaveCount(0);
+  const beforeReload = await feedEntries.evaluateAll((entries) =>
+    entries.map((entry) => entry.className),
   );
-  expect(new Set(beforeReload).size).toBe(beforeReload.length);
   await page.reload();
-  await expect(page.locator(".editorial-card__image img")).toHaveCount(beforeReload.length);
-  const afterReload = await page.locator(".editorial-card__image img").evaluateAll((images) =>
-    images.map((image) => (image as HTMLImageElement).getAttribute("src")),
+  await expect(page.locator(".mixed-feed .feed-entry")).toHaveCount(beforeReload.length);
+  const afterReload = await page.locator(".mixed-feed .feed-entry").evaluateAll((entries) =>
+    entries.map((entry) => entry.className),
   );
   expect(afterReload).toEqual(beforeReload);
   await expect

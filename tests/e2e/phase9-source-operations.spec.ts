@@ -106,7 +106,7 @@ test("来源默认安全配置、调度预算请求和等待预算状态清晰",
   await expect(page.locator("#app")).not.toBeEmpty();
   await expect(page.getByRole("heading", { name: "采集与来源" })).toBeVisible();
   await expect(page.getByText("来源核验、扫描范围、AI 预算和任务记录")).toBeVisible();
-  await page.getByRole("button", { name: /展开平台高级设置/ }).click();
+  await page.getByRole("button", { name: /高级管理/ }).click();
   await expect(page.getByText(/新来源保持停用/)).toBeVisible();
   await expect(page.getByText(/原图缓存和自动 AI 均关闭/)).toBeVisible();
   await expect(page.getByText(/必须人工审核后才能发布/)).toBeVisible();
@@ -172,10 +172,24 @@ test("来源、调度和预算页面在 375px 与 1440px 均不横向溢出视�
     await page.goto(`${institutionUrl}/public-sources`);
     await expect(page.getByRole("heading", { name: "采集与来源" })).toBeVisible();
     await expect(page.getByText("健康权威来源")).toBeVisible();
+    const sourceCard = page.locator(".source-card").first();
+    await expect(sourceCard.getByRole("button", { name: "立即检查" })).toBeVisible();
+    await expect(sourceCard.getByRole("link", { name: "查看新内容" })).toBeVisible();
+    await expect(sourceCard.getByRole("button", { name: "更多" })).toBeVisible();
+    await expect(sourceCard.getByRole("checkbox")).toHaveCount(0);
+    await expect(sourceCard.getByText("自动更新已关闭")).toBeVisible();
+    if (viewport.width === 375) {
+      const help = sourceCard.getByRole("button", { name: "自动更新说明" });
+      await help.click();
+      await expect(page.getByRole("tooltip")).toContainText("不等于自动发布");
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("tooltip")).toHaveCount(0);
+      await expect(help).toBeFocused();
+    }
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBeTruthy();
-    await page.getByRole("button", { name: /展开平台高级设置/ }).click();
+    await page.getByRole("button", { name: /高级管理/ }).click();
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBeTruthy();

@@ -38,7 +38,7 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 390, height: 844 }
     await page.setViewportSize(viewport);
     await page.goto(h5Url);
 
-    await expect(page.getByRole("heading", { name: /大场镇居民/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "推荐内容" })).toBeVisible();
     await expect(page.getByText("2026年大场镇政府开放月活动预告").first()).toBeVisible();
     await expect(page.getByRole("link", { name: "邻里" })).toBeVisible();
     await expectNoOverflow(page);

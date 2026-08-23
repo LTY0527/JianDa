@@ -49,7 +49,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
 
     for (const [route, heading, file] of pages) {
       await page.goto(`${h5Url}${route}`);
-      await assertRendered(page, route === "/" ? /大场镇居民/ : heading);
+      await assertRendered(page, route === "/" ? "推荐内容" : heading);
       const navigation = page.getByRole("navigation", { name: "主要导航" });
       await expect(navigation.getByRole("link")).toHaveCount(5);
       await page.waitForLoadState("networkidle");
@@ -76,8 +76,8 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     const checks = [
       [375, 812, "/guide/social-security-card-renewal", "社会保障卡到期换领指南", "h5-guide-detail-375.png"],
       [375, 812, "/news/summer-heat-health", "高温天气老年人健康防护提醒", "h5-news-detail-375.png"],
-      [768, 1024, "/", /大场镇居民/, "h5-home-768.png"],
-      [1440, 900, "/", /大场镇居民/, "h5-home-1440.png"],
+      [768, 1024, "/", "推荐内容", "h5-home-768.png"],
+      [1440, 900, "/", "推荐内容", "h5-home-1440.png"],
     ] as const;
     for (const [width, height, route, heading, file] of checks) {
       await page.setViewportSize({ width, height });

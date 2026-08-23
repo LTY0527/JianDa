@@ -118,7 +118,7 @@ test("PARTIAL_SUCCESS 错误队列只允许重试未解决的可重试项", asyn
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${institutionUrl}/public-sources`);
-  await page.getByRole("button", { name: /展开平台高级设置/ }).click();
+  await page.getByRole("button", { name: /高级管理/ }).click();
   await page.getByRole("button", { name: "采集任务" }).click();
   const partialRow = page.locator("tbody tr").filter({ hasText: "#610" });
   await expect(partialRow).toContainText("部分成功");
