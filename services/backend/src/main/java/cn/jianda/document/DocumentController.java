@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -101,6 +102,12 @@ public class DocumentController {
     public ApiResponse<Void> updateField(@PathVariable long documentId, @PathVariable long fieldId,
                                          @Valid @RequestBody FieldRequest request) {
         service.updateField(documentId, fieldId, request.value(), request.confirmed(), UserContext.current());
+        return ApiResponse.ok(null);
+    }
+
+    @DeleteMapping("/{documentId}/fields/{fieldId}")
+    public ApiResponse<Void> rejectField(@PathVariable long documentId, @PathVariable long fieldId) {
+        service.rejectField(documentId, fieldId, UserContext.current());
         return ApiResponse.ok(null);
     }
 

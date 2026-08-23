@@ -210,6 +210,8 @@ export const documentApi = {
       value,
       confirmed,
     }),
+  rejectField: (documentId: number, fieldId: number) =>
+    http.delete<ApiResponse<void>>(`/documents/${documentId}/fields/${fieldId}`),
   review: (id: number, comment = "字段与原文一致") =>
     http.post<ApiResponse<void>>(`/documents/${id}/review`, { comment }),
   publish: (

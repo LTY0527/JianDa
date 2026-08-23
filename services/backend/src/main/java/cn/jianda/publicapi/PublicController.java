@@ -111,7 +111,7 @@ public class PublicController {
                         + "MAX(CASE WHEN f.field_type='CONTACT' THEN f.field_value END) phone,"
                         + "MAX(CASE WHEN f.field_type IN ('SERVICE_TIME','TIME') THEN f.field_value END) opening_hours,"
                         + "p.summary description,p.source_url,p.source_name,p.last_verified_at "
-                        + "FROM published_item p LEFT JOIN extracted_field f ON f.document_id=p.document_id "
+                        + "FROM published_item p LEFT JOIN extracted_field f ON f.document_id=p.document_id AND f.review_status<>'REJECTED' "
                         + "WHERE p.status='PUBLISHED' AND p.region_code=? "
                         + "AND (p.expires_at IS NULL OR p.expires_at>=CURRENT_TIMESTAMP) "
                         + "AND p.source_url IS NOT NULL AND p.source_url<>'' "
@@ -208,7 +208,7 @@ public class PublicController {
         result.put("generated", generated);
         List<Map<String, Object>> fields = jdbc.queryForList(
                 "SELECT field_type,field_label,field_value,page_no,segment_id,source_quote "
-                        + "FROM extracted_field WHERE document_id=? ORDER BY id", documentId);
+                        + "FROM extracted_field WHERE document_id=? AND review_status<>'REJECTED' ORDER BY id", documentId);
         result.put("fields", fields);
         result.put("original_file_available", documentService.publicOriginalFileAvailable(result));
         if (!generated.containsKey("SESSIONS")) {

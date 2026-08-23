@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -404,9 +405,37 @@ class CoreFlowIntegrationTest {
                         "fields", List.of(fact), "summary", List.of("请按原文咨询。"),
                         "plain_text", "请按原文电话咨询。", "steps", List.of(),
                         "term_explanations", Map.of(), "warnings", List.of(),
-                        "audio_script", "请按原文电话咨询。", "metrics", Map.of("total_tokens", 8)));
+                        "audio_script", "请按原文电话咨询。", "metrics", Map.ofEntries(
+                                Map.entry("provider", "external"),
+                                Map.entry("model", "deepseek-v4-flash"),
+                                Map.entry("request_id", "req-rewrite-success"),
+                                Map.entry("response_fingerprint", "fedcba9876543210"),
+                                Map.entry("accessible_rewrite_ms", 18),
+                                Map.entry("prompt_tokens", 5),
+                                Map.entry("completion_tokens", 3),
+                                Map.entry("total_tokens", 8))));
         mvc.perform(post("/api/documents/{id}/retry-rewrite", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
+        mvc.perform(get("/api/documents/{id}/jobs", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].provider_id").value("external"))
+                .andExpect(jsonPath("$.data[0].model_id").value("deepseek-v4-flash"))
+                .andExpect(jsonPath("$.data[0].provider_request_id").value("req-rewrite-success"))
+                .andExpect(jsonPath("$.data[0].response_fingerprint").value("fedcba9876543210"))
+                .andExpect(jsonPath("$.data[0].crossed_provider_boundary").value(true))
+                .andExpect(jsonPath("$.data[0].total_tokens").value(8));
+        String fieldsAfterRewrite = mvc.perform(get("/api/documents/{id}/fields", documentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andReturn().getResponse().getContentAsString();
+        long irrelevantFieldId = objectMapper.readTree(fieldsAfterRewrite).path("data").get(0).path("id").asLong();
+        mvc.perform(delete("/api/documents/{documentId}/fields/{fieldId}", documentId, irrelevantFieldId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(0));
         verify(aiClient).rewrite(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap(), anyMap());
         verify(aiClient).analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap());
     }

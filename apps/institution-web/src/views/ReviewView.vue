@@ -270,6 +270,22 @@ async function confirm(index: number) {
   }
 }
 
+async function rejectField(index: number) {
+  const field = fields.value[index];
+  if (!field || !window.confirm(`确认排除“${field.label}”吗？该字段不会进入公开内容。`)) return;
+  try {
+    await documentApi.rejectField(documentId, field.id);
+    fields.value.splice(index, 1);
+    values.value.splice(index, 1);
+    confirmed.value = confirmed.value
+      .filter((value) => value !== index)
+      .map((value) => value > index ? value - 1 : value);
+    active.value = Math.max(0, Math.min(active.value, fields.value.length - 1));
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
 function confirmModule(type: string) {
   if (!confirmedModules.value.includes(type)) {
     confirmedModules.value.push(type);
@@ -619,6 +635,9 @@ async function rejectCandidate(candidate: ImageCandidate) {
             </div>
             <button class="confirm-btn" @click.stop="confirm(entry.index)">
               <CheckCircle2 :size="17" />确认此字段
+            </button>
+            <button class="btn secondary" type="button" @click.stop="rejectField(entry.index)">
+              排除无关字段
             </button>
           </article>
         </div>

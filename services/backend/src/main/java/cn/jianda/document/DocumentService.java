@@ -761,7 +761,7 @@ public class DocumentService {
     public List<Map<String, Object>> fields(long id, AuthUser user) {
         assertAccess(id, user);
         List<Map<String, Object>> fields =
-                jdbc.queryForList("SELECT * FROM extracted_field WHERE document_id=? ORDER BY id", id);
+                jdbc.queryForList("SELECT * FROM extracted_field WHERE document_id=? AND review_status<>'REJECTED' ORDER BY id", id);
         markSuspectedDuplicateConditions(fields);
         return fields;
     }
@@ -917,6 +917,17 @@ public class DocumentService {
                     changedCharacters(previous, value.trim()), documentId);
         }
         log(user, "UPDATE_FIELD", "EXTRACTED_FIELD", fieldId, "SUCCESS");
+    }
+
+    @Transactional
+    public void rejectField(long documentId, long fieldId, AuthUser user) {
+        assertAccess(documentId, user);
+        int count = jdbc.update(
+                "UPDATE extracted_field SET review_status='REJECTED',reviewer_id=?,reviewed_at=CURRENT_TIMESTAMP "
+                        + "WHERE id=? AND document_id=? AND review_status<>'REJECTED'",
+                user.id(), fieldId, documentId);
+        if (count == 0) throw new BusinessException(404, "字段不存在或已排除");
+        log(user, "REJECT_FIELD", "EXTRACTED_FIELD", fieldId, "SUCCESS");
     }
 
     private static int changedCharacters(String before, String after) {
