@@ -222,6 +222,10 @@ class ProcessingMetrics(BaseModel):
     http_status: int = 200
     request_id: str = ""
     response_fingerprint: str = ""
+    rewrite_mode: Literal["MODEL", "DETERMINISTIC_FALLBACK"] = "MODEL"
+    rewrite_attempts: int = 1
+    normalization_applied: bool = False
+    normalization_rules: list[str] = Field(default_factory=list)
 
 
 class StepCard(BaseModel):
@@ -308,6 +312,9 @@ class AnalyzeResult(BaseModel):
     policy_sections: list[TypeSpecificFact] = Field(default_factory=list)
     health_guidance: list[TypeSpecificFact] = Field(default_factory=list)
     metrics: ProcessingMetrics = Field(default_factory=ProcessingMetrics)
+    rewrite_mode: Literal["MODEL", "DETERMINISTIC_FALLBACK"] = "MODEL"
+    normalization_applied: bool = False
+    normalization_rules: list[str] = Field(default_factory=list)
 
 
 class FactField(BaseModel):
@@ -395,13 +402,31 @@ class Segment(BaseModel):
     text: str
     start_offset: int
     end_offset: int
+    raw_text: str = ""
+
+
+class PageExtractionQuality(BaseModel):
+    page_no: int = Field(ge=1)
+    quality: Literal["GOOD", "UNCERTAIN", "POOR"]
+    selected_source: Literal["TEXT_LAYER", "OCR"]
+    text_char_count: int = 0
+    valid_chinese_ratio: float = 0
+    replacement_char_ratio: float = 0
+    whitespace_ratio: float = 0
+    image_count: int = 0
+    image_area_ratio: float = 0
+    text_block_count: int = 0
+    suspicious_garbage_ratio: float = 0
 
 
 class ExtractTextResult(BaseModel):
     text: str
+    raw_text: str = ""
     page_count: int
     segments: list[Segment]
     extraction_method: str
+    ocr_page_count: int = 0
+    quality_pages: list[PageExtractionQuality] = Field(default_factory=list)
 
 
 class MetadataPreview(BaseModel):

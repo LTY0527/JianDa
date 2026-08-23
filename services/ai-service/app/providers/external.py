@@ -280,6 +280,15 @@ class CompletionResult:
     repaired_paths: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class RewriteOutcome:
+    response: RewriteResponse
+    completions: tuple[CompletionResult, ...]
+    mode: str
+    attempts: int
+    normalization_rules: tuple[str, ...] = ()
+
+
 class ExternalLlmProvider(LlmProvider):
     """Two-stage OpenAI-compatible provider with strict source tracing."""
 
@@ -643,6 +652,35 @@ class ExternalLlmProvider(LlmProvider):
             ),
         )
 
+    @staticmethod
+    def _aggregate_completion_results(
+        results: list[CompletionResult],
+    ) -> CompletionResult:
+        digest = hashlib.sha256(
+            "".join(result.response_sha256 for result in results).encode()
+        ).hexdigest()
+        return CompletionResult(
+            payload=results[-1].payload if results else {},
+            request_id=",".join(
+                result.request_id for result in results if result.request_id
+            )[:240],
+            finish_reason=results[-1].finish_reason if results else "fallback",
+            prompt_tokens=sum(result.prompt_tokens for result in results),
+            completion_tokens=sum(result.completion_tokens for result in results),
+            total_tokens=sum(result.total_tokens for result in results),
+            elapsed_ms=sum(result.elapsed_ms for result in results),
+            retry_count=sum(result.retry_count for result in results),
+            response_length=sum(result.response_length for result in results),
+            response_sha256=digest,
+            json_parse_success=all(result.json_parse_success for result in results),
+            normalization_applied=any(
+                result.normalization_applied for result in results
+            ),
+            repaired_paths=tuple(
+                path for result in results for path in result.repaired_paths
+            ),
+        )
+
     def analyze(self, request: TextRequest) -> AnalyzeResult:
         started = time.perf_counter()
         try:
@@ -751,59 +789,14 @@ class ExternalLlmProvider(LlmProvider):
                 request, facts, sessions, active_prompt_version
             )
         )
-        try:
-            rewrite_result = self._completion(
-                active_client,
-                [
-                    {"role": "system", "content": rewrite_prompt.SYSTEM_PROMPT},
-                    {"role": "user", "content": rewrite_user},
-                ],
-                stage="accessible_rewrite",
-                max_tokens=self._dynamic_rewrite_max_tokens(request),
-            )
-            rewrite = self._validate_rewrite(
-                rewrite_result.payload,
-                request,
-                active_prompt_version,
-                completion=rewrite_result,
-            )
-        except ExternalProviderError as exc:
-            if exc.stage == "accessible_rewrite":
-                checkpoint = FactExtractionResponse(
-                    prompt_version=active_prompt_version,
-                    fields=facts,
-                    sessions=sessions,
-                    audience_rules=structured.audience_rules,
-                    service_schedule=structured.service_schedule,
-                    conditional_materials=structured.conditional_materials,
-                    fees=structured.fees,
-                    result_delivery=structured.result_delivery,
-                    deadline_rules=structured.deadline_rules,
-                    amendments=structured.amendments,
-                    uncertain_fields=structured.uncertain_fields,
-                    document_kind=structured.document_kind,
-                    document_outline=structured.document_outline,
-                    section_summaries=structured.section_summaries,
-                    standard_sections=structured.standard_sections,
-                    policy_sections=structured.policy_sections,
-                    health_guidance=structured.health_guidance,
-                )
-                exc.fact_checkpoint = {
-                    "prompt_version": active_prompt_version,
-                    "schema_version": "web-v1.1" if use_news_prompts else SCHEMA_VERSION,
-                    "model": self.settings.model,
-                    "response_fingerprint": fact_result.response_sha256[:16],
-                    "request_id": fact_result.request_id,
-                    "fact_extract_ms": fact_result.elapsed_ms,
-                    "prompt_tokens": fact_result.prompt_tokens,
-                    "completion_tokens": fact_result.completion_tokens,
-                    "total_tokens": fact_result.total_tokens,
-                    "facts": checkpoint.model_dump(mode="json"),
-                }
-                exc.prompt_tokens += fact_result.prompt_tokens
-                exc.completion_tokens += fact_result.completion_tokens
-                exc.total_tokens += fact_result.total_tokens
-            raise
+        rewrite_outcome = self._complete_rewrite_with_recovery(
+            active_client, rewrite_prompt.SYSTEM_PROMPT, rewrite_user, request,
+            active_prompt_version, facts,
+        )
+        rewrite = rewrite_outcome.response
+        rewrite_result = self._aggregate_completion_results(
+            list(rewrite_outcome.completions)
+        )
         rewrite = self._rewrite_with_sessions(rewrite, facts, sessions)
         metrics = ProcessingMetrics(
             schema_version=SCHEMA_VERSION,
@@ -841,6 +834,10 @@ class ExternalLlmProvider(LlmProvider):
                 rewrite_result.request_id,
             )))[:240],
             response_fingerprint=fact_result.response_sha256[:16],
+            rewrite_mode=rewrite_outcome.mode,
+            rewrite_attempts=rewrite_outcome.attempts,
+            normalization_applied=bool(rewrite_outcome.normalization_rules),
+            normalization_rules=list(rewrite_outcome.normalization_rules),
         )
         result = AnalyzeResult(
             fields=[
@@ -887,6 +884,9 @@ class ExternalLlmProvider(LlmProvider):
             policy_sections=structured.policy_sections,
             health_guidance=structured.health_guidance,
             metrics=metrics,
+            rewrite_mode=rewrite_outcome.mode,
+            normalization_applied=bool(rewrite_outcome.normalization_rules),
+            normalization_rules=list(rewrite_outcome.normalization_rules),
         )
         if cache_key:
             _RESULT_CACHE[cache_key] = result.model_copy(deep=True)
@@ -929,6 +929,131 @@ class ExternalLlmProvider(LlmProvider):
             structured.health_guidance,
         ))
 
+    def _complete_rewrite_with_recovery(
+        self,
+        client: httpx.Client | _AsyncClientAdapter,
+        system_prompt: str,
+        user_prompt: str,
+        request: TextRequest,
+        prompt_version: str,
+        facts: list[FactField],
+    ) -> RewriteOutcome:
+        completions: list[CompletionResult] = []
+        rules: list[str] = []
+        last_error: ExternalProviderError | None = None
+        for attempt in range(2):
+            corrective = ""
+            if attempt and last_error is not None:
+                path = last_error.json_path or "$"
+                corrective = (
+                    "\n\n上次仅改写阶段的 JSON Schema 校验未通过。"
+                    f"\n错误路径：{path}"
+                    "\n不要重新提取事实，只修正输出结构。"
+                    "\naction_checklist.priority 只能使用：立即 / 近期 / 了解即可。"
+                    "\nscope.national_or_local 只能使用：全国 / 地方 / 具体机构 / 原文未说明。"
+                    "\n输出单个合法 JSON 对象。"
+                )
+            try:
+                completion = self._completion(
+                    client,
+                    [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt + corrective},
+                    ],
+                    stage="accessible_rewrite",
+                    max_tokens=self._dynamic_rewrite_max_tokens(request),
+                )
+                completions.append(completion)
+                response = self._validate_rewrite(
+                    completion.payload, request, prompt_version,
+                    completion=completion,
+                )
+                rules.extend(completion.repaired_paths)
+                if attempt:
+                    rules.append(
+                        f"rewrite_retry_after:{last_error.json_path or '$'}"
+                    )
+                return RewriteOutcome(
+                    response=response,
+                    completions=tuple(completions),
+                    mode="MODEL",
+                    attempts=attempt + 1,
+                    normalization_rules=tuple(sorted(set(rules))),
+                )
+            except ExternalProviderError as exc:
+                last_error = exc
+                if not (attempt == 0 and exc.retryable):
+                    break
+        fallback_rules = list(rules)
+        if last_error is not None:
+            fallback_rules.append(
+                f"deterministic_fallback_after:{last_error.json_path or '$'}"
+            )
+        LOGGER.warning(
+            "provider=external model=%s stage=accessible_rewrite "
+            "rewrite_mode=DETERMINISTIC_FALLBACK attempts=%s error_path=%s",
+            self.settings.model,
+            max(1, len(completions)),
+            last_error.json_path if last_error else "$",
+        )
+        return RewriteOutcome(
+            response=self._deterministic_rewrite(prompt_version, facts),
+            completions=tuple(completions),
+            mode="DETERMINISTIC_FALLBACK",
+            attempts=max(1, len(completions)),
+            normalization_rules=tuple(sorted(set(fallback_rules))),
+        )
+
+    @staticmethod
+    def _deterministic_rewrite(
+        prompt_version: str, facts: list[FactField]
+    ) -> RewriteResponse:
+        by_type: dict[str, list[FactField]] = {}
+        for fact in facts:
+            by_type.setdefault(fact.field_type, []).append(fact)
+        ordered = [
+            fact for field_type in (
+                "TARGET_AUDIENCE", "ELIGIBILITY", "START_DATE", "END_DATE",
+                "EVENT_DATE", "SERVICE_TIME", "LOCATION", "MATERIAL", "FEE",
+                "CONTACT", "WARNING",
+            ) for fact in by_type.get(field_type, [])
+        ]
+        if not ordered:
+            ordered = facts
+        summary = [f"{fact.label}：{fact.value}" for fact in ordered[:3]]
+        if not summary:
+            summary = ["原文已提取，暂无可确定的结构化事实。"]
+        lines = ["已根据可追溯事实生成基础易读版本。"]
+        lines.extend(f"{fact.label}：{fact.value}" for fact in ordered)
+        steps: list[StepCard] = []
+        step_fields = (
+            ("MATERIAL", "准备需要的材料"),
+            ("START_DATE", "确认开始时间"),
+            ("END_DATE", "确认截止时间"),
+            ("LOCATION", "确认办理或活动地点"),
+            ("CONTACT", "需要时联系咨询"),
+        )
+        for field_type, title in step_fields:
+            for fact in by_type.get(field_type, [])[:1]:
+                steps.append(StepCard(
+                    order=len(steps) + 1, title=title, description=fact.value
+                ))
+        warnings = list(dict.fromkeys(
+            fact.value for fact in by_type.get("WARNING", [])
+        ))
+        plain_text = "\n".join(lines)
+        return RewriteResponse(
+            prompt_version=prompt_version,
+            summary=summary,
+            quick_summary=summary,
+            plain_text=plain_text,
+            steps=steps,
+            warnings=warnings,
+            term_explanations={},
+            audio_script="。".join(line.rstrip("。") for line in lines) + "。",
+            uncertainties=["已生成基础易读版本，AI自然化表达可稍后重新优化。"],
+        )
+
     def rewrite_from_checkpoint(
         self, request: TextRequest, checkpoint_payload: dict[str, Any]
     ) -> AnalyzeResult:
@@ -954,18 +1079,14 @@ class ExternalLlmProvider(LlmProvider):
             request, facts, checkpoint, active_prompt_version
         )
         started = time.perf_counter()
-        rewrite_result = self._completion(
-            self.client or self._shared_client(),
-            [
-                {"role": "system", "content": rewrite_prompt.SYSTEM_PROMPT},
-                {"role": "user", "content": rewrite_user},
-            ],
-            stage="accessible_rewrite",
-            max_tokens=self._dynamic_rewrite_max_tokens(request),
+        rewrite_outcome = self._complete_rewrite_with_recovery(
+            self.client or self._shared_client(), rewrite_prompt.SYSTEM_PROMPT,
+            rewrite_user, request, active_prompt_version, facts,
         )
-        rewrite = self._validate_rewrite(
-            rewrite_result.payload, request, active_prompt_version, completion=rewrite_result
+        rewrite_result = self._aggregate_completion_results(
+            list(rewrite_outcome.completions)
         )
+        rewrite = rewrite_outcome.response
         rewrite = self._rewrite_with_sessions(rewrite, facts, sessions)
         metrics = ProcessingMetrics(
             schema_version=SCHEMA_VERSION,
@@ -984,6 +1105,10 @@ class ExternalLlmProvider(LlmProvider):
             http_status=200,
             request_id=rewrite_result.request_id,
             response_fingerprint=rewrite_result.response_sha256[:16],
+            rewrite_mode=rewrite_outcome.mode,
+            rewrite_attempts=rewrite_outcome.attempts,
+            normalization_applied=bool(rewrite_outcome.normalization_rules),
+            normalization_rules=list(rewrite_outcome.normalization_rules),
         )
         return AnalyzeResult(
             fields=[ExtractedField(
@@ -1012,6 +1137,9 @@ class ExternalLlmProvider(LlmProvider):
             policy_sections=checkpoint.policy_sections,
             health_guidance=checkpoint.health_guidance,
             metrics=metrics,
+            rewrite_mode=rewrite_outcome.mode,
+            normalization_applied=bool(rewrite_outcome.normalization_rules),
+            normalization_rules=list(rewrite_outcome.normalization_rules),
         )
 
     def preview_metadata(
@@ -1443,16 +1571,32 @@ class ExternalLlmProvider(LlmProvider):
             priority_aliases = {
                 "URGENT": "立即",
                 "IMMEDIATE": "立即",
+                "HIGH": "立即",
+                "HIGH_PRIORITY": "立即",
                 "SOON": "近期",
+                "RECENT": "近期",
                 "NORMAL": "了解即可",
                 "FYI": "了解即可",
+                "LOW": "了解即可",
+                "紧急": "立即",
+                "高": "立即",
+                "高优先级": "立即",
+                "立即处理": "立即",
+                "近期处理": "近期",
+                "最近": "近期",
+                "一周内": "近期",
+                "参考": "了解即可",
+                "一般了解": "了解即可",
+                "非必须": "了解即可",
             }
             checklist = payload.get("action_checklist")
             if isinstance(checklist, list):
                 for index, raw in enumerate(checklist):
                     if not isinstance(raw, dict):
                         continue
-                    priority = str(raw.get("priority") or "").upper()
+                    priority = re.sub(
+                        r"[\s\-]+", "_", str(raw.get("priority") or "").strip()
+                    ).upper()
                     if priority in priority_aliases:
                         raw["priority"] = priority_aliases[priority]
                         repaired.append(
@@ -1485,6 +1629,7 @@ class ExternalLlmProvider(LlmProvider):
                     )
                     normalized_items.append(raw)
                 payload[key] = normalized_items
+            cls._normalize_rewrite_display_text(payload, repaired)
             scope = payload.get("scope")
             if isinstance(scope, dict):
                 cls._quarantine_unknown(
@@ -1516,6 +1661,50 @@ class ExternalLlmProvider(LlmProvider):
                 cls._string_list(payload.get("uncertainties")) + uncertain
             )
         return payload, sorted(set(repaired))
+
+    @classmethod
+    def _normalize_rewrite_display_text(
+        cls, payload: dict[str, Any], repaired: list[str]
+    ) -> None:
+        """Normalize presentation-only strings without touching quoted facts."""
+
+        def clean(value: Any, path: str) -> Any:
+            if not isinstance(value, str):
+                return value
+            normalized = re.sub(r"```(?:json)?|```", "", value, flags=re.IGNORECASE)
+            normalized = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", normalized)
+            normalized = normalized.replace("**", "").replace("__", "")
+            normalized = re.sub(r"[ \t]+", " ", normalized).strip()
+            if normalized != value:
+                repaired.append(f"{path}:display_text_normalized")
+            return normalized
+
+        for key in (
+            "summary", "quick_summary", "why_it_matters", "common_mistakes",
+            "warnings", "uncertainties",
+        ):
+            values = payload.get(key)
+            if isinstance(values, list):
+                payload[key] = [clean(value, f"$.{key}[{index}]")
+                                for index, value in enumerate(values)]
+        for key in ("plain_text", "audio_script"):
+            if key in payload:
+                payload[key] = clean(payload[key], f"$.{key}")
+        for key, fields in {
+            "steps": ("title", "description"),
+            "action_checklist": ("action",),
+            "key_facts": ("label",),
+            "faq": ("question", "answer"),
+        }.items():
+            values = payload.get(key)
+            if not isinstance(values, list):
+                continue
+            for index, item in enumerate(values):
+                if not isinstance(item, dict):
+                    continue
+                for field in fields:
+                    if field in item:
+                        item[field] = clean(item[field], f"$.{key}[{index}].{field}")
 
     @staticmethod
     def _quarantine_unknown(

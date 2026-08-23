@@ -603,7 +603,7 @@ def test_untraceable_quote_or_page_mismatch_is_rejected_without_retry(invalid_fi
     assert len(server.requests) == 1
 
 
-def test_invalid_rewrite_schema_fails_without_mock_fallback(caplog):
+def test_invalid_rewrite_schema_retries_only_rewrite_with_error_path(caplog):
     invalid_rewrite = rewrite()
     invalid_rewrite.pop("audio_script")
     invalid_rewrite_response = json_completion(invalid_rewrite)
@@ -622,32 +622,49 @@ def test_invalid_rewrite_schema_fails_without_mock_fallback(caplog):
         [
             response(200, fact_response),
             response(200, invalid_rewrite_response),
+            response(200, json_completion(rewrite())),
         ]
     ) as server:
         provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
-        with pytest.raises(ExternalProviderError) as captured:
-            provider.analyze(request())
-    error = captured.value
-    assert error.error_code == "LLM_SCHEMA_VALIDATION_FAILED"
-    assert error.stage == "accessible_rewrite"
-    assert error.json_path == "$.audio_script"
-    assert error.keyword == "required"
-    assert error.retryable is True
-    assert error.response_fingerprint
-    assert error.provider == "external"
-    assert error.model == "deepseek-v4-flash"
-    assert error.prompt_tokens == 24
-    assert error.completion_tokens == 12
-    assert error.total_tokens == 36
-    assert error.safe_detail()["total_tokens"] == 36
-    assert error.elapsed_ms >= 0
-    assert error.fact_checkpoint is not None
-    assert error.fact_checkpoint["facts"]["fields"][0]["value"] == "青松社区服务站"
-    assert len(server.requests) == 2
+        result = provider.analyze(request())
+    assert result.rewrite_mode == "MODEL"
+    assert result.metrics.rewrite_attempts == 2
+    assert any("rewrite_retry_after:$.audio_script" == rule
+               for rule in result.normalization_rules)
+    assert len(server.requests) == 3
+    retry_prompt = server.requests[2]["json"]["messages"][1]["content"]
+    assert "错误路径：$.audio_script" in retry_prompt
+    assert "不要重新提取事实" in retry_prompt
     assert "error_path=$.audio_script" in caplog.text
     assert "error_type=missing" in caplog.text
     assert "response_sha256=" in caplog.text
     assert TEST_KEY not in caplog.text
+
+
+def test_two_invalid_rewrites_use_deterministic_fallback_without_mock():
+    invalid_rewrite = rewrite()
+    invalid_rewrite["action_checklist"] = [{
+        "action": "查看地点",
+        "priority": "无法确定",
+        "source_quote": "地点：青松社区服务站",
+        "segment_id": 101,
+    }]
+    with QueueServer([
+        response(200, json_completion(facts())),
+        response(200, json_completion(invalid_rewrite)),
+        response(200, json_completion(invalid_rewrite)),
+    ]) as server:
+        provider = ExternalLlmProvider(settings(server.url), sleep=lambda _: None)
+        result = provider.analyze(request())
+    assert len(server.requests) == 3
+    assert result.rewrite_mode == "DETERMINISTIC_FALLBACK"
+    assert result.metrics.rewrite_mode == "DETERMINISTIC_FALLBACK"
+    assert result.metrics.rewrite_attempts == 2
+    assert result.fields[0].value == "青松社区服务站"
+    assert result.summary == ["地点：青松社区服务站"]
+    assert "已根据可追溯事实生成基础易读版本" in result.plain_text
+    assert any(rule.startswith("deterministic_fallback_after:")
+               for rule in result.normalization_rules)
 
 
 def test_completion_normalizes_fenced_and_explained_json():

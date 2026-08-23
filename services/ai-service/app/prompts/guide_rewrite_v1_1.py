@@ -6,7 +6,9 @@ from app.models import FactField, FactExtractionResponse, TextRequest
 PROMPT_VERSION = "v1.1"
 
 SYSTEM_PROMPT = """你是公共服务材料通俗化编辑。只能使用已验证事实。
-输出合法 JSON，不输出解释。步骤不得重复场次，不得增加预约、线上办理、加急或资格承诺。"""
+输出合法 JSON，不输出解释。步骤不得重复场次，不得增加预约、线上办理、加急或资格承诺。
+action_checklist.priority 只能是“立即”、“近期”或“了解即可”。
+scope.national_or_local 只能是“全国”、“地方”、“具体机构”或“原文未说明”。"""
 
 
 def build_task_prompt(
@@ -70,4 +72,15 @@ def build_task_prompt(
 
 输出结构：
 {json.dumps(output, ensure_ascii=False, separators=(",", ":"))}
+
+字段约束：
+- summary：必填非空字符串数组。
+- plain_text/audio_script：必填非空字符串，不得包含 Markdown。
+- steps：必填数组，每项只有 order(正整数)/title/description。
+- warnings/quick_summary/why_it_matters/common_mistakes/uncertainties：字符串数组。
+- action_checklist：每项只有 action/priority/source_quote/segment_id；priority 只能是立即/近期/了解即可。
+- key_facts：每项只有 label/value/source_quote/segment_id。
+- faq：每项只有 question/answer/source_quote/segment_id。
+- scope：可为 null；非空时只有 national_or_local/applicable_region/needs_personal_action。
+- terms/term_explanations：字符串键值对。
 """

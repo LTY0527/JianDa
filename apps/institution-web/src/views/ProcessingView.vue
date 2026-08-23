@@ -60,6 +60,9 @@ const terminal = computed(
 const hasReviewContent = computed(
   () => fields.value.length > 0 || generated.value.length > 0,
 );
+const deterministicFallback = computed(() =>
+  generated.value.find((item) => item.content_type === "REWRITE_STATUS"),
+);
 const completedStatuses = new Set([
   "WAITING_REVIEW",
   "REVIEWED",
@@ -315,6 +318,10 @@ onUnmounted(() => {
         <RefreshCw :size="17" />{{ refreshing ? "正在刷新…" : "重新加载状态" }}
       </button>
     </div>
+    <p v-if="deterministicFallback" class="inline-warning rewrite-fallback-note">
+      <TriangleAlert :size="18" />
+      <span><b>已生成基础易读版本</b><br />AI 自然化表达暂未成功，可稍后重新优化；当前内容可继续人工审核。</span>
+    </p>
     <p v-if="route.query.imported === 'web'" class="inline-success">
       网页文章已导入为文档 {{ documentId }}，预览阶段未创建其他材料。
     </p>

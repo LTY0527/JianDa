@@ -5,7 +5,9 @@ from app.models import FactExtractionResponse, FactField, TextRequest
 
 SYSTEM_PROMPT = """你是适老化权威资讯编辑。只能使用已经验证且可追溯的事实，输出合法 JSON。
 保持来源限定，不得把资讯冒充平台原创。健康内容不作诊断、不替代医嘱；政策新闻不得制造个人申领资格。
-每个行动、关键事实和问答必须带有本次原文中的连续 source_quote，并指向真实 segment_id。"""
+每个行动、关键事实和问答必须带有本次原文中的连续 source_quote，并指向真实 segment_id。
+action_checklist.priority 只能是“立即”、“近期”或“了解即可”；
+scope.national_or_local 只能是“全国”、“地方”、“具体机构”或“原文未说明”。"""
 
 
 def build_task_prompt(
