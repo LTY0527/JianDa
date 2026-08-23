@@ -2,66 +2,58 @@
 
 运行日期：2026-08-23（Asia/Shanghai）
 
-## 结论
+## 最终结论
 
 `REAL ACCEPTANCE: PARTIAL`
 
-真实大场镇网页、发现、影子采集、材料创建、AI 审批队列、External DeepSeek、事实审核、发布、H5、scheduler、居民邻里、提醒和运营指标均已形成真实证据。以下门禁仍未满足，因此不能写 PASS：
+核心真实门禁已经通过：官方 PDF 67 真实提取并发送 DeepSeek、事实追溯、审核发布；10 个助手真实问题；文档 63 官方真实封面确认与缓存；H5 多视口、大字、图片自然尺寸和搜索转简达。当前只因真机人工体验和两个未注入受保护密码的浏览器场景未完成，保留 PARTIAL，不把跳过项写成 PASS。
 
-- 官方 PDF 已上传并由 PyMuPDF 提取，但未获得把该 PDF 正文发送给 External Provider 的单独授权；External 阶段为 BLOCKED。
-- 大场镇文章存在技术有效的真实图片候选，但没有确认公开缓存和使用依据；候选已拒绝，公开端仍为分类默认图，真实封面门禁失败。
-- 助手已完成安全升级与自动回归，但真实 DeepSeek 助手 10+ 问题集未获本轮外部数据调用授权。
-- after 多视口完整截图集与 iPhone/Android 人工验收未完成。
+## 官方 PDF 67
 
-## 运行基线
+- 标题：国家卫生健康标准 WS/T 876—2026
+- SHA-256：`151e1809c12dc262e4e72b761e1f64f795aa2694f7834acf68149b52236815dd`
+- 提取：PyMuPDF，8 页 / 8 segments
+- External 成功任务：job 75
+- 模型：`deepseek-v4-flash`
+- 成功任务 Token：1976；耗时：4538 ms
+- 前两次真实失败：job 73（6492 Token）、job 74（2042 Token），保留诊断，不算 PASS
+- 事实审核：排除误分类的“发布日期”；确认“实施日期” `2026-09-01`
+- 公开 slug：`guide-67`；published item：29
+- 用户端：`http://127.0.0.1/guide/guide-67`
 
-- branch：`feat/phase9-6-real-acceptance-v1`
-- tested HEAD：`5044ca4`
-- Docker：MySQL、AI、backend、frontend 均 healthy
-- DB schema：Flyway V26，真实 MySQL volume
-- 健康接口：8001、8080、8090、80 均 HTTP 200
+job 75 的旧记录因已修复的重写元数据缺陷显示 provider=mock，但运行日志和请求指标证明该次为真实 External。本轮未为改写历史标签额外消耗 External 请求，报告如实记录该异常。
 
-## 真实网页与 DeepSeek
+## 助手真实问题集
 
-- source registry：5，宝山区政府信息公开·大场镇
-- URL：`https://xxgk.shbsq.gov.cn/article.html?infoid=6513958d-e52a-41d5-90a1-c8f47c24bf1f`
-- robots：NOT_FOUND_ALLOW
-- documentId：63；jobId：72；queueId：19；slug：`news-63`
-- provider：external；model：deepseek-v4-flash；HTTP：成功；Mock fallback：否
-- prompt version：web-v1.1；schema：1.1
-- tokens：2501 + 1576 = 4077；elapsed：10318 ms
-- regionCode：310113102；local scope：STREET
-- 字段追溯：segment 105；字段与生成内容经自动化事实断言和人工修正 API 核对
-- H5：`http://127.0.0.1/news/news-63`
+- 10 个不同问题，覆盖银龄活动、健康体检、文档 67、大场镇开放日、反诈和健康科普。
+- 12 次成功 External 回答，成功 Token 合计 8833，耗时 952—1885 ms。
+- 4 次真实响应被 Schema/事实安全检查拒绝并回退检索；5 次 422 在 Provider 前失败，均未冒充 External PASS。
+- 本轮 PDF 与助手 External 总请求约 20 次，总量低于 25 次与 120000 Token 授权上限。
 
-## 官方 PDF
+## 真实图片
 
-- documentId：67；标题：国家卫生健康标准 WS/T 876—2026
-- 本地官方文件 SHA-256：`151e1809c12dc262e4e72b761e1f64f795aa2694f7834acf68149b52236815dd`
-- 页数/segments：8/8；extraction：pymupdf
-- 当前状态：UPLOADED；fields/generated：0/0
-- External：未调用；`BLOCKED: explicit PDF external-data authorization required`
-- 原始文件已保留，未删除 volume，未改写数据库制造结果。
+- 文档 63 候选 8：官方来源、1949×1183 JPEG。
+- SHA-256：`83e7df1405a3f54c3a5747f8e4c72797882f1f467ed6d9fe934eb681d9d857e8`
+- 状态：`APPROVED / CONFIRMED`，`image_cached=true`
+- 公开 cover：HTTP 200，`image/jpeg`，204151 bytes
+- 页面：`http://127.0.0.1/news/news-63`
+- 使用范围仅为本地、局域网和课堂 Demo，不主张商业版权授权。
 
-## 图片
+## 自动验收
 
-- 发布总数：22；网页文章：5；真实封面：0；分类默认图：22。
-- 文档 63 候选 8 通过技术与相关性检查，但权利依据未确认，已拒绝。
-- Hero：没有合法真实图时使用文字主视觉，不用默认 SVG 冒充真实照片。
+- AI：105 passed
+- Maven：72 passed
+- 两端 typecheck/build：全部通过
+- 全量 Playwright：105 passed、16 skipped、0 failed
+- 一键 REAL Playwright：2 passed、2 skipped
+- Docker：四服务 healthy；四健康接口 HTTP 200
+- No-Mock guard：PASS
+- Phase 7.3 证据：一键脚本运行前后哈希一致
 
-## 居民、邻里与运营
+## 剩余风险
 
-- 真实 DEMO 居民：resident id 1；真实 BCrypt/session/MySQL。
-- 验收帖子：post id 4；创建、列表、点赞、评论、举报、管理员隐藏、居民端不可见、管理员恢复全部成功。
-- 发布内容：published item id 28（`news-63`）。
-- 指标增长：周阅读 63→64、周收听 0→1、周提醒 0→1；同时记录电话点击和地址复制事件。
-- 新增无 Mock Playwright 真实套件再次完成同一闭环，1/1 通过。
+- 当前 Codex 进程没有受保护的平台/居民密码，2 个认证 REAL 浏览器场景跳过。
+- iPhone Safari、Android Chrome 的触控、朗读、拨号仍需真实设备人工确认。
+- 未来公网或商业部署必须重新审核图片版权与缓存策略。
 
-## Browser 证据
-
-- 真实发布：`tests/e2e/phase9-6-real-published.spec.ts`，1/1 passed。
-- 真实居民运营：`tests/e2e/real/phase9-6-resident-operations.spec.ts`，1/1 passed。
-- REAL 守卫禁止 `page.route`、`route.fulfill`、MockProvider 和 fixture 标记。
-- Browser plugin unavailable；按仓库 Playwright fallback 执行。
-
-本报告不包含 API Key、JWT、密码、Authorization、完整 Prompt 或模型原始响应。
+本报告不包含 API Key、JWT、数据库密码、Cookie、Authorization、完整 Prompt 或模型原始响应。

@@ -1,109 +1,44 @@
 # Phase 9.6 真实图片审计
 
-审计时间：2026-08-23
+审计日期：2026-08-23
 
-## 审计范围
+## 最终结论
 
-- 数据环境：Docker Compose `jianda-mysql-1`，真实 MySQL volume。
-- 数据口径：`published_item.status = PUBLISHED`，并关联 `source_document` 与 `image_candidate`。
-- 页面证据：真实 Docker H5 首页 `390×844`，未拦截 API。
-- 本报告先记录改造前基线；历史补图、人工图片审核和公开 cover 验证完成后再补充最终统计。
+文档 63 的官方文章图片候选 8 已按本地、局域网和课堂 Demo 授权完成来源核对、技术校验、人工确认与本地缓存。公开端通过同源 cover API 返回真实 JPEG；未审核图片仍不会公开，其他没有合适原图的内容继续使用文字卡或分类默认图。
 
-## 改造前真实统计
+## 已确认封面
 
-| 指标 | 数量 | 说明 |
-| --- | ---: | --- |
-| 已发布总数 | 21 | 全部已发布内容 |
-| 已发布网页文章 | 4 | 文档 27、31、32、34 |
-| 真实照片 | 0 | `ORIGINAL_COVER`、`ARTICLE_IMAGE` 均为 0 |
-| 机构上传原图 | 0 | `UPLOADED_ORIGINAL` 为 0 |
-| 真实 PDF 首页 | 0 | `PDF_FIRST_PAGE` 为 0 |
-| 分类默认图 | 21 | 全部为 `CATEGORY_DEFAULT` |
-| 绝对无渲染封面 | 0 | H5 仍会生成本地分类默认图；数据库未保存远程或本地真实封面 |
-| 已缓存真实封面 | 0 | `image_cached = true` 为 0 |
-| 远程失效封面 | 0 | 当前没有已发布远程封面 URL，因此没有可判定的失效 URL |
-| 有候选但未审核的材料 | 1 | 文档 30，未发布 |
-| 待审核候选 | 1 | 上海市人民政府正文图片，639×846 |
-| 版权/使用依据阻塞 | 1 | 候选 `rights_status = UNKNOWN`，不能公开 |
+- 文档 ID：63
+- 公开 slug：`news-63`
+- 类型：`ARTICLE_IMAGE`
+- 来源：宝山区政府信息公开·大场镇
+- 来源页：`https://xxgk.shbsq.gov.cn/article.html?infoid=6513958d-e52a-41d5-90a1-c8f47c24bf1f`
+- 图片尺寸：1949 × 1183
+- MIME：`image/jpeg`
+- SHA-256：`83e7df1405a3f54c3a5747f8e4c72797882f1f467ed6d9fe934eb681d9d857e8`
+- 审核状态：`APPROVED / CONFIRMED`
+- 缓存状态：`image_cached=true`
+- 公开接口：`/api/public/items/news-63/cover`，HTTP 200，`image/jpeg`，204151 bytes
 
-## 已发布网页文章
+图片内容为官方“上海政府开放月 / 阳光政务·公开为民”主题图，与文章直接相关，不是随机网络图或 AI 生成图。使用依据仅覆盖本地、局域网和课堂演示，不声称取得商业版权授权。
 
-| document id | slug | 来源 | 当前封面 | 审核状态 | 缓存 |
-| ---: | --- | --- | --- | --- | --- |
-| 27 | `news-27` | 新华网 | 分类默认图 | 已明确回退 | 否 |
-| 31 | `news-31` | 新华网 | 分类默认图 | 已明确回退 | 否 |
-| 32 | `news-32` | 新华网 | 分类默认图 | 已明确回退 | 否 |
-| 34 | `news-34` | 新华网 | 分类默认图 | 已明确回退 | 否 |
+## 链路修复
 
-四篇文章均保存 canonical 原文入口和“未获得图片下载许可”的说明，没有把第三方图片冒充为已授权图片。
+- `allow_image_candidates` 允许下载少量数据完成技术校验并生成机构端候选。
+- `allow_image_cache` / `image_cache_allowed` 只控制人工确认来源和使用依据后的公开缓存。
+- 修复 MySQL 布尔表达式返回数值 `1` 时未被识别为 true 的问题。
+- 修复 AI 图片下载路径缺少 8 MiB 最大体积常量的问题。
+- 候选缓存成功后同步 `image_cached` 与 hash，公开端只读取已确认缓存。
+- 解析继续通用支持 OpenGraph、JSON-LD、src、懒加载属性、srcset、picture/source 与 video poster；没有站点专用选择器。
 
-## 来源策略现状
+## 展示验证
 
-当前 5 个来源的 `allow_image_candidates`、`allow_image_cache`、`image_cache_allowed`、`auto_approve_images` 均为关闭。该状态是安全默认值，不会自动公开第三方图片，但也意味着历史网页重扫无法生成新候选。
+- `news-63` 在 375/390/768/1440 下全部可见且不变形。
+- 18/20/22/24px 四档字号无横向滚动或文字图片重叠。
+- REAL Playwright 对页面所有可见 `img` 断言 `naturalWidth > 0`、`naturalHeight > 0`。
+- 图片失败和无图文章仍安全回退，不把分类 SVG 冒充真实 Hero。
 
-Phase 9.6 真实补图必须按顺序执行：先为明确范围的来源开启“只生成候选”，真实重扫并人工核对来源；只有补齐使用依据且来源级缓存策略经过人工确认后，才允许下载缓存。不能直接把开关打开视为图片验收通过。
+## 尚未完成
 
-## 代码审计结论
-
-已具备：
-
-- OpenGraph、JSON-LD、`src`、常见 lazy-load 属性、`srcset`、`picture/source` 与 `video poster` 发现；
-- HTTP、MIME、文件大小、真实宽高、最小尺寸、比例、hash 和明显 logo/二维码关键词过滤；
-- 候选、来源页、发现方式、尺寸、MIME、hash、权利状态与人工审核字段；
-- 只有经过人工确认且来源允许缓存时才写入本地 cover；公开端使用 `/api/public/items/{slug}/cover`；
-- 未审核图片不公开，H5 安全回退分类默认图。
-
-审计发现并已在 `e1856d1` 修复：
-
-- 候选相关性从 URL、alt 和尺寸扩展到 DOM/附近正文、标题主题 token 与发现方式分数，V26 保存 `context_text` 和 `relevance_score`；
-- 首页只在同一重要性分段内使用真实封面加权；没有真实封面或加载失败时显示文字 Hero，不再放大分类 SVG；
-- 审核端显示候选上下文和相关性，便于人工排除不相关图片。
-
-仍待真实执行：所有已发布网页真实封面覆盖率为 0%，下一步需逐篇重扫、人工核对使用依据并仅对合法图片缓存。
-
-## 改造前视觉证据
-
-- `artifacts/phase9-6-real-acceptance-ux/before/h5-home-390.png`
-- 首屏 Hero 使用健康分类 SVG，不是官方照片；图片本身可加载，但不满足 Phase 9.6 的真实主视觉门禁。
-
-## 最终复核统计
-
-发布文档 63 后再次只读查询真实 MySQL：
-
-- 已发布总数：22；其中网页文章 5。
-- `CATEGORY_DEFAULT`：22；真实封面 0。
-- 文档 63 候选 8：1949×1183，相关性 34，技术上属于文章；因权利和公开使用依据未确认，状态为 `REJECTED/REJECTED`。
-- 文档 63 公开状态：`image_reviewed=true`、`image_cached=false`、`CATEGORY_DEFAULT`。
-- 未删除候选来源记录，也没有远程热链或绕过缓存门禁。
-
-## 当前覆盖率
-
-- 全部已发布内容真实封面覆盖率：`0 / 22 = 0%`
-- 已发布网页文章真实封面覆盖率：`0 / 5 = 0%`
-- 首页首屏真实视觉覆盖率：`0%`
-
-以上为真实基线，不是估算值。最终覆盖率将在历史重扫、权利审核、缓存和浏览器自然尺寸验证后更新。
-
-## 历史网页真实重扫
-
-执行范围：新华网来源、4 篇已发布网页文章。测试期间只临时开启 `allow_image_candidates`；`allow_image_cache`、`image_cache_allowed`、`auto_approve_images` 始终关闭，结束后候选开关恢复关闭。
-
-第一次真实重扫：
-
-- scanned：4
-- failed：0
-- candidates：3
-- auto approved：0
-- cached：0
-- 发现问题：3 个候选中有 2 个是文章底部其他推荐内容；空 alt 被当前文章标题替代，导致相关性虚高。
-
-修复 `17b1637` 后清空 AI 与后端 preview 缓存，使用相同 4 篇文章复扫：
-
-- scanned：4
-- failed：0
-- valid candidates：0
-- wrong candidates：0
-- auto approved：0
-- cached：0
-
-结论：当前 4 篇已发布新华网页面没有通过“属于本文 + 尺寸/MIME/比例”门禁的真实图片。系统保持分类默认图/文字 Hero，不从搜索引擎补图，也不把推荐图冒充本文图片。真实封面覆盖率仍为 0%，需从后续真实大场镇文章或官方 PDF 中寻找可追溯视觉。
+- 历史 WEB_ARTICLE 已执行安全重扫；现有新华网文章没有通过“属于本文 + 尺寸/MIME/比例”门禁的有效图片，未从搜索引擎或推荐区补图。
+- 真实封面覆盖率仍不是 100%；后续按文章逐篇核对，不以无关图片追求覆盖率。

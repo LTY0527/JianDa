@@ -560,7 +560,7 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] 17 张修改后产品化截图和索引、Phase 9.5 产品报告、测试报告及迁移说明完成。
 - [ ] 真实大场镇网页 External AI → 审核 → 发布仍需单次显式授权的受控人工验收；本轮未调用真实 DeepSeek。
 
-## Phase 9.6 — 真实全链路验收、真实配图、助手升级与商业视觉跃迁（进行中）
+## Phase 9.6 — 真实全链路验收、真实配图、助手升级与商业视觉跃迁（自动收口完成，待真机验收）
 
 - [x] 审计 Phase 9.5 本地与远端基线；本地与远端 ahead/behind 均为 0。
 - [x] 从 `0e1c64b` 建立 `feat/phase9-6-real-acceptance-v1`，未覆盖 Phase 7.3 的 15 张现有修改截图。
@@ -577,10 +577,15 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] 助手增加确定性事实覆盖后检和已核对 factCards；证据外电话、日期、时间和金额安全回退，不直接返回用户。
 - [x] 建立不拦截 API 的真实 Docker Playwright 套件与静态守卫；真实发布 1 passed，真实居民/邻里/提醒/运营 1 passed。
 - [x] 真实居民 id 1、帖子 id 4 完成登录、发帖、点赞、评论、举报、管理员隐藏、居民不可见和恢复；周阅读 63→64、收听 0→1、提醒 0→1。
-- [x] 本轮回归：AI 101、Maven 71、两端 typecheck/build、全量 Playwright 105 passed/13 skipped/0 failed（118 total）；Docker 四服务 healthy、四健康接口 HTTP 200。
+- [x] 官方 PDF 文档 67 完成 PyMuPDF 8 页/8 segments、真实 External、事实追溯、无关字段排除、审核与发布；公开为 `guide-67`。
+- [x] 真实 DeepSeek 助手完成 10 个不同问题评估，12 次成功回答共 8833 Token；安全拒绝和 retrieval 回退未冒充 External PASS。
+- [x] 文档 63 官方候选 8 完成课堂 Demo 范围来源核对、人工确认和本地缓存；公开 cover 为 1949×1183 JPEG。
+- [x] 搜索无结果可携带原关键词进入简达；四类首页/资讯布局保持独立信息层级。
+- [x] 新增一键脚本 `scripts/run-phase9-6-real-acceptance.ps1`，包含 Docker、四健康检查、No-Mock guard、REAL Playwright、可选全量回归和 Phase 7.3 证据保护。
+- [x] 本轮回归：AI 105、Maven 72、两端 typecheck/build、全量 Playwright 105 passed/16 skipped/0 failed（121 total）；Docker 四服务 healthy、四健康接口 HTTP 200。
 - [x] Phase 7.3 的 15 张用户现有修改截图在全量测试前后组合 SHA-256 不变，未覆盖、暂存或提交。
-- [ ] BLOCKED：官方 PDF 文档 67 已用 PyMuPDF 提取 8 页/8 segments，但发送给 External Provider 需要新的明确授权；当前 fields/generated 为 0/0。
-- [ ] BLOCKED：文档 63 的真实图片候选 8 因公开使用和缓存依据未确认而拒绝；当前 22 条发布内容真实封面仍为 0，不得冒充真实配图通过。
-- [ ] BLOCKED：真实 DeepSeek 助手 10+ 问题集未获本轮外部数据调用授权；自动安全回归不能替代真实助手验收。
-- [ ] PARTIAL：完整 after 多视口截图集与 iPhone/Android 人工可用性验收待完成。
+- [x] after 截图已覆盖 375/390/768/1440 与 18/20/22/24px；可见真实图片自然宽高全部大于 0。
+- [ ] PARTIAL：iPhone Safari / Android Chrome 的触控、朗读、拨号仍待真机人工验收。
+- [ ] PARTIAL：当前 Codex 进程未注入受保护平台/居民密码，一键 REAL Playwright 的 2 个认证场景明确跳过，不计 PASS。
+- [ ] 未来公网或商业部署前重新进行真实图片版权审核；当前使用依据只覆盖本地、局域网和课堂 Demo。
 - [x] 已分别输出 Regression Tests 与 REAL ACCEPTANCE；当前最终结论为 `REAL ACCEPTANCE: PARTIAL`，未把 Mock/fixture 通过数计入真实验收。

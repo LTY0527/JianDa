@@ -1,35 +1,40 @@
-# Phase 9.6 真实全链路验收与产品升级清单
+# Phase 9.6 真实全链路验收清单
 
-更新时间：2026-08-23
+更新日期：2026-08-23
 
 ## P0：真实链路
 
-- [x] 审计 Phase 9.5 本地与远端基线，并建立独立分支。
-- [x] 建立真实验收口径、问题台账和截图目录，不触碰 Phase 7.3 历史证据。
-- [x] 审计网页历史图片、候选、审核、缓存、公开封面和首页回退的完整链路；真实基线覆盖率为 0%。
-- [x] 保存 H5 首页/详情/助手与机构端采集/工作台的 before 截图。
-- [x] 校验 Docker、MySQL、Flyway V26 与四项健康检查，四服务均为 healthy、四接口均为 HTTP 200。
-- [x] 校验 External Provider 已通过真实网页处理返回 provider/model/token/耗时；未输出敏感配置。
-- [x] 完成大场镇真实来源 discover → shadow → collect → AI queue → External → review → publish，发布为 `news-63`。
-- [ ] BLOCKED：官方 PDF 文档 67 已真实提取 8 页/8 segments，但发送给 External Provider 需要新的明确授权；未调用、未伪造结果。
-- [ ] BLOCKED：文档 63 的真实候选 8 技术有效，但公开缓存和使用依据未确认，已拒绝并安全回退分类默认图。
-- [x] 完成真实调度器触发验证（job 29）并恢复来源停用、自动采集关闭和 7 天窗口。
+- [x] 官方 PDF 文档 67 使用 PyMuPDF 提取 8 页、保存 8 segments，并执行真实 External。
+- [x] 文档 67 的字段、生成内容、source quote、页码与 segment 完成事实追溯；无关“发布日期”字段通过审核 API 排除。
+- [x] 文档 67 完成人工审核与发布，公开 slug 为 `guide-67`，原 PDF 可查看。
+- [x] 真实 External 处理没有使用 Mock fallback 冒充成功；失败尝试保留诊断。
+- [x] 文档 63 官方图片候选 8 完成来源核对、人工确认、本地缓存和公开 cover 验证。
+- [x] 10 个真实助手问题完成 DeepSeek 评估，并对事实与引用执行确定性后检。
+- [x] External 请求和 Token 使用保持在用户授权的 25 次/120000 Token 上限内。
 
 ## P1：产品能力
 
-- [x] 首页 Hero 优先真实图片；无合法图片或图片加载失败时使用文字 Hero，禁止默认 SVG 充当 Hero。
-- [ ] 区分主图、普通图文、紧急通知和服务信息布局，并验证 375/390/768/1440。
-- [x] 助手检索返回文档 ID；External 回答对日期、时间、电话和金额执行引用覆盖校验，已核对字段生成 factCards，高风险无依据继续拒答。
-- [ ] 搜索无结果可带关键词进入助手，并明确平台资料未命中。
-- [ ] 机构端来源、图片、审核、发布与运营页面增强真实状态和问题导向层级。
-- [x] 完成居民登录、发帖、点赞、评论、举报、隐藏和恢复的真实 API 闭环；居民 1、帖子 4 留有可追踪 DEMO 标识。
-- [x] 完成提醒、内容浏览、收听、电话/地址操作事件与运营指标真实增长验证：周阅读 63→64、收听 0→1、提醒 0→1。
+- [x] 主图大卡、普通图文、无图紧急通知、精简服务使用四种独立信息结构，未重复创建组件。
+- [x] 搜索无结果显示“平台资料暂未命中”，可携带原关键词进入简达助手。
+- [x] 审核页可排除无关字段，保留审计历史且不污染公开字段和服务目录。
+- [x] 助手检索加入已确认字段；证据上限、日期归一化和高风险事实覆盖检查已修复。
+- [x] 图片候选和缓存开关职责分离；未经确认的第三方图片仍不得公开。
+- [x] 机构端继续按来源、采集、图片、审核、发布和运营状态展示问题与下一步操作。
 
 ## P2：质量与证据
 
-- [x] 建立无 `page.route` / `route.fulfill` 的真实 Docker Playwright 套件与静态守卫；真实发布 1/1、居民运营 1/1 通过。
-- [ ] PARTIAL：已保存真实审核和 H5 发布截图并登记；完整 after 多视口截图集尚未补齐。
-- [ ] 校验全部图片 `naturalWidth`、`naturalHeight`，并验证 18/20/22/24px。
-- [x] 运行 AI pytest 101、Maven 71、两端 typecheck/build、全量 Playwright 105 passed/13 skipped（118 total）和两组显式启用的真实浏览器 E2E。
-- [x] 输出真实验收、采集、图片、助手、UX、测试与问题台账七份报告。
-- [x] 更新 README、TASKS、API，并按真实阶段使用中文提交；不 push。
+- [x] 375/390/768/1440 与 18/20/22/24px 自动验证完成。
+- [x] REAL Playwright 对全部可见真实 `img` 检查自然宽高均大于 0。
+- [x] after 多视口截图已写入 `artifacts/phase9-6-real-acceptance-ux/after`。
+- [x] 新增 `scripts/run-phase9-6-real-acceptance.ps1`，包含 Docker、健康检查、No-Mock guard、REAL Playwright、可选全量回归和 Phase 7.3 证据保护。
+- [x] AI 105、Maven 72、两端 typecheck/build、全量 Playwright 105 passed/16 skipped/0 failed。
+- [x] Docker MySQL、AI、backend、frontend 四服务 healthy，四个健康接口 HTTP 200。
+- [x] 一键脚本运行前后 Phase 7.3 目录哈希一致；15 张用户已有修改截图未暂存或提交。
+
+## 仍待人工验收
+
+- [ ] iPhone Safari 与 Android Chrome 的真实触控、系统朗读和拨号体验仍需设备侧人工确认。
+- [ ] 受保护平台/居民密码未注入当前 Codex 进程，REAL Playwright 中 2 个认证场景明确跳过；对应业务 API 与既有真实浏览器证据已完成，但本轮不冒充浏览器重跑 PASS。
+- [ ] 未来公网或商业部署前，真实图片仍需重新进行商业版权审核；本轮确认仅用于本地、局域网和课堂 Demo。
+
+最终结论：`REAL ACCEPTANCE: PARTIAL`。真实 PDF、External 助手、真实封面和公开页面门禁已通过；剩余阻塞仅为真机与受保护认证浏览器复跑。
