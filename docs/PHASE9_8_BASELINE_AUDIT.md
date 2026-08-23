@@ -42,3 +42,10 @@ Docker volumes 保留，不执行 `docker compose down -v`。
 - 基线第 1 项已由真实批测修复：每页质量评分、OCR 比较、人工复核和 POOR 文本拒绝均有 Docker/Tesseract 证据。
 - 基线第 2–4 项仍以各专项真实验收 Gate 为准；实现存在不等同于最终 PASS。
 - 原有 15 张 `artifacts/phase7-3` 用户截图修改继续保持未暂存、未覆盖、未删除。
+
+## 2026-08-24 采集环境续跑记录
+
+- Docker MySQL、AI、backend、frontend 均 healthy，Flyway 已到 V30；没有删除 volume。
+- 当前 backend 容器 `CRAWL_SCHEDULER_ENABLED=false`。来源 5 的 `next_run_at` 已过期，重部署启动后无新 SCHEDULED Job；历史 Job 28、29 仍作为曾真实触发的证据，但不冒充当前环境 PASS。
+- 真实来源数为 5，大场/宝山内容 4，图片真实覆盖 1/31；相关清单保持 PARTIAL/FAILED，未用模拟来源、批量写入或默认图补齐。
+- 原有 15 张 `artifacts/phase7-3` 用户截图修改仍未暂存、未覆盖、未删除。
