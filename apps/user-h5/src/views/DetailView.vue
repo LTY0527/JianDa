@@ -10,6 +10,7 @@ import { useSpeechPlayer } from "../composables/useSpeechPlayer";
 import { buildTelephoneHref, copyText } from "../utils/contactActions";
 import { deduplicateWarnings, sameDisplayText } from "../utils/contentNormalization";
 import { articleCover, categoryDefaultCover } from "../utils/coverImage";
+import { activeRegion } from "../region";
 import {
   ShieldCheck,
   Volume2,
@@ -136,7 +137,7 @@ async function loadDetail(slug: string) {
     item.value = await fetchDetail(slug);
     if (version !== loadVersion) return;
     void recordContentView(item.value.id).catch(() => undefined);
-    fetchNeighbors(slug, preferences.preferSameCategory)
+    fetchNeighbors(slug, preferences.preferSameCategory, activeRegion.value.region_code)
       .then((value) => { if (version === loadVersion) neighbors.value = value; })
       .catch(() => undefined);
     const generated = item.value.generated || {};

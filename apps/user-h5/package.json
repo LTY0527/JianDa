@@ -12,9 +12,11 @@
   "dependencies": {
     "@jianda/shared-types": "0.1.0",
     "@jianda/shared-ui": "0.1.0",
+    "@types/qrcode": "^1.5.5",
     "axios": "^1.7.9",
     "lucide-vue-next": "^0.468.0",
     "pinia": "^2.3.0",
+    "qrcode": "^1.5.4",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0"
   },

@@ -118,8 +118,8 @@ export async function fetchItems(category?: string, regionCode?: string): Promis
   return response.data.data;
 }
 
-export async function searchItems(keyword: string): Promise<PublicItem[]> {
-  const response = await client.get("/public/search", { params: { keyword } });
+export async function searchItems(keyword: string, regionCode?: string): Promise<PublicItem[]> {
+  const response = await client.get("/public/search", { params: { keyword, regionCode } });
   return response.data.data;
 }
 
@@ -140,9 +140,10 @@ export interface PublicItemNeighbors {
 export async function fetchNeighbors(
   slug: string,
   sameCategory = true,
+  regionCode?: string,
 ): Promise<PublicItemNeighbors> {
   const response = await client.get(`/public/items/${slug}/neighbors`, {
-    params: { sameCategory },
+    params: { sameCategory, regionCode },
   });
   return response.data.data;
 }
@@ -231,6 +232,30 @@ export async function fetchServiceOrders(): Promise<ServiceOrder[]> {
 }
 export async function cancelServiceOrder(id: number): Promise<void> {
   await client.post(`/public/commercial/orders/${id}/cancel`, null, { headers: residentHeaders() });
+}
+
+export interface MembershipPlan {
+  id: number; plan_code: string; name: string; billing_period: string; duration_days: number;
+  price_cents: number; original_price_cents?: number; benefits: string[]; demo_price: boolean;
+}
+export interface DemoPaymentSession {
+  sessionId: string; status: "DEMO_PENDING"; method: "ALIPAY" | "WECHAT";
+  amountCents: number; planName: string; qrPayload: string; expiresAt: string; demo: true;
+}
+export async function fetchMembershipPlans(): Promise<MembershipPlan[]> {
+  return (await client.get("/public/membership/plans")).data.data;
+}
+export async function fetchMembershipCapabilities(): Promise<{ demoMode: boolean; realPaymentAvailable: boolean; message: string }> {
+  return (await client.get("/public/membership/capabilities")).data.data;
+}
+export async function fetchMembershipMe(): Promise<Record<string, unknown>> {
+  return (await client.get("/public/membership/me", { headers: residentHeaders() })).data.data;
+}
+export async function createDemoMembershipPayment(planId: number, method: "ALIPAY" | "WECHAT"): Promise<DemoPaymentSession> {
+  return (await client.post("/public/membership/demo-payments", { planId, method }, { headers: residentHeaders() })).data.data;
+}
+export async function confirmDemoMembershipPayment(sessionId: string): Promise<{ paymentStatus: string; membershipStatus: string; expiresAt: string }> {
+  return (await client.post(`/public/membership/demo-payments/${sessionId}/confirm`, null, { headers: residentHeaders() })).data.data;
 }
 
 export async function createReminder(

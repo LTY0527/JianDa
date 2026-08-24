@@ -30,6 +30,7 @@ services:
       JIANDA_PROMPT_VERSION: ${JIANDA_PROMPT_VERSION:-v1.1}
       JIANDA_ALLOW_FAKE_IP_DNS: ${JIANDA_ALLOW_FAKE_IP_DNS:-false}
       ASSISTANT_EXTERNAL_ENABLED: ${ASSISTANT_EXTERNAL_ENABLED:-false}
+      PAYMENT_DEMO_MODE: ${PAYMENT_DEMO_MODE:-false}
     ports:
       - "${AI_PORT:-8001}:8001"
     healthcheck:
@@ -90,6 +91,8 @@ services:
       args:
         VITE_H5_BASE_URL: ${VITE_H5_BASE_URL:-}
         VITE_ENABLE_DEV_FIXTURES: ${VITE_ENABLE_DEV_FIXTURES:-false}
+        VITE_AMAP_KEY: ${VITE_AMAP_KEY:-}
+        VITE_AMAP_SECURITY_JS_CODE: ${VITE_AMAP_SECURITY_JS_CODE:-}
     depends_on:
       backend:
         condition: service_healthy

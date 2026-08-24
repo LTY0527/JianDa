@@ -127,13 +127,23 @@ public class CommercialController {
     @GetMapping("/commercial/overview")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ApiResponse<Map<String, Object>> overview() {
-        return ApiResponse.ok(Map.of(
-                "plans", count("organization_plan"), "activeSubscriptions", countWhere("organization_subscription", "status='ACTIVE'"),
-                "verifiedProviders", countWhere("service_provider", "verification_status='VERIFIED' AND status='ACTIVE'"),
-                "activeProducts", countWhere("service_product", "status='ACTIVE'"), "orders", count("service_order"),
-                "pendingRefunds", countWhere("refund_request", "status='REQUESTED'"),
-                "activeSponsors", countWhere("sponsor_campaign", "status='ACTIVE'"),
-                "payment", paymentProvider.capabilities()));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("plans", count("organization_plan"));
+        result.put("activeSubscriptions", countWhere("organization_subscription", "status='ACTIVE'"));
+        result.put("membershipPlans", countWhere("membership_plan", "enabled=TRUE"));
+        result.put("activeMembers", countWhere("resident_membership",
+                "status='DEMO_ACTIVE_MEMBERSHIP' AND expires_at>CURRENT_TIMESTAMP"));
+        result.put("newMembersThisMonth", countWhere("resident_membership",
+                "YEAR(created_at)=YEAR(CURRENT_TIMESTAMP) AND MONTH(created_at)=MONTH(CURRENT_TIMESTAMP)"));
+        result.put("verifiedProviders", countWhere("service_provider",
+                "verification_status='VERIFIED' AND status='ACTIVE'"));
+        result.put("activeProducts", countWhere("service_product", "status='ACTIVE'"));
+        result.put("ordersThisMonth", countWhere("service_order",
+                "YEAR(created_at)=YEAR(CURRENT_TIMESTAMP) AND MONTH(created_at)=MONTH(CURRENT_TIMESTAMP)"));
+        result.put("pendingRefunds", countWhere("refund_request", "status='REQUESTED'"));
+        result.put("activeSponsors", countWhere("sponsor_campaign", "status='ACTIVE'"));
+        result.put("payment", paymentProvider.capabilities());
+        return ApiResponse.ok(result);
     }
 
     private long count(String table) { return jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Long.class); }

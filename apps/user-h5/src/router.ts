@@ -18,6 +18,7 @@ const router = createRouter({
     { path: "/activities", component: () => import("./views/ServiceChannelView.vue"), meta: { title: "活动报名", serviceKind: "activities", showBack: true, backTo: "/services" } },
     { path: "/trusted-services", component: () => import("./views/TrustedServicesView.vue"), meta: { title: "合作服务", showBack: true, backTo: "/services" } },
     { path: "/orders", component: () => import("./views/ServiceOrdersView.vue"), meta: { title: "我的订单", showBack: true, backTo: "/profile" } },
+    { path: "/membership", component: () => import("./views/MembershipView.vue"), meta: { title: "简达会员", showBack: true, backTo: "/profile" } },
     { path: "/profile", component: () => import("./views/ProfileView.vue"), meta: { title: "我的", showBack: false } },
     { path: "/category/:name", component: () => import("./views/ListView.vue"), meta: { title: "内容分类", showBack: true, backTo: "/news" } },
     { path: "/search", component: () => import("./views/ListView.vue"), meta: { title: "搜索", showBack: true, backTo: "/" } },
