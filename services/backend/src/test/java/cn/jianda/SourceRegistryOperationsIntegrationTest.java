@@ -145,12 +145,19 @@ class SourceRegistryOperationsIntegrationTest {
     }
 
     @Test
-    void verifiedOfficialSourcesEnableImageFlowAndDachangRunsEveryTwelveHours() {
+    void verifiedExistingSourcesKeepImageFlowAndNewSourcesRequireCacheReview() {
         Integer disabledImageSources = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM source_registry WHERE authority_level IN ('A','B') "
+                        + "AND domain NOT IN ('www.gov.cn','www.nhc.gov.cn','mzj.sh.gov.cn','wsjkw.sh.gov.cn','ybj.sh.gov.cn','www.shbsq.gov.cn') "
                         + "AND (allow_image_candidates=FALSE OR allow_image_cache=FALSE OR image_cache_allowed=FALSE)",
                 Integer.class);
         org.junit.jupiter.api.Assertions.assertEquals(0, disabledImageSources);
+        Integer safeNewSources = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_registry WHERE domain IN "
+                        + "('www.gov.cn','www.nhc.gov.cn','mzj.sh.gov.cn','wsjkw.sh.gov.cn','ybj.sh.gov.cn','www.shbsq.gov.cn') "
+                        + "AND allow_image_candidates=TRUE AND allow_image_cache=FALSE AND image_cache_allowed=FALSE",
+                Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(6, safeNewSources);
         Map<String, Object> dachang = jdbc.queryForMap(
                 "SELECT enabled,allow_auto_crawl,allow_image_candidates,allow_image_cache,image_cache_allowed,"
                         + "schedule_mode,interval_hours FROM source_registry WHERE domain='xxgk.shbsq.gov.cn' "

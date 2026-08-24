@@ -409,7 +409,7 @@ function failureAdvice(code?: string) {
 
 function selectAllUnimported() {
   selectedUrls.value = discoveryResult.value?.data.candidates
-    .filter((item) => !item.imported)
+    .filter((item) => !item.imported && item.relevance_level !== "LOW")
     .map((item) => item.canonical_url) || [];
 }
 
@@ -422,7 +422,7 @@ async function collectSelected() {
       discoveryResult.value.source.id,
       selectedUrls.value,
     );
-    operationMessage.value = `批量采集完成：新增 ${response.data.data.importedCount} 篇，失败 ${response.data.data.failedCount} 篇。`;
+    operationMessage.value = `批量加入任务 #${response.data.data.jobId} 已创建，将在后台继续处理；可到任务中心查看进度。`;
     selectedUrls.value = [];
     await load();
   } catch (cause) {
@@ -884,11 +884,12 @@ onUnmounted(() => {
           已过滤 {{ discoveryResult.data.filtered_navigation_count }} 条导航或目录链接。
         </div>
         <table class="data-table">
-          <thead><tr><th>选择</th><th>发现文章</th><th>方式</th><th>状态</th><th>受控操作</th></tr></thead>
+          <thead><tr><th>选择</th><th>发现文章</th><th>居民相关度</th><th>方式</th><th>状态</th><th>受控操作</th></tr></thead>
           <tbody>
             <tr v-for="article in discoveryResult.data.candidates" :key="article.dedup_key">
               <td><input v-model="selectedUrls" type="checkbox" :value="article.canonical_url" :disabled="article.imported" :aria-label="`选择${article.title || '文章'}`" /></td>
               <td><b>{{ article.title || "标题待抓取" }}</b><small>{{ article.canonical_url }}</small></td>
+              <td><b>{{ article.relevance_level === "HIGH" ? "高" : article.relevance_level === "LOW" ? "低" : "中" }}</b><small>{{ article.recommendation_reason || "建议人工核对" }}</small></td>
               <td>{{ article.discovery_method }}</td>
               <td>{{ article.imported ? "已导入 / 已有版本" : article.published_time || "发布时间待核对" }}</td>
               <td>

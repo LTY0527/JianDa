@@ -224,6 +224,13 @@ export interface ArticleDiscoveryCandidate {
   imported?: boolean;
   duplicate?: boolean;
   has_previous_version?: boolean;
+  relevance_level?: "HIGH" | "MEDIUM" | "LOW";
+  relevance_score?: number;
+  recommended_topic?: string;
+  recommendation_reason?: string;
+  region_code?: string;
+  region_name?: string;
+  has_real_image?: boolean;
 }
 
 export interface QuickSourcePreview {
@@ -323,6 +330,15 @@ export interface CrawlJob {
   discoveryResult?: ArticleDiscoveryResult;
   existing?: boolean;
   errors?: CrawlJobError[];
+}
+
+export interface BatchImportJob extends CrawlJob {
+  result?: {
+    imported: Array<{ documentId: number; aiQueueStatus?: string }>;
+    importedCount: number;
+    duplicateCount: number;
+    failedCount: number;
+  };
 }
 
 export const publicSourceApi = {
@@ -441,11 +457,12 @@ export const publicSourceApi = {
     }>>(`/source-registries/${id}/collect`, { url }),
   collectRegistryArticles: (id: number, urls: string[]) =>
     http.post<ApiResponse<{
-      importedCount: number;
-      failedCount: number;
-      imported: Array<{ documentId: number; aiQueueStatus: string }>;
-      errors: Array<{ url: string; message: string }>;
+      jobId: number;
+      status: "PENDING";
+      total: number;
     }>>(`/source-registries/${id}/collect-batch`, { urls }),
+  registryImportJob: (jobId: number) =>
+    http.get<ApiResponse<BatchImportJob>>(`/source-registries/import-jobs/${jobId}`),
   quickPreviewSource: (url: string) =>
     http.post<ApiResponse<QuickSourcePreview>>("/source-registries/quick-preview", { url }),
   quickConfirmSource: (payload: {

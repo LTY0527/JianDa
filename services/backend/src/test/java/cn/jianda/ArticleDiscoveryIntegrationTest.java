@@ -83,6 +83,9 @@ class ArticleDiscoveryIntegrationTest {
                 .andExpect(jsonPath("$.data.candidates[0].source_id").value(enabledId))
                 .andExpect(jsonPath("$.data.candidates[0].canonical_url")
                         .value("https://discovery-fixture-enabled.example/news/one"))
+                .andExpect(jsonPath("$.data.candidates[0].relevance_level").value("HIGH"))
+                .andExpect(jsonPath("$.data.candidates[1].relevance_level").value("LOW"))
+                .andExpect(jsonPath("$.data.candidates[0].recommendation_reason").isNotEmpty())
                 .andExpect(jsonPath("$.data.errors[0]").value("一个条目缺少地址"));
         verify(aiClient).discoverArticles(enabledId, "https://discovery-fixture-enabled.example",
                 "https://discovery-fixture-enabled.example/rss.xml", "RSS", 2);
@@ -167,7 +170,11 @@ class ArticleDiscoveryIntegrationTest {
         OffsetDateTime published = OffsetDateTime.now(ZoneOffset.UTC).minusDays(1);
         return Map.ofEntries(
                 Map.entry("source_id", enabledId), Map.entry("discovered_url", url),
-                Map.entry("canonical_url", url), Map.entry("title", "离线文章" + key),
+                Map.entry("canonical_url", url), Map.entry("title", switch (key) {
+                    case "one" -> "老年健康社区便民服务";
+                    case "two" -> "政府采购公告";
+                    default -> "离线文章" + key;
+                }),
                 Map.entry("published_time", published.toString()), Map.entry("discovery_method", "RSS"),
                 Map.entry("discovery_page", "https://discovery-fixture-enabled.example/rss.xml"),
                 Map.entry("content_kind_candidate", "UNKNOWN"), Map.entry("discovered_at", published.plusMinutes(1).toString()),

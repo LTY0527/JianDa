@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 @RestController
 @RequestMapping("/api/source-registries")
@@ -22,14 +24,17 @@ public class SourceRegistryController {
     private final ArticleDiscoveryService discoveryService;
     private final ArticleDiscoveryJobService discoveryJobService;
     private final WebArticleService webArticleService;
+    private final BatchArticleImportJobService batchImportJobService;
 
     public SourceRegistryController(SourceRegistryService service, ArticleDiscoveryService discoveryService,
                                     ArticleDiscoveryJobService discoveryJobService,
-                                    WebArticleService webArticleService) {
+                                    WebArticleService webArticleService,
+                                    BatchArticleImportJobService batchImportJobService) {
         this.service = service;
         this.discoveryService = discoveryService;
         this.discoveryJobService = discoveryJobService;
         this.webArticleService = webArticleService;
+        this.batchImportJobService = batchImportJobService;
     }
 
     @GetMapping
@@ -134,21 +139,15 @@ public class SourceRegistryController {
     }
 
     @PostMapping("/{id}/collect-batch")
-    public ApiResponse<Map<String, Object>> collectBatch(
+    public ResponseEntity<ApiResponse<Map<String, Object>>> collectBatch(
             @PathVariable long id, @Valid @RequestBody BatchControlledUrlRequest request) {
-        List<Map<String, Object>> imported = new java.util.ArrayList<>();
-        List<Map<String, Object>> errors = new java.util.ArrayList<>();
-        for (String url : request.urls().stream().distinct().limit(100).toList()) {
-            try {
-                Map<String, Object> preview = webArticleService.preview(url);
-                service.assertPreviewBelongsTo(id, preview);
-                imported.add(webArticleService.importArticle(url, UserContext.current()));
-            } catch (cn.jianda.common.BusinessException exception) {
-                errors.add(Map.of("url", url, "message", exception.getMessage()));
-            }
-        }
-        return ApiResponse.ok(Map.of("imported", imported, "errors", errors,
-                "importedCount", imported.size(), "failedCount", errors.size()));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.ok(
+                batchImportJobService.start(id, request.urls(), UserContext.current())));
+    }
+
+    @GetMapping("/import-jobs/{jobId}")
+    public ApiResponse<Map<String, Object>> importJob(@PathVariable long jobId) {
+        return ApiResponse.ok(batchImportJobService.detail(jobId));
     }
 
     public record EnabledRequest(boolean enabled) {}

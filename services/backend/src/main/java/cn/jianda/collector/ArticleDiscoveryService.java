@@ -61,7 +61,7 @@ public class ArticleDiscoveryService {
                 ? sanitizeCandidates(sourceId, source, list)
                 : new SanitizedCandidates(List.of(), 0, List.of());
         List<Map<String, Object>> candidates = sanitized.candidates();
-        candidates = filterCandidates(candidates, options);
+        candidates = filterCandidates(candidates, options, source);
         int duplicates = 0;
         for (Map<String, Object> candidate : candidates) {
             if (taskService.hasCanonical(sourceId, String.valueOf(candidate.get("canonical_url")))) duplicates++;
@@ -83,7 +83,7 @@ public class ArticleDiscoveryService {
     }
 
     private List<Map<String, Object>> filterCandidates(
-            List<Map<String, Object>> candidates, DiscoveryOptions options) {
+            List<Map<String, Object>> candidates, DiscoveryOptions options, Map<String, Object> source) {
         if (options == null) options = new DiscoveryOptions(null, null, null, null, null);
         int recentDays = options.recentDays() == null ? 7 : options.recentDays();
         int maxArticles = options.maxArticles() == null ? 20 : options.maxArticles();
@@ -111,11 +111,36 @@ public class ArticleDiscoveryService {
             enriched.put("imported", imported != null && imported > 0);
             enriched.put("duplicate", imported != null && imported > 0);
             enriched.put("has_previous_version", imported != null && imported > 0);
+            enrichResidentRelevance(enriched, source);
             if (Boolean.TRUE.equals(options.onlyUnimported()) && imported != null && imported > 0) continue;
             result.add(enriched);
             if (result.size() >= maxArticles) break;
         }
         return result;
+    }
+
+    private static void enrichResidentRelevance(Map<String, Object> candidate, Map<String, Object> source) {
+        String searchable = (text(candidate.get("title")) + " " + text(candidate.get("canonical_url")))
+                .toLowerCase(Locale.ROOT);
+        List<String> high = List.of("养老", "助餐", "老年", "老人", "健康", "医保", "民政", "社区", "活动",
+                "便民", "防诈", "反诈", "安全", "电梯", "停水", "停电", "交通", "疫苗", "就医", "办理");
+        List<String> low = List.of("送达公告", "采购", "招标", "行政处罚", "预算", "决算", "人事任免", "工作总结",
+                "会议精神", "机关", "征求意见稿");
+        int positive = (int) high.stream().filter(searchable::contains).count();
+        int negative = (int) low.stream().filter(searchable::contains).count();
+        int score = Math.max(0, Math.min(100, 45 + positive * 18 - negative * 35));
+        String level = negative > 0 && positive == 0 ? "LOW" : positive >= 2 ? "HIGH" : "MEDIUM";
+        candidate.put("relevance_level", level);
+        candidate.put("relevance_score", score);
+        candidate.put("recommended_topic", high.stream().filter(searchable::contains).findFirst().orElse("公共服务"));
+        candidate.put("recommendation_reason", switch (level) {
+            case "HIGH" -> "与居民生活和适老公共服务高度相关";
+            case "LOW" -> "偏行政公示或机关事务，居民直接价值较低";
+            default -> "可能与本地公共服务相关，建议人工快速核对";
+        });
+        candidate.put("region_code", source.get("region_code"));
+        candidate.put("region_name", source.get("street_or_town"));
+        candidate.put("has_real_image", false);
     }
 
     private static List<String> keywords(String value) {
@@ -140,7 +165,8 @@ public class ArticleDiscoveryService {
 
     private Map<String, Object> enabledSource(long sourceId) {
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT id,domain,allowed_hosts,homepage_url,rss_url,sitemap_url,section_url,discovery_mode,rate_limit,enabled "
+                "SELECT id,domain,allowed_hosts,homepage_url,rss_url,sitemap_url,section_url,discovery_mode,rate_limit,enabled,"
+                        + "region_code,street_or_town,district "
                         + "FROM source_registry WHERE id=? AND enabled=TRUE", sourceId);
         if (rows.isEmpty()) throw new BusinessException(403, "来源不存在或尚未启用，不能执行文章发现");
         return rows.get(0);

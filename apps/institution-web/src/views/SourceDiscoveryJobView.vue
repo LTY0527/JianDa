@@ -7,6 +7,7 @@ import { apiMessage } from "../api/http";
 import {
   publicSourceApi,
   type ArticleDiscoveryCandidate,
+  type BatchImportJob,
   type CrawlJob,
   type WebSourceRegistry,
 } from "../api/publicSources";
@@ -23,7 +24,9 @@ const collecting = ref(false);
 const error = ref("");
 const notice = ref("");
 const importedDocuments = ref<number[]>([]);
-let timer: ReturnType<typeof setTimeout> | undefined;
+const importJob = ref<BatchImportJob | null>(null);
+let discoveryTimer: ReturnType<typeof setTimeout> | undefined;
+let importTimer: ReturnType<typeof setTimeout> | undefined;
 
 const terminal = computed(() => job.value && !["PENDING", "RUNNING"].includes(job.value.status));
 const succeeded = computed(() => ["SUCCESS", "PARTIAL_SUCCESS"].includes(job.value?.status || ""));
@@ -60,7 +63,7 @@ async function load() {
     job.value = jobResponse.data.data;
     if (sourcesResponse) source.value = sourcesResponse.data.data.find((item) => item.id === sourceId) || null;
     error.value = "";
-    if (!terminal.value) timer = setTimeout(load, 1200);
+    if (!terminal.value) discoveryTimer = setTimeout(load, 1200);
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -69,7 +72,9 @@ async function load() {
 }
 
 function selectAll() {
-  selectedUrls.value = newCandidates.value.map((item) => item.canonical_url);
+  selectedUrls.value = newCandidates.value
+    .filter((item) => item.relevance_level !== "LOW")
+    .map((item) => item.canonical_url);
 }
 
 async function collectOne(article: ArticleDiscoveryCandidate) {
@@ -95,14 +100,32 @@ async function collectSelected() {
   error.value = "";
   try {
     const response = await publicSourceApi.collectRegistryArticles(source.value.id, selectedUrls.value);
-    importedDocuments.value = response.data.data.imported.map((item) => item.documentId);
-    notice.value = `已加入 ${response.data.data.importedCount} 篇，失败 ${response.data.data.failedCount} 篇；不会自动发布。`;
+    localStorage.setItem(`jianda_import_job_${source.value.id}`, String(response.data.data.jobId));
+    notice.value = `批量加入任务 #${response.data.data.jobId} 已创建，可离开页面后再回来查看。`;
     selectedUrls.value = [];
-    await load();
+    await pollImportJob(response.data.data.jobId);
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
     collecting.value = false;
+  }
+}
+
+async function pollImportJob(activeJobId: number) {
+  try {
+    const response = await publicSourceApi.registryImportJob(activeJobId);
+    importJob.value = response.data.data;
+    const current = importJob.value;
+    if (["PENDING", "RUNNING"].includes(current.status)) {
+      importTimer = setTimeout(() => pollImportJob(activeJobId), 1200);
+      return;
+    }
+    localStorage.removeItem(`jianda_import_job_${sourceId}`);
+    importedDocuments.value = current.result?.imported?.map((item) => item.documentId) || [];
+    notice.value = `已加入 ${current.added_count} 篇，重复 ${current.duplicate_count} 篇，失败 ${current.failed_count} 篇；不会自动发布。`;
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
   }
 }
 
@@ -126,8 +149,15 @@ async function retry() {
   }
 }
 
-onMounted(load);
-onUnmounted(() => { if (timer) clearTimeout(timer); });
+onMounted(() => {
+  void load();
+  const saved = Number(localStorage.getItem(`jianda_import_job_${sourceId}`) || 0);
+  if (saved > 0) void pollImportJob(saved);
+});
+onUnmounted(() => {
+  if (discoveryTimer) clearTimeout(discoveryTimer);
+  if (importTimer) clearTimeout(importTimer);
+});
 </script>
 
 <template>
@@ -168,17 +198,22 @@ onUnmounted(() => { if (timer) clearTimeout(timer); });
       </section>
 
       <section class="panel discovery-results">
-        <header><div><h2>{{ newCandidates.length }} 篇新内容</h2><p>选择后加入内容中心；系统不会自动发布。</p></div><button class="btn secondary" type="button" @click="selectAll">全选未重复内容</button></header>
+        <header><div><h2>{{ newCandidates.length }} 篇新内容</h2><p>选择后加入内容中心；系统不会自动发布。</p></div><button class="btn secondary" type="button" @click="selectAll">全选推荐内容</button></header>
         <div v-if="!candidates.length" class="empty-state">没有发现可加入的新文章。可调整来源入口，或改用粘贴链接和上传 PDF。</div>
         <article v-for="article in candidates" :key="article.dedup_key" class="candidate-row">
           <input v-model="selectedUrls" type="checkbox" :value="article.canonical_url" :disabled="article.imported" :aria-label="`选择${article.title || '文章'}`" />
-          <div><h3>{{ article.title || "标题待抓取" }}</h3><p>{{ article.published_time || "发布时间待核对" }} · {{ source?.source_name }} · {{ article.discovery_method }}</p><small>{{ article.canonical_url }}</small></div>
-          <span :class="article.imported ? 'candidate-existing' : 'candidate-new'">{{ article.imported ? "已存在" : "新内容" }}</span>
+          <div><h3>{{ article.title || "标题待抓取" }}</h3><p>{{ article.published_time || "发布时间待核对" }} · {{ article.region_name || source?.source_name }} · {{ article.recommended_topic || "公共服务" }}</p><p class="candidate-reason">{{ article.recommendation_reason }}</p><small>{{ article.canonical_url }}</small></div>
+          <span :class="article.imported ? 'candidate-existing' : `candidate-relevance relevance-${(article.relevance_level || 'MEDIUM').toLowerCase()}`">{{ article.imported ? "已存在" : article.relevance_level === 'HIGH' ? '高相关' : article.relevance_level === 'LOW' ? '低相关' : '中相关' }}</span>
           <button class="text-action strong" type="button" :disabled="article.imported || collecting" @click="collectOne(article)">加入内容中心</button>
         </article>
         <footer v-if="candidates.length"><button class="btn primary" type="button" :disabled="!selectedUrls.length || collecting" @click="collectSelected">加入所选内容（{{ selectedUrls.length }}）</button></footer>
       </section>
     </template>
+
+    <section v-if="importJob && ['PENDING', 'RUNNING'].includes(importJob.status)" class="panel discovery-progress import-progress" aria-live="polite">
+      <header><LoaderCircle class="spin" /><div><h2>{{ importJob.progress_message || '正在准备批量加入' }}</h2><p>任务 #{{ importJob.id }} · 刷新或离开页面不会中断。</p></div></header>
+      <p>已处理 {{ importJob.added_count + importJob.duplicate_count + importJob.failed_count }}/{{ importJob.discovered_count }} · 成功 {{ importJob.added_count }} · 重复 {{ importJob.duplicate_count }} · 失败 {{ importJob.failed_count }}</p>
+    </section>
 
     <section v-if="notice" class="panel collect-next-step" role="status">
       <Check /><div><h2>已加入内容中心</h2><p>{{ notice }}</p></div>
@@ -193,5 +228,6 @@ onUnmounted(() => { if (timer) clearTimeout(timer); });
 
 <style scoped>
 .discovery-page{max-width:1180px;margin:0 auto}.discovery-loading{display:flex;align-items:center;gap:10px;padding:36px}.discovery-progress,.discovery-failed,.discovery-summary,.discovery-results,.collect-next-step{padding:26px;margin-bottom:18px}.discovery-progress header,.discovery-summary>div,.collect-next-step{display:flex;align-items:flex-start;gap:14px}.discovery-progress h2,.discovery-summary h2,.discovery-failed h2,.collect-next-step h2{margin:0 0 6px}.discovery-progress p,.discovery-summary p,.collect-next-step p{margin:0;color:var(--color-muted)}.discovery-progress ol{display:grid;grid-template-columns:repeat(5,1fr);gap:0;margin:30px 0 4px;padding:0;list-style:none}.discovery-progress li{position:relative;display:grid;justify-items:center;gap:8px;color:var(--color-muted);text-align:center;font-size:13px}.discovery-progress li:not(:last-child)::after{content:"";position:absolute;top:12px;left:62%;width:76%;height:2px;background:var(--color-border)}.discovery-progress li.done,.discovery-progress li.active{color:var(--color-primary);font-weight:700}.discovery-progress li.done::after{background:var(--color-primary)}.discovery-progress svg{width:25px;height:25px;padding:3px;background:#fff;z-index:1}.discovery-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px}.success-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:#e1f2ed;color:var(--color-primary)}.discovery-results>header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding-bottom:16px;border-bottom:1px solid var(--color-border)}.discovery-results h2,.discovery-results h3{margin:0}.discovery-results header p{margin:5px 0 0;color:var(--color-muted)}.candidate-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:16px;align-items:center;padding:18px 0;border-bottom:1px solid var(--color-border)}.candidate-row p,.candidate-row small{display:block;margin:5px 0 0;color:var(--color-muted)}.candidate-row small{overflow-wrap:anywhere}.candidate-new,.candidate-existing{padding:4px 8px;border-radius:5px;font-size:12px}.candidate-new{background:#e7f3ef;color:var(--color-primary)}.candidate-existing{background:#f0f2f1;color:var(--color-muted)}.discovery-results footer{display:flex;justify-content:flex-end;padding-top:18px}.collect-next-step{align-items:center}.collect-next-step>.discovery-actions{margin:0 0 0 auto}.collect-next-step>svg{color:var(--color-primary)}
+.candidate-relevance{padding:4px 8px;border-radius:5px;font-size:12px;font-weight:700}.relevance-high{background:#e1f2ed;color:#12634f}.relevance-medium{background:#fff1cc;color:#765400}.relevance-low{background:#f1f2f2;color:#68706d}.candidate-reason{font-size:13px}
 @media(max-width:760px){.discovery-progress ol{grid-template-columns:1fr;gap:14px}.discovery-progress li{grid-template-columns:30px 1fr;justify-items:start;text-align:left}.discovery-progress li::after{display:none}.candidate-row{grid-template-columns:auto minmax(0,1fr)}.candidate-row>span,.candidate-row>button{grid-column:2;justify-self:start}.discovery-results>header,.collect-next-step{align-items:flex-start;flex-direction:column}.collect-next-step>.discovery-actions{margin-left:0}}
 </style>

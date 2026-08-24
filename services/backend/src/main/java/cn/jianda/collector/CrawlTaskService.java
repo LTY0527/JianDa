@@ -176,6 +176,16 @@ public class CrawlTaskService {
         if (changed == 0) throw new BusinessException(409, "采集任务已经停止或所有权已变化");
     }
 
+    public void updateImportProgress(long jobId, String owner, int total, int processed,
+            int added, int duplicates, int failed, String message) {
+        int changed = jdbc.update("UPDATE crawl_job SET processing_stage='BATCH_IMPORT',discovered_count=?,"
+                        + "added_count=?,duplicate_count=?,failed_count=?,progress_message=?,updated_at=CURRENT_TIMESTAMP "
+                        + "WHERE id=? AND status='RUNNING' AND lock_owner=?",
+                total, added, duplicates, failed,
+                safeProgress(message + "；已处理 " + processed + "/" + total), jobId, owner);
+        if (changed == 0) throw new BusinessException(409, "批量加入任务已经停止或所有权已变化");
+    }
+
     public void saveDiscoveryResult(long jobId, String owner, String json) {
         int changed = jdbc.update("UPDATE crawl_job SET discovery_result_json=?,updated_at=CURRENT_TIMESTAMP "
                         + "WHERE id=? AND status='RUNNING' AND lock_owner=?",

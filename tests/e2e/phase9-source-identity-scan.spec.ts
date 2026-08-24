@@ -129,6 +129,9 @@ test("扫描筛选和批量保存只提交所选未导入 URL", async ({ page })
       content_kind_candidate: "HEALTH_EDUCATION",
       dedup_key: "new",
       imported: false,
+      relevance_level: "HIGH",
+      relevance_score: 99,
+      recommendation_reason: "与居民健康服务高度相关",
     },
     {
       canonical_url: "https://health.example.gov.cn/news/old",
@@ -138,6 +141,9 @@ test("扫描筛选和批量保存只提交所选未导入 URL", async ({ page })
       content_kind_candidate: "HEALTH_EDUCATION",
       dedup_key: "old",
       imported: true,
+      relevance_level: "LOW",
+      relevance_score: 10,
+      recommendation_reason: "偏行政公示",
     },
   ];
   await page.route("**/api/**", async (route) => {
@@ -177,7 +183,7 @@ test("扫描筛选和批量保存只提交所选未导入 URL", async ({ page })
     }
     if (path.endsWith("/collect-batch")) {
       batchPayload = request.postDataJSON();
-      return fulfill(route, { importedCount: 1, failedCount: 0, imported: [], errors: [] });
+      return fulfill(route, { jobId: 901, status: "PENDING", total: 1 });
     }
     return fulfill(route, null);
   });
@@ -199,10 +205,11 @@ test("扫描筛选和批量保存只提交所选未导入 URL", async ({ page })
   await page.getByRole("button", { name: "全选未重复内容" }).click();
   await expect(page.getByLabel("选择老年健康新文章")).toBeChecked();
   await expect(page.getByLabel("选择已导入文章")).toBeDisabled();
+  await expect(page.getByText("与居民健康服务高度相关")).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: /批量保存所选/ }).click();
   expect(batchPayload).toEqual({ urls: ["https://health.example.gov.cn/news/new"] });
-  await expect(page.getByText(/新增 1 篇，失败 0 篇/)).toBeVisible();
+  await expect(page.getByText(/批量加入任务 #901 已创建/)).toBeVisible();
 });
 
 test("历史补图必须先预览再确认执行", async ({ page }) => {
