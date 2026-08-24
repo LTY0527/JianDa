@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ImagePlus, Heart, MapPin, MessageCircle, Send, ShieldAlert, Trash2, UsersRound, WifiOff } from "lucide-vue-next";
 import BottomNav from "../components/BottomNav.vue";
 import H5Header from "../components/H5Header.vue";
@@ -30,10 +30,11 @@ async function like(post: CommunityPost) { if (!requireLogin()) return; try { co
 async function comment(post: CommunityPost) { if (!requireLogin()) return; const content = window.prompt("写一句友善、简短的评论（不超过 300 字）"); if (!content) return; try { await addCommunityComment(post.id, content); post.comment_count += 1; } catch { error.value = "评论没有发布成功。"; } }
 async function report(post: CommunityPost) { if (!requireLogin()) return; const reason = window.prompt("请说明举报原因（至少 5 个字）"); if (!reason) return; try { await reportCommunityPost(post.id, reason); error.value = "举报已提交，平台管理员会进行核对。"; } catch { error.value = "举报没有提交成功。"; } }
 onMounted(load);
+watch(() => activeRegion.value.region_code, load);
 </script>
 
 <template><div class="h5-page"><H5Header/><main class="h5-main neighborhood-page">
-  <header class="neighborhood-hero"><div><h1><UsersRound/>大场邻里</h1><p><MapPin/>上海市 · 宝山区 · {{ activeRegion.street_or_town }}</p></div><small>不显示精确小区和门牌</small></header>
+  <header class="neighborhood-hero"><div><h1><UsersRound/>{{ activeRegion.street_or_town.replace('镇','') }}邻里</h1><p><MapPin/>上海市 · 宝山区 · {{ activeRegion.street_or_town }}</p></div><small>不显示精确小区和门牌</small></header>
   <nav class="neighborhood-tabs" aria-label="邻里分类"><button v-for="item in ['最新','互助','活动']" :key="item" :class="{ active: tab === item }" @click="select(item as typeof tab)">{{ item }}</button></nav>
   <section v-if="loggedIn" class="neighborhood-compose"><label for="post-content">分享一件对邻里有用的事</label><textarea id="post-content" v-model="draft" maxlength="500" rows="3" placeholder="不发布身份证、银行卡、门牌等个人信息"></textarea><div v-if="selected.length" class="post-media-preview"><figure v-for="(item,index) in selected" :key="item.preview"><img :src="item.preview" :alt="`待发布图片 ${index+1}`"/><button type="button" :aria-label="`移除图片 ${index+1}`" @click="removeImage(index)"><Trash2/></button></figure></div><footer><span>{{ draft.length }}/500 · {{ selected.length }}/6 张</span><label class="image-picker"><ImagePlus/>选择图片<input type="file" accept="image/jpeg,image/png" multiple @change="choose"/></label><button type="button" :disabled="submitting || !draft.trim()" @click="publish"><Send/>{{ uploading?'上传图片…':submitting ? "发布中…" : "发布" }}</button></footer></section>
   <button v-else class="neighborhood-login-tip" type="button" @click="loginRedirect">登录居民账号后可发布、点赞、评论和举报</button>

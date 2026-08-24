@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
@@ -31,7 +31,7 @@ import {
   WifiOff,
 } from "lucide-vue-next";
 
-type ChannelKey = "recommend" | "dachang" | "health" | "elderly" | "services" | "fraud" | "activity" | "community";
+type ChannelKey = "recommend" | "health" | "elderly" | "meals" | "services" | "fraud" | "activity" | "community";
 type FeedKind = "image" | "alert" | "service" | "activity" | "text";
 
 const route = useRoute();
@@ -44,9 +44,9 @@ const featuredCoverFailed = ref(false);
 
 const channels: Array<{ key: ChannelKey; label: string }> = [
   { key: "recommend", label: "推荐" },
-  { key: "dachang", label: "大场" },
   { key: "health", label: "健康" },
   { key: "elderly", label: "养老" },
+  { key: "meals", label: "助餐" },
   { key: "services", label: "办事" },
   { key: "fraud", label: "防诈" },
   { key: "activity", label: "活动" },
@@ -58,11 +58,11 @@ const selectedChannel = computed<ChannelKey>(() => {
 });
 
 const commonServices = [
-  ["社区卫生", HeartPulse, "健康"],
-  ["长者食堂", Utensils, "养老"],
-  ["便民电话", PhoneCall, "生活服务"],
-  ["活动报名", CalendarDays, "活动"],
-  ["办事指南", Building2, "办事"],
+  ["社区卫生", HeartPulse, "/services/health"],
+  ["长者食堂", Utensils, "/services/meals"],
+  ["便民电话", PhoneCall, "/services/contacts"],
+  ["活动报名", CalendarDays, "/activities"],
+  ["办事指南", Building2, "/services/guides"],
 ] as const;
 
 function preferredScore(item: PublicItem) {
@@ -79,9 +79,9 @@ function isLocal(item: PublicItem) {
 }
 function channelMatches(item: PublicItem, channel: ChannelKey) {
   if (channel === "recommend") return true;
-  if (channel === "dachang") return isLocal(item);
   if (channel === "health") return includesText(item, /健康|卫生|医疗|体检|疫苗|医院/);
-  if (channel === "elderly") return includesText(item, /养老|助老|长者|老年|银龄|助餐/);
+  if (channel === "elderly") return includesText(item, /养老|助老|长者|老年|银龄/);
+  if (channel === "meals") return includesText(item, /助餐|食堂|用餐|餐饮/);
   if (channel === "services") return contentKind(item) === "guide" || includesText(item, /办事|办理|材料|服务|换领/);
   if (channel === "fraud") return includesText(item, /反诈|诈骗|银行卡|验证码|风险/);
   if (channel === "activity") return includesText(item, /活动|报名|开放日|讲座|辅导|场次/);
@@ -142,6 +142,7 @@ async function load() {
   }
 }
 onMounted(load);
+watch(() => activeRegion.value.region_code, load);
 </script>
 
 <template>
@@ -187,7 +188,7 @@ onMounted(load);
             @error="featuredCoverFailed = true"
           />
           <div class="commercial-hero__body">
-            <span>{{ featured.category }}<template v-if="isLocal(featured)"> · 大场</template></span>
+            <span>{{ featured.category }}<template v-if="isLocal(featured)"> · {{ activeRegion.street_or_town }}</template></span>
             <h1>{{ normalizeTitle(featured.title) }}</h1>
             <p>{{ truncateSummary(featured.summary, 126) }}</p>
             <small>{{ featured.source_name }} · {{ shortDate(featured.published_at) }}</small>
@@ -199,7 +200,7 @@ onMounted(load);
           <RouterLink
             v-for="task in commonServices"
             :key="task[0]"
-            :to="{ path: '/services', query: { type: task[2] } }"
+            :to="task[2]"
           ><span><component :is="task[1]" /></span><b>{{ task[0] }}</b></RouterLink>
         </nav>
 
@@ -247,7 +248,7 @@ onMounted(load);
             </span>
             <span v-else-if="feedKind(item) === 'service'" class="feed-entry__icon"><Building2 /></span>
             <div class="feed-entry__body">
-              <small>{{ item.category }}<template v-if="isLocal(item)"> · 大场</template></small>
+              <small>{{ item.category }}<template v-if="isLocal(item)"> · {{ activeRegion.street_or_town }}</template></small>
               <h3>{{ normalizeTitle(item.title) }}</h3>
               <p>{{ truncateSummary(item.summary, feedKind(item) === "image" ? 72 : 110) }}</p>
               <footer>{{ item.source_name }} · {{ shortDate(item.published_at) }}</footer>

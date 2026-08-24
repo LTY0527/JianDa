@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
 import { fetchDetail, fetchItems, fetchServiceDirectory, setFavorite, type PublicItem, type ServiceDirectoryItem } from "../api";
@@ -74,6 +74,7 @@ async function toggleFavorite(item: PublicItem) {
   } catch { error.value = "收藏操作失败，请稍后重试。"; }
 }
 onMounted(load);
+watch(() => activeRegion.value.region_code, load);
 </script>
 <template><div class="h5-page"><H5Header /><main class="h5-main services-page">
   <header class="app-section-head"><ClipboardList /><div><h1>办事行动中心</h1><p>先确认是否适用，再准备材料、地点和办理步骤。</p></div></header>

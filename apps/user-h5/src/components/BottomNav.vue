@@ -6,7 +6,7 @@ const links = [
   { to: "/", icon: Home, label: "首页", matches: ["/"] },
   { to: "/neighborhood", icon: UsersRound, label: "邻里", matches: ["/neighborhood"] },
   { to: "/assistant", icon: MessageCircleQuestion, label: "简达助手", primary: true, matches: ["/assistant"] },
-  { to: "/services", icon: ClipboardList, label: "办事", matches: ["/services", "/guide", "/steps"] },
+  { to: "/services", icon: ClipboardList, label: "服务", matches: ["/services", "/activities", "/guide", "/steps"] },
   { to: "/profile", icon: UserRound, label: "我的", matches: ["/profile", "/favorites", "/history", "/reminders", "/settings"] },
 ];
 function isActive(matches: string[]) {
