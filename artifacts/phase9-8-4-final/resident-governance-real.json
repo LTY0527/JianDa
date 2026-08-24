@@ -1,0 +1,26 @@
+﻿{
+    "started_at":  "2026-08-24T14:09:03+08:00",
+    "gate":  "PASS",
+    "accounts":  {
+                     "admin":  "platform_admin",
+                     "residentB":  "demo_li",
+                     "residentA":  "demo_chen"
+                 },
+    "postId":  13,
+    "steps":  {
+                  "feed_visible_after_create":  "PASS",
+                  "like_before_report":  "PASS",
+                  "comment_before_report":  "PASS",
+                  "report_post":  "PASS",
+                  "feed_hidden_after_report":  "PASS",
+                  "like_after_report_blocked":  "PASS_BLOCKED(404)",
+                  "comment_after_report_blocked":  "PASS_BLOCKED(404)",
+                  "admin_queue_has_reported":  "PASS",
+                  "admin_restore_visible":  "PASS",
+                  "like_after_restore":  "PASS",
+                  "admin_hide":  "PASS",
+                  "like_after_hidden_blocked":  "PASS_BLOCKED(404)",
+                  "comment_after_hidden_blocked":  "PASS_BLOCKED(404)"
+              },
+    "finished_at":  "2026-08-24T14:09:03+08:00"
+}

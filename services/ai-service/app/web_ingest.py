@@ -196,9 +196,10 @@ class _ArticleParser(HTMLParser):
             return
         if key in {"og:title", "twitter:title"}:
             self.page.title = value
-        elif key == "og:image":
-            self.page.cover_image_url = urljoin(self.base_url, value)
-            self.page.cover_image_type = "ORIGINAL_COVER"
+        elif key in {"og:image", "twitter:image"}:
+            if not self.page.cover_image_url:
+                self.page.cover_image_url = urljoin(self.base_url, value)
+                self.page.cover_image_type = "ORIGINAL_COVER"
         elif key in {"author", "article:author"}:
             self.page.author = value
         elif key in {"article:published_time", "pubdate", "publishdate", "datepublished"}:

@@ -29,8 +29,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:jianda-assistant-external-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
         "jianda.assistant.external-enabled=true",
-        "jianda.assistant.daily-call-limit=10",
-        "jianda.assistant.daily-token-limit=10000"
+        "jianda.assistant.global-daily-call-limit=10",
+        "jianda.assistant.global-daily-token-limit=10000"
 })
 @AutoConfigureMockMvc
 class AssistantExternalIntegrationTest {

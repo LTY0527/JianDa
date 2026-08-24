@@ -30,8 +30,6 @@ jianda:
   ai-service-url: ${AI_SERVICE_URL:http://127.0.0.1:8001}
   assistant:
     external-enabled: ${ASSISTANT_EXTERNAL_ENABLED:false}
-    daily-call-limit: ${ASSISTANT_DAILY_CALL_LIMIT:30}
-    daily-token-limit: ${ASSISTANT_DAILY_TOKEN_LIMIT:30000}
     global-daily-call-limit: ${ASSISTANT_GLOBAL_DAILY_CALL_LIMIT:200}
     global-daily-token-limit: ${ASSISTANT_GLOBAL_DAILY_TOKEN_LIMIT:200000}
     resident-daily-call-limit: ${ASSISTANT_RESIDENT_DAILY_CALL_LIMIT:20}

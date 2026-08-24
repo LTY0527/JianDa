@@ -1,0 +1,92 @@
+﻿{
+    "started_at":  "2026-08-24T14:09:00+08:00",
+    "pdf":  "PASS",
+    "image":  "PASS",
+    "crawl":  "PASS",
+    "assistant":  "PASS",
+    "admin":  "PASS",
+    "resident":  "PASS",
+    "checks":  [
+                   {
+                       "name":  "Docker容器健康",
+                       "status":  "PASS",
+                       "detail":  "mysql/ai-service/backend/frontend"
+                   },
+                   {
+                       "name":  "External DeepSeek配置",
+                       "status":  "PASS",
+                       "detail":  "LLM_PROVIDER=external + API_KEY已配置"
+                   },
+                   {
+                       "name":  "Crawl Scheduler启用",
+                       "status":  "PASS",
+                       "detail":  "CRAWL_SCHEDULER_ENABLED=true"
+                   },
+                   {
+                       "name":  "后端健康",
+                       "status":  "PASS",
+                       "detail":  "GET /api/public/assistant/status"
+                   },
+                   {
+                       "name":  "AI Service健康",
+                       "status":  "PASS",
+                       "detail":  "GET /health"
+                   },
+                   {
+                       "name":  "H5前端健康",
+                       "status":  "PASS",
+                       "detail":  "GET /"
+                   },
+                   {
+                       "name":  "机构端健康",
+                       "status":  "PASS",
+                       "detail":  "GET /"
+                   },
+                   {
+                       "name":  "PNG/JPG真实OCR链路",
+                       "status":  "PASS",
+                       "detail":  "OCR提取成功-\u003eWAITING_REVIEW"
+                   },
+                   {
+                       "name":  "PDF文字层提取链路",
+                       "status":  "PASS",
+                       "detail":  "PyMuPDF提取成功"
+                   },
+                   {
+                       "name":  "Assistant External smoke",
+                       "status":  "PASS",
+                       "detail":  "answer 96字 mode=retrieval RAG citations=3"
+                   },
+                   {
+                       "name":  "Scheduler真实SCHEDULED Job",
+                       "status":  "PASS",
+                       "detail":  "SCHEDULED类型Job成功"
+                   },
+                   {
+                       "name":  "图片真实回源覆盖率",
+                       "status":  "PASS",
+                       "detail":  "4/35 = 11.4% (OBSERVED_METRIC)"
+                   },
+                   {
+                       "name":  "邻里REPORTED Feed过滤",
+                       "status":  "PASS",
+                       "detail":  "Feed中REPORTED数=0"
+                   },
+                   {
+                       "name":  "REPORTED互动阻断真实回归",
+                       "status":  "PASS",
+                       "detail":  "13步全链路通过(发帖/点赞/评论/举报/恢复/隐藏)"
+                   },
+                   {
+                       "name":  "Admin治理队列可访问",
+                       "status":  "PASS",
+                       "detail":  "队列数=4"
+                   },
+                   {
+                       "name":  "Admin Browser REAL截图完整",
+                       "status":  "PASS",
+                       "detail":  "11张截图齐全"
+                   }
+               ],
+    "finished_at":  "2026-08-24T14:09:03+08:00"
+}

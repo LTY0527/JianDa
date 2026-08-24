@@ -128,7 +128,7 @@ public class CommunityMediaService {
 
     public MediaFile load(long id, boolean thumbnail) {
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT m.storage_path,m.thumbnail_path,m.mime_type FROM community_post_media m JOIN community_post p ON p.id=m.community_post_id WHERE m.id=? AND p.status IN ('VISIBLE','REPORTED')", id);
+                "SELECT m.storage_path,m.thumbnail_path,m.mime_type FROM community_post_media m JOIN community_post p ON p.id=m.community_post_id WHERE m.id=? AND p.status='VISIBLE'", id);
         if (rows.isEmpty()) throw new BusinessException(404, "图片不存在或帖子已隐藏");
         Map<String, Object> row = rows.get(0);
         Path path = Paths.get(String.valueOf(row.get(thumbnail ? "thumbnail_path" : "storage_path"))).toAbsolutePath().normalize();

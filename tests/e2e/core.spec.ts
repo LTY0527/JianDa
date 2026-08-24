@@ -60,7 +60,8 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await navigation.getByRole("link", { name: "简达助手", exact: true }).click();
     await expect(page.getByRole("heading", { name: "简达助手" })).toBeVisible();
     await navigation.getByRole("link", { name: "我的", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "居民登录" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "游客浏览" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "居民登录" })).toBeVisible();
   });
 
   test("用户端在 375、768 和 1440 宽度无横向溢出", async ({ page }) => {

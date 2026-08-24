@@ -224,11 +224,11 @@ public class AssistantService {
         } catch (RuntimeException exception) {
             long elapsed = elapsedMs(started);
             recordEvent(question, contextSlug, "retrieval", citations.size(), citations.size(),
-                    false, null, null, 0, 0, 0, elapsed, "EXTERNAL_CALL_FAILED", residentUserId, visitorId);
+                    false, null, null, 0, 0, 0, elapsed, "EXTERNAL_FALLBACK", residentUserId, visitorId);
             LOGGER.warn("assistant_rag_fallback category={} evidence_count={} elapsed_ms={} error_type={}",
                     questionCategory(question), citations.size(), elapsed,
                     exception.getClass().getSimpleName());
-            Map<String, Object> resp = retrievalResponse(answer, citations, "EXTERNAL_CALL_FAILED");
+            Map<String, Object> resp = retrievalResponse(answer, citations, "EXTERNAL_FALLBACK");
             resp.put("aiErrorHint", "外部 AI 调用暂时失败，已自动降级为原文检索。可稍后重试。");
             return resp;
         }
@@ -437,13 +437,13 @@ public class AssistantService {
         } catch (RuntimeException exception) {
             long elapsed = elapsedMs(started);
             recordEvent(question, contextSlug, "retrieval", 0, 0, false,
-                    null, null, 0, 0, 0, elapsed, "EXTERNAL_CALL_FAILED",
+                    null, null, 0, 0, 0, elapsed, "EXTERNAL_FALLBACK",
                     residentUserId, visitorId);
             LOGGER.warn("assistant_general_fallback category={} elapsed_ms={} error_type={}",
                     questionCategory(question), elapsed, exception.getClass().getSimpleName());
             Map<String, Object> resp = retrievalResponse(
                     "当前已审核发布内容中没有可靠答案，通用 AI 暂时不可用。", List.of(),
-                    "EXTERNAL_CALL_FAILED");
+                    "EXTERNAL_FALLBACK");
             resp.put("aiErrorHint", "外部 AI 调用暂时失败，已自动降级。可稍后重试。");
             return resp;
         }

@@ -170,7 +170,7 @@ public class ResidentCommunityController {
     public ApiResponse<Map<String, Object>> like(
             @PathVariable long id, @RequestHeader("X-Resident-Token") String token) {
         Map<String, Object> user = resident(token);
-        visiblePost(id);
+        requirePublicVisiblePost(id);
         Integer countValue = jdbc.queryForObject("SELECT COUNT(*) FROM community_post_like WHERE community_post_id=? AND resident_user_id=?",
                 Integer.class, id, user.get("id"));
         int count = countValue == null ? 0 : countValue;
@@ -182,7 +182,7 @@ public class ResidentCommunityController {
 
     @GetMapping("/api/public/community/posts/{id}/comments")
     public ApiResponse<List<Map<String, Object>>> comments(@PathVariable long id) {
-        visiblePost(id);
+        requirePublicVisiblePost(id);
         return ApiResponse.ok(jdbc.queryForList(
                 "SELECT c.id,c.content,c.created_at,u.nickname,u.is_demo user_is_demo FROM community_comment c "
                         + "JOIN resident_user u ON u.id=c.resident_user_id WHERE c.community_post_id=? "
@@ -194,7 +194,7 @@ public class ResidentCommunityController {
             @PathVariable long id, @RequestHeader("X-Resident-Token") String token,
             @RequestBody CommentRequest request) {
         Map<String, Object> user = resident(token);
-        visiblePost(id);
+        requirePublicVisiblePost(id);
         String content = clean(request.content(), 300);
         if (content.isBlank()) throw new BusinessException(400, "请输入评论内容");
         jdbc.update("INSERT INTO community_comment(community_post_id,resident_user_id,content) VALUES (?,?,?)",
@@ -207,7 +207,7 @@ public class ResidentCommunityController {
             @PathVariable long id, @RequestHeader("X-Resident-Token") String token,
             @RequestBody ReportRequest request) {
         Map<String, Object> user = resident(token);
-        visiblePost(id);
+        requirePublicVisiblePost(id);
         String reason = clean(request.reason(), 200);
         if (reason.length() < 5) throw new BusinessException(400, "请简要说明举报原因");
         jdbc.update("INSERT INTO community_report(community_post_id,resident_user_id,reason) VALUES (?,?,?)",
@@ -248,11 +248,11 @@ public class ResidentCommunityController {
         return rows.get(0);
     }
 
-    private void visiblePost(long id) {
-        Integer countValue = jdbc.queryForObject("SELECT COUNT(*) FROM community_post WHERE id=? AND status IN ('VISIBLE','REPORTED')",
+    private void requirePublicVisiblePost(long id) {
+        Integer countValue = jdbc.queryForObject("SELECT COUNT(*) FROM community_post WHERE id=? AND status='VISIBLE'",
                 Integer.class, id);
         int count = countValue == null ? 0 : countValue;
-        if (count == 0) throw new BusinessException(404, "帖子不存在或已隐藏");
+        if (count == 0) throw new BusinessException(404, "帖子不存在或已隐藏，暂不能互动");
     }
 
     private void recordUsage(Object userId, String type) {

@@ -429,6 +429,15 @@ public class DocumentService {
                 LOGGER.warn("document_rewrite_schema_recovered document_id={} job_id={} facts_persisted={} checkpoint={}",
                         id, jobId, factsPersisted, checkpoint != null);
                 try {
+                    // 从失败异常中补齐 provider/model/request_id/fingerprint，
+                    // 确保 fallback job 仍记录真实外部调用元数据。
+                    if (exception instanceof AiServiceException aiFailure) {
+                        diagnosticProvider = defaultString(aiFailure.stringValue("provider"), diagnosticProvider);
+                        diagnosticModel = defaultString(aiFailure.stringValue("model"), diagnosticModel);
+                        diagnosticRequestId = defaultString(aiFailure.stringValue("request_id"), diagnosticRequestId);
+                        diagnosticFingerprint = defaultString(aiFailure.stringValue("response_fingerprint"), diagnosticFingerprint);
+                        crossedProviderBoundary = crossedProviderBoundary || !diagnosticRequestId.isBlank();
+                    }
                     if (checkpoint != null && !factsPersisted) {
                         persistFactCheckpointFromRaw(id, checkpoint);
                     }
@@ -453,10 +462,13 @@ public class DocumentService {
                     long totalMs = metric(metrics, "total_ms") + persistenceMs;
                     aiQueueService.settle(reservation, totalTokens, true,
                             nullableString(metrics.get("provider")), nullableString(metrics.get("model")));
+                    // 持久化 fact_checkpoint_json，确保 retry-rewrite 可跳过事实提取阶段直接改写。
+                    String retryCheckpointJson = serializeCheckpointForRetry(
+                            id, checkpoint, diagnosticModel, diagnosticRequestId, diagnosticFingerprint);
                     jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,reason_code=?,"
                                     + "schema_version=?,provider_id=?,model_id=?,provider_request_id=?,response_fingerprint=?,"
                                     + "crossed_provider_boundary=?,prompt_tokens=?,completion_tokens=?,total_tokens=?,"
-                                    + "persistence_ms=?,total_ms=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                                    + "persistence_ms=?,total_ms=?,fact_checkpoint_json=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
                             "REWRITE_ENUM_RECOVERED_VIA_FALLBACK",
                             String.valueOf(metrics.getOrDefault("schema_version", "1.1")),
                             nullableString(diagnosticProvider), nullableString(diagnosticModel),
@@ -464,7 +476,7 @@ public class DocumentService {
                             crossedProviderBoundary, tokenMetric(exception, "prompt_tokens"),
                             tokenMetric(exception, "completion_tokens"),
                             Math.max(totalTokens, tokensFrom(exception)),
-                            persistenceMs, totalMs, jobId);
+                            persistenceMs, totalMs, retryCheckpointJson, jobId);
                     jdbc.update("UPDATE source_document SET processing_status='WAITING_REVIEW',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
                     log(user, "PROCESS_DOCUMENT", "SOURCE_DOCUMENT", id, "REWRITE_FALLBACK_RECOVERED");
                     return Map.of("documentId", id, "status", "WAITING_REVIEW", "stage", "SUCCEEDED",
@@ -673,6 +685,57 @@ public class DocumentService {
                     jobId);
         } catch (JsonProcessingException | IllegalArgumentException checkpointError) {
             LOGGER.error("Failed to persist fact checkpoint for document {}", documentId, checkpointError);
+        }
+    }
+
+    /**
+     * 为 fallback 后的 retry-rewrite 准备可序列化的事实检查点 JSON。
+     * 优先使用异常携带的 checkpoint；缺失时从已持久化的 extracted_field 重建最小检查点，
+     * 以便 retry-rewrite 仍可跳过事实提取阶段。返回 null 表示无可用检查点。
+     */
+    private String serializeCheckpointForRetry(long documentId, Map<?, ?> checkpoint,
+                                               String diagnosticModel, String diagnosticRequestId,
+                                               String diagnosticFingerprint) {
+        Map<?, ?> source = (checkpoint != null && !checkpoint.isEmpty()) ? checkpoint : null;
+        if (source == null) {
+            List<Map<String, Object>> rawFields = jdbc.queryForList(
+                    "SELECT field_type,field_label,field_value,page_no,segment_id,source_quote,confidence "
+                            + "FROM extracted_field WHERE document_id=? ORDER BY id", documentId);
+            if (rawFields.isEmpty()) return null;
+            List<Map<String, Object>> fields = new ArrayList<>();
+            for (Map<String, Object> raw : rawFields) {
+                Map<String, Object> field = new LinkedHashMap<>();
+                field.put("field_type", raw.get("field_type"));
+                field.put("label", raw.get("field_label"));
+                field.put("value", raw.get("field_value"));
+                field.put("page_no", raw.get("page_no"));
+                field.put("segment_id", raw.get("segment_id"));
+                field.put("source_quote", raw.get("source_quote"));
+                field.put("confidence", raw.get("confidence"));
+                fields.add(field);
+            }
+            Map<String, Object> facts = new LinkedHashMap<>();
+            facts.put("prompt_version", "v1");
+            facts.put("fields", fields);
+            facts.put("sessions", List.of());
+            Map<String, Object> rebuilt = new LinkedHashMap<>();
+            rebuilt.put("prompt_version", "v1");
+            rebuilt.put("schema_version", "1.1");
+            rebuilt.put("model", nullableString(diagnosticModel).isBlank() ? "recovered" : diagnosticModel);
+            rebuilt.put("response_fingerprint", nullableString(diagnosticFingerprint));
+            rebuilt.put("request_id", nullableString(diagnosticRequestId));
+            rebuilt.put("fact_extract_ms", 0);
+            rebuilt.put("prompt_tokens", 0);
+            rebuilt.put("completion_tokens", 0);
+            rebuilt.put("total_tokens", 0);
+            rebuilt.put("facts", facts);
+            source = rebuilt;
+        }
+        try {
+            return objectMapper.writeValueAsString(source);
+        } catch (JsonProcessingException serializationError) {
+            LOGGER.warn("Failed to serialize fact checkpoint for retry document {}", documentId, serializationError);
+            return null;
         }
     }
 
