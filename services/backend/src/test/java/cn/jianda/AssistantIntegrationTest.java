@@ -201,8 +201,8 @@ class AssistantIntegrationTest {
     }
 
     private void insertPublished(long documentId, String slug, String title, String summary, String status) {
-        jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,published_at,status,source_name,source_url) "
-                        + "VALUES (?,?,?,?, '反诈',1,?,?, '测试权威来源','https://example.gov.cn/source')",
+        jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,published_at,status,source_name,source_url,province,local_scope) "
+                        + "VALUES (?,?,?,?, '反诈',1,?,?, '测试权威来源','https://example.gov.cn/source','全国','NATIONAL_SHARED')",
                 documentId, slug, title, summary, Timestamp.valueOf(LocalDateTime.of(2026, 7, 23, 10, 0)), status);
     }
 }

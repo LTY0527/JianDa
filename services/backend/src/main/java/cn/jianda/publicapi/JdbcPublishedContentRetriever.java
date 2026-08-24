@@ -21,8 +21,7 @@ public class JdbcPublishedContentRetriever implements PublishedContentRetriever 
                 "SELECT p.document_id,p.slug,p.title,p.summary,p.category,p.source_name,p.published_at,"
                         + "p.region_code,p.local_scope,d.raw_text "
                         + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
-                        + "WHERE p.status='PUBLISHED' AND (p.region_code=? "
-                        + "OR p.local_scope IN ('CITY','NATIONAL','CITY_SHARED','NATIONAL_SHARED','UNSPECIFIED')) "
+                        + "WHERE p.status='PUBLISHED' AND " + PublishedRegionScope.predicate("p") + " "
                         + "ORDER BY CASE WHEN p.region_code=? THEN 0 ELSE 1 END,p.published_at DESC,p.id DESC",
                 SupportedRegions.normalize(regionCode), SupportedRegions.normalize(regionCode));
         List<Map<String, Object>> result = new ArrayList<>(rows.size());

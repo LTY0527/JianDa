@@ -66,8 +66,8 @@ public class PublicController {
             parameters.add(category);
         }
         if (regionCode != null && !regionCode.isBlank()) {
-            sql += "AND (p.region_code=? OR p.local_scope IN ('CITY','NATIONAL','UNSPECIFIED')) ";
-            parameters.add(regionCode.trim());
+            sql += "AND " + PublishedRegionScope.predicate("p") + " ";
+            parameters.addAll(PublishedRegionScope.parameters(regionCode));
         }
         return ApiResponse.ok(jdbc.queryForList(sql + order, parameters.toArray()));
     }
@@ -84,17 +84,25 @@ public class PublicController {
     }
 
     @GetMapping("/search")
-    public ApiResponse<List<Map<String, Object>>> search(@RequestParam String keyword) {
+    public ApiResponse<List<Map<String, Object>>> search(
+            @RequestParam String keyword,
+            @RequestParam(required = false) String regionCode) {
         String like = "%" + keyword.trim() + "%";
-        return ApiResponse.ok(jdbc.queryForList("SELECT p.id,p.slug,p.title,p.summary,p.category,p.source_name,"
+        String sql = "SELECT p.id,p.slug,p.title,p.summary,p.category,p.source_name,"
                 + "p.source_url,p.published_at,p.content_kind,p.cover_image_url,p.is_local,p.reading_minutes,"
                 + "p.pinned,p.importance,p.effective_from,p.deadline_at,p.expires_at,p.last_verified_at,"
                 + "p.source_updated_at,p.verification_status,d.cover_image_type,d.image_source_name,d.image_source_url,"
                 + "d.image_alt_text,d.image_cached,d.image_license_note "
                 + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
                 + "WHERE p.status='PUBLISHED' AND (p.expires_at IS NULL OR p.expires_at>=CURRENT_TIMESTAMP) "
-                + "AND (p.title LIKE ? OR p.summary LIKE ? OR p.category LIKE ?) "
-                + "ORDER BY p.pinned DESC,p.importance DESC,p.published_at DESC,p.id DESC", like, like, like));
+                + "AND (p.title LIKE ? OR p.summary LIKE ? OR p.category LIKE ?) ";
+        List<Object> parameters = new ArrayList<>(List.of(like, like, like));
+        if (regionCode != null && !regionCode.isBlank()) {
+            sql += "AND " + PublishedRegionScope.predicate("p") + " ";
+            parameters.addAll(PublishedRegionScope.parameters(regionCode));
+        }
+        sql += "ORDER BY p.pinned DESC,p.importance DESC,p.published_at DESC,p.id DESC";
+        return ApiResponse.ok(jdbc.queryForList(sql, parameters.toArray()));
     }
 
     @GetMapping("/categories")
@@ -223,25 +231,29 @@ public class PublicController {
     public ApiResponse<Map<String, Object>> neighbors(
             @PathVariable String slug,
             @RequestParam(defaultValue = "false") boolean sameCategory,
-            @RequestParam(required = false) String category) {
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String regionCode) {
         List<Map<String, Object>> currentRows = jdbc.queryForList(
-                "SELECT id,pinned,importance,published_at,category FROM published_item "
+                "SELECT id,pinned,importance,published_at,category,region_code FROM published_item "
                         + "WHERE slug=? AND status='PUBLISHED'", slug);
         if (currentRows.isEmpty()) throw new BusinessException(404, "内容不存在或已撤回");
         Map<String, Object> current = currentRows.get(0);
         String activeCategory = category == null || category.isBlank()
                 ? String.valueOf(current.get("category")) : category.trim();
-        Object previous = sameCategory ? adjacent(current, true, activeCategory) : null;
-        Object next = sameCategory ? adjacent(current, false, activeCategory) : null;
-        if (previous == null) previous = adjacent(current, true, null);
-        if (next == null) next = adjacent(current, false, null);
+        Object currentRegion = current.get("region_code");
+        String activeRegion = regionCode == null || regionCode.isBlank()
+                ? currentRegion == null ? "" : String.valueOf(currentRegion) : regionCode;
+        Object previous = sameCategory ? adjacent(current, true, activeCategory, activeRegion) : null;
+        Object next = sameCategory ? adjacent(current, false, activeCategory, activeRegion) : null;
+        if (previous == null) previous = adjacent(current, true, null, activeRegion);
+        if (next == null) next = adjacent(current, false, null, activeRegion);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("previous", previous);
         result.put("next", next);
         return ApiResponse.ok(result);
     }
 
-    private Object adjacent(Map<String, Object> current, boolean previous, String category) {
+    private Object adjacent(Map<String, Object> current, boolean previous, String category, String regionCode) {
         Object pinnedValue = current.get("pinned");
         int pinned = pinnedValue instanceof Number number ? number.intValue()
                 : Boolean.TRUE.equals(pinnedValue) ? 1 : 0;
@@ -253,19 +265,19 @@ public class PublicController {
         String sql = "SELECT p.id,p.slug,p.title,p.category,p.cover_image_url,p.content_kind "
                 + "FROM published_item p WHERE p.status='PUBLISHED' "
                 + (category == null ? "" : "AND p.category=? ")
+                + (regionCode == null || regionCode.isBlank() ? "" : "AND " + PublishedRegionScope.predicate("p") + " ")
                 + "AND ((CASE WHEN p.pinned THEN 1 ELSE 0 END " + comparison + " ?) "
                 + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND p.importance " + comparison + " ?) "
                 + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND p.importance=? AND p.published_at " + comparison + " ?) "
                 + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND p.importance=? AND p.published_at=? AND p.id " + comparison + " ?)) "
                 + "ORDER BY p.pinned " + order + ",p.importance " + order + ",p.published_at " + order
                 + ",p.id " + order + " LIMIT 1";
-        Object[] key = { pinned, pinned, importance, pinned, importance, publishedAt,
-                pinned, importance, publishedAt, id };
-        if (category == null) return firstOrNull(jdbc.queryForList(sql, key));
-        Object[] parameters = new Object[key.length + 1];
-        parameters[0] = category;
-        System.arraycopy(key, 0, parameters, 1, key.length);
-        return firstOrNull(jdbc.queryForList(sql, parameters));
+        List<Object> parameters = new ArrayList<>();
+        if (category != null) parameters.add(category);
+        if (regionCode != null && !regionCode.isBlank()) parameters.addAll(PublishedRegionScope.parameters(regionCode));
+        parameters.addAll(List.of(pinned, pinned, importance, pinned, importance, publishedAt,
+                pinned, importance, publishedAt, id));
+        return firstOrNull(jdbc.queryForList(sql, parameters.toArray()));
     }
 
     private static Object firstOrNull(List<Map<String, Object>> rows) {
