@@ -248,8 +248,8 @@ export async function residentLogin(username: string, password: string): Promise
   localStorage.setItem("jianda_resident_profile", JSON.stringify(response.data.data.profile));
   return response.data.data.profile;
 }
-export async function residentRegister(username: string, password: string, nickname: string): Promise<ResidentProfile> {
-  const response = await client.post("/public/resident/register", { username, password, nickname });
+export async function residentRegister(username: string, password: string, nickname: string, regionCode?: string): Promise<ResidentProfile> {
+  const response = await client.post("/public/resident/register", { username, password, nickname, regionCode });
   localStorage.setItem("jianda_resident_token", response.data.data.token);
   localStorage.setItem("jianda_resident_profile", JSON.stringify(response.data.data.profile));
   return response.data.data.profile;

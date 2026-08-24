@@ -34,7 +34,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 public class ResidentCommunityController {
-    private static final String DACHANG_REGION = "310113102";
+    private static final String DEFAULT_REGION = SupportedRegions.DEFAULT_CODE;
     private static final Pattern USERNAME = Pattern.compile("[A-Za-z0-9_]{4,30}");
     private final JdbcTemplate jdbc;
     private final PasswordEncoder passwordEncoder;
@@ -66,8 +66,9 @@ public class ResidentCommunityController {
         if (nickname.length() < 2) throw new BusinessException(400, "昵称至少需要 2 个字");
         Integer duplicate = jdbc.queryForObject("SELECT COUNT(*) FROM resident_user WHERE username=?", Integer.class, username);
         if (duplicate != null && duplicate > 0) throw new BusinessException(409, "该用户名已被注册");
+        SupportedRegions.Region region = SupportedRegions.require(request.regionCode());
         jdbc.update("INSERT INTO resident_user(username,password_hash,nickname,district,street_or_town,region_code) VALUES (?,?,?,?,?,?)",
-                username, passwordEncoder.encode(password), nickname, "宝山区", "大场镇", DACHANG_REGION);
+                username, passwordEncoder.encode(password), nickname, region.district(), region.townName(), region.code());
         return login(new LoginRequest(username, password));
     }
 
@@ -117,9 +118,9 @@ public class ResidentCommunityController {
 
     @GetMapping("/api/public/community/posts")
     public ApiResponse<List<Map<String, Object>>> posts(
-            @RequestParam(defaultValue = DACHANG_REGION) String regionCode,
+            @RequestParam(defaultValue = DEFAULT_REGION) String regionCode,
             @RequestParam(defaultValue = "最新") String category) {
-        if (!DACHANG_REGION.equals(regionCode)) throw new BusinessException(403, "当前地区尚未开放邻里功能");
+        regionCode = SupportedRegions.require(regionCode).code();
         String filter = "最新".equals(category) ? "" : "AND p.category=? ";
         String sql = "SELECT p.id,p.category,p.content,p.region_code,p.district,p.street_or_town,p.status,p.is_demo,p.created_at,"
                 + "u.nickname,u.avatar,u.is_demo user_is_demo,"
@@ -244,7 +245,9 @@ public class ResidentCommunityController {
                 "SELECT u.* FROM resident_session s JOIN resident_user u ON u.id=s.resident_user_id "
                         + "WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP AND u.status='ACTIVE'", sha256(token));
         if (rows.isEmpty()) throw new BusinessException(401, "居民登录已过期，请重新登录");
-        if (!DACHANG_REGION.equals(rows.get(0).get("region_code"))) throw new BusinessException(403, "当前地区尚未开放邻里功能");
+        if (!SupportedRegions.contains(String.valueOf(rows.get(0).get("region_code")))) {
+            throw new BusinessException(403, "当前地区尚未开放邻里功能");
+        }
         return rows.get(0);
     }
 
@@ -282,7 +285,7 @@ public class ResidentCommunityController {
     }
 
     public record LoginRequest(String username, String password) {}
-    public record RegisterRequest(String username, String password, String nickname) {}
+    public record RegisterRequest(String username, String password, String nickname, String regionCode) {}
     public record PostRequest(String category, String content, List<Long> mediaIds) {}
     public record CommentRequest(String content) {}
     public record ReportRequest(String reason) {}

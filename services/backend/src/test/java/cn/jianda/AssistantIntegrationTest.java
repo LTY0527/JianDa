@@ -120,7 +120,7 @@ class AssistantIntegrationTest {
                         + "VALUES (?,'互助','助手邻里测试-大场公园已举报信息','310113102','宝山区','大场镇','REPORTED')",
                 residentId);
         jdbc.update("INSERT INTO community_post(resident_user_id,category,content,region_code,district,street_or_town,status) "
-                        + "VALUES (?,'互助','助手邻里测试-大场公园其他地区','310113101','宝山区','其他街道','VISIBLE')",
+                        + "VALUES (?,'互助','助手邻里测试-顾村公园周日活动','310113109','宝山区','顾村镇','VISIBLE')",
                 residentId);
 
         mvc.perform(post("/api/public/assistant/chat")
@@ -150,12 +150,15 @@ class AssistantIntegrationTest {
         mvc.perform(post("/api/public/assistant/chat")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"message":"邻里有没有大场公园活动？","regionCode":"310113101"}
+                                {"message":"邻里有没有顾村公园活动？","regionCode":"310113109"}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.mode").value("community_post"))
-                .andExpect(jsonPath("$.data.communityPosts.length()").value(0))
-                .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("尚未开放")));
+                .andExpect(jsonPath("$.data.communityPosts[*].content",
+                        org.hamcrest.Matchers.hasItem(org.hamcrest.Matchers.containsString("顾村公园"))))
+                .andExpect(jsonPath("$.data.communityPosts[*].content",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem(
+                                org.hamcrest.Matchers.containsString("大场公园健步走")))));
     }
 
     @Test

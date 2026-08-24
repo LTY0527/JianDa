@@ -8,5 +8,5 @@ import java.util.Map;
  * A database full-text or vector implementation can replace this without changing answer policy.
  */
 public interface PublishedContentRetriever {
-    List<Map<String, Object>> publishedContent();
+    List<Map<String, Object>> publishedContent(String regionCode);
 }

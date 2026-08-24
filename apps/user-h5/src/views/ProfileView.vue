@@ -15,7 +15,7 @@ onMounted(()=>{loadLibrary();restoreProfile();window.addEventListener("jianda-li
 const links = [
   ["/reminders", Bell, "我的提醒", "报名截止、活动和办理时间", () => ""], ["/favorites", Heart, "我的收藏", "仍在公开的资讯与办事", () => `${favoriteCount.value} 条`],
   ["/history", Clock3, "历史浏览", "最近打开过的内容", () => `${historyCount.value} 条`], ["/listen?tab=recent", Headphones, "最近收听", "继续播放在本机听过的内容", () => `${listenCount.value} 条`],
-  ["/neighborhood", UserRound, "我的帖子与评论", "参与大场邻里互动", () => ""], ["/settings", Settings, "阅读与语音设置", "字号、对比度和朗读速度", () => ""],
+  ["/neighborhood", UserRound, "我的帖子与评论", "参与当前地区邻里互动", () => ""], ["/settings", Settings, "阅读与语音设置", "字号、对比度和朗读速度", () => ""],
   ["/settings", SlidersHorizontal, "关注内容", "由您自己选择关心的频道", () => ""],
 ] as const;
 </script>

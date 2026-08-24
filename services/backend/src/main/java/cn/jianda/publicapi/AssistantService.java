@@ -23,7 +23,7 @@ public class AssistantService {
     private static final Logger LOGGER = LoggerFactory.getLogger(AssistantService.class);
     private static final String DISCLAIMER = "仅帮助理解，正式要求以原文为准。涉及医疗、金融或政策决定时，请向主管部门或专业人员核实。";
     private static final String COMMUNITY_DISCLAIMER = "邻里信息由居民发布，未经官方核验，不作为政策、办事或其他官方依据，请自行联系确认并注意安全。";
-    private static final String DACHANG_REGION = "310113102";
+    private static final String DEFAULT_REGION = SupportedRegions.DEFAULT_CODE;
     private static final int MAX_CITATIONS = 3;
     private static final int MAX_COMMUNITY_POSTS = 5;
     private static final List<Pattern> GROUNDED_FACT_PATTERNS = List.of(
@@ -83,7 +83,7 @@ public class AssistantService {
     }
 
     public Map<String, Object> chat(String message, String contextSlug) {
-        return chat(message, contextSlug, DACHANG_REGION, null, null);
+        return chat(message, contextSlug, DEFAULT_REGION, null, null);
     }
 
     public Map<String, Object> chat(String message, String contextSlug, String regionCode) {
@@ -116,7 +116,10 @@ public class AssistantService {
             return response;
         }
 
-        List<Map<String, Object>> rows = retriever.publishedContent();
+        String evidenceRegion = SupportedRegions.mentionedIn(question)
+                .map(SupportedRegions.Region::code)
+                .orElse(SupportedRegions.require(regionCode).code());
+        List<Map<String, Object>> rows = retriever.publishedContent(evidenceRegion);
         Set<String> terms = terms(question);
         Set<String> anchors = queryAnchors(question);
         List<RankedItem> ranked = rows.stream()
@@ -205,15 +208,9 @@ public class AssistantService {
 
     private Map<String, Object> communityResponse(String question, String regionCode,
                                                   Long residentUserId, String visitorId) {
-        String activeRegion = regionCode == null || regionCode.isBlank()
-                ? DACHANG_REGION : regionCode.trim();
-        if (!DACHANG_REGION.equals(activeRegion)) {
-            Map<String, Object> result = response(
-                    "当前地区尚未开放邻里信息检索。", List.of(), "community_post");
-            result.put("communityPosts", List.of());
-            result.put("disclaimer", COMMUNITY_DISCLAIMER);
-            return result;
-        }
+        String activeRegion = SupportedRegions.mentionedIn(question)
+                .map(SupportedRegions.Region::code)
+                .orElse(SupportedRegions.require(regionCode).code());
         Set<String> terms = terms(question);
         List<Map<String, Object>> posts = jdbc.queryForList(
                 "SELECT p.id,p.category,p.content,p.region_code,p.district,p.street_or_town,p.created_at,u.nickname "
@@ -231,8 +228,8 @@ public class AssistantService {
                 .map(RankedItem::row)
                 .toList();
         String answer = matches.isEmpty()
-                ? "当前开放地区的可见邻里信息中，没有找到与这个问题相关的帖子。"
-                : "在当前开放地区找到 " + matches.size()
+                ? "当前地区的可见邻里信息中，没有找到与这个问题相关的帖子。"
+                : "在当前地区找到 " + matches.size()
                         + " 条相关邻里信息。以下内容由居民发布，请查看发布时间并自行联系确认。";
         recordEvent(question, null, "community_post", matches.size(), 0, true,
                 null, null, 0, 0, 0, 0, matches.isEmpty() ? "NO_COMMUNITY_POST" : null,

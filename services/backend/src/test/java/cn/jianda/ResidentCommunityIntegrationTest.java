@@ -121,6 +121,26 @@ class ResidentCommunityIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    void gucunAndMiaohangRegistrationAndFeedsUseRequestedRegion() throws Exception {
+        String gucun = mvc.perform(post("/api/public/resident/register").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"resident_gucun\",\"password\":\"Secure123\",\"nickname\":\"顾村居民\",\"regionCode\":\"310113109\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.profile.regionCode").value("310113109"))
+                .andExpect(jsonPath("$.data.profile.streetOrTown").value("顾村镇"))
+                .andReturn().getResponse().getContentAsString();
+        String token = objectMapper.readTree(gucun).path("data").path("token").asText();
+        String created = mvc.perform(post("/api/public/community/posts")
+                        .header("X-Resident-Token", token).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"category\":\"活动\",\"content\":\"顾村居民真实测试帖子\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long postId = objectMapper.readTree(created).path("data").path("id").asLong();
+        mvc.perform(get("/api/public/community/posts").param("regionCode", "310113109"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data[?(@.id == " + postId + ")]").exists());
+        mvc.perform(get("/api/public/community/posts").param("regionCode", "310113112"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data[?(@.id == " + postId + ")]").isEmpty());
+    }
+
     private String staffLogin() throws Exception {
         String body = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of("username", "platform_admin", "password", "Jianda@123"))))
