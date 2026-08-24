@@ -17,6 +17,7 @@ const router = createRouter({
         { path: "documents/:id/publish", component: () => import("./views/PublishView.vue"), meta: { title: "审核与发布", showBack: true, backTo: "/documents" } },
         { path: "published", component: () => import("./views/PublishedView.vue"), meta: { title: "已发布内容", showBack: false } },
         { path: "public-sources", component: () => import("./views/PublicSourcesView.vue"), meta: { title: "采集与来源", showBack: false, platformOnly: true } },
+        { path: "public-sources/:sourceId/check/:jobId", component: () => import("./views/SourceDiscoveryJobView.vue"), meta: { title: "来源检查", showBack: true, backTo: "/public-sources", platformOnly: true } },
         { path: "public-import", component: () => import("./views/PublicImportView.vue"), meta: { title: "添加内容", showBack: true, backTo: "/documents", platformOnly: true } },
         { path: "operations", component: () => import("./views/OperationsView.vue"), meta: { title: "数据概览", showBack: false, platformOnly: true } },
         { path: "community-moderation", component: () => import("./views/CommunityModerationView.vue"), meta: { title: "邻里内容治理", showBack: true, backTo: "/operations", platformOnly: true } },

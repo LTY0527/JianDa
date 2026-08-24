@@ -80,12 +80,8 @@ test.describe("Phase 9.8_4 真实 Admin 全链路", () => {
     }
     expect(clicked).toBeTruthy();
 
-    // 截“检查执行中”
-    try {
-      await expect(page.locator(".source-operation-state.running")).toBeVisible({ timeout: 10000 });
-    } catch {
-      // 某些来源检查极快，running 状态可能已结束，仍截当前页
-    }
+    // Phase 9.9 起检查任务进入独立进度/结果页。
+    await expect(page).toHaveURL(/\/public-sources\/\d+\/check\/\d+/, { timeout: 10000 });
     await page.waitForTimeout(1500);
     await page.screenshot({
       path: path.join(artifactRoot, "admin-source-running-1440.png"),

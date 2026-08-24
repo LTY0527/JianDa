@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 import { Plus, ShieldCheck, ToggleLeft, ToggleRight, RefreshCw, ArrowRight, Settings2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import HelpTip from "../components/HelpTip.vue";
@@ -24,6 +25,7 @@ import {
 } from "../utils/display";
 
 const sources = ref<PublicSource[]>([]);
+const router = useRouter();
 const registries = ref<WebSourceRegistry[]>([]);
 const jobs = ref<CrawlJob[]>([]);
 const aiQueue = ref<AiQueueItem[]>([]);
@@ -130,9 +132,20 @@ function sourceHealth(source: WebSourceRegistry) {
 }
 const enabledSourceCount = computed(() => registries.value.filter((source) => source.enabled).length);
 async function checkNow(source: WebSourceRegistry) {
-  showAdvanced.value = true;
-  activeSection.value = "scan";
-  await discoverArticles(source);
+  operatingSourceId.value = source.id;
+  error.value = "";
+  try {
+    const entry = discoveryEntry(source);
+    const response = await publicSourceApi.startRegistryDiscoveryJob(source.id, {
+      method: entry.method,
+      entryUrl: entry.entryUrl,
+      ...scanForm,
+    });
+    await router.push(`/public-sources/${source.id}/check/${response.data.data.id}`);
+  } catch (cause) {
+    error.value = apiMessage(cause);
+    operatingSourceId.value = null;
+  }
 }
 function openNewSource() {
   showAdvanced.value = true;

@@ -196,7 +196,7 @@ test("来源、调度和预算页面在 375px 与 1440px 均不横向溢出视�
   }
 });
 
-test("发现文章、影子采集和立即采集保持三段式人工控制", async ({ page }) => {
+test("立即检查进入独立进度页并引导加入内容中心", async ({ page }) => {
   await prepare(page);
   const enabledRegistry = { ...registry, enabled: true, allow_image_candidates: true };
   const candidate = {
@@ -210,6 +210,7 @@ test("发现文章、影子采集和立即采集保持三段式人工控制", as
     dedup_key: "article-1",
   };
   const calls: string[] = [];
+  let jobReads = 0;
   await page.route("**/*", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -221,30 +222,35 @@ test("发现文章、影子采集和立即采集保持三段式人工控制", as
     if (path === "/api/crawl-tasks") return fulfill(route, []);
     if (path === "/api/ai-queue") return fulfill(route, []);
     if (path === "/api/runtime-capabilities") return fulfill(route, { crawlAutoAiEnabled: false, crawlSchedulerEnabled: false, llmProvider: "mock", externalModel: "", dailyArticleLimit: 5, dailyTokenLimit: 50000 });
-    if (path.endsWith("/discover")) {
-      calls.push("discover");
+    if (path === "/api/source-registries/31/discover-jobs" && request.method() === "POST") {
+      calls.push("start");
       return fulfill(route, {
-        sourceId: 31,
-        method: "RSS",
-        candidates: [candidate],
-        duplicateCount: 0,
-        errors: [],
+        id: 801, source_registry_id: 31, source_name: enabledRegistry.source_name,
+        domain: enabledRegistry.domain, original_url: enabledRegistry.rss_url,
+        status: "PENDING", trigger_type: "MANUAL", processing_stage: "CONNECT",
+        discovered_count: 0, added_count: 0, duplicate_count: 0, skipped_count: 0,
+        failed_count: 0, retry_count: 0, progress_message: "正在连接官网",
       });
     }
-    if (path.endsWith("/shadow")) {
-      calls.push("shadow");
+    if (path === "/api/source-registries/discover-jobs/801") {
+      jobReads += 1;
+      if (jobReads === 1) return fulfill(route, {
+        id: 801, source_registry_id: 31, source_name: enabledRegistry.source_name,
+        domain: enabledRegistry.domain, original_url: enabledRegistry.rss_url,
+        status: "RUNNING", trigger_type: "MANUAL", processing_stage: "ARTICLE_PARSE",
+        discovered_count: 1, added_count: 0, duplicate_count: 0, skipped_count: 0,
+        failed_count: 0, retry_count: 0, progress_message: "正在识别文章",
+      });
       return fulfill(route, {
-        title: candidate.title,
-        source_name: enabledRegistry.source_name,
-        cover_image_type: "ARTICLE_IMAGE",
-        canonical_url: candidate.canonical_url,
-        content_preview: "这是影子采集得到的正文预览，不创建材料。",
-        content_kind: "HEALTH_EDUCATION",
-        authority_level: "A",
-        robots_allowed: true,
-        robots_status: "ALLOWED",
-        warnings: [],
-        image_cached: false,
+        id: 801, source_registry_id: 31, source_name: enabledRegistry.source_name,
+        domain: enabledRegistry.domain, original_url: enabledRegistry.rss_url,
+        status: "SUCCESS", trigger_type: "MANUAL", processing_stage: "COMPLETE",
+        discovered_count: 1, added_count: 1, duplicate_count: 0, skipped_count: 174,
+        failed_count: 0, retry_count: 0,
+        discoveryResult: {
+          sourceId: 31, method: "RSS", candidates: [candidate], duplicateCount: 0,
+          errors: [], filtered_external_count: 20, filtered_navigation_count: 154,
+        },
       });
     }
     if (path.endsWith("/collect")) {
@@ -260,18 +266,16 @@ test("发现文章、影子采集和立即采集保持三段式人工控制", as
 
   await page.goto(`${institutionUrl}/public-sources`);
   await page.getByRole("button", { name: "立即检查" }).click();
-  await expect(page.getByText(/未创建材料、未调用 AI/)).toBeVisible();
+  await expect(page).toHaveURL(/\/public-sources\/31\/check\/801/);
+  await expect(page.getByRole("heading", { name: "正在识别文章" })).toBeVisible();
+  await expect(page.getByText("检查完成")).toBeVisible({ timeout: 5000 });
   await expect(page.getByText(candidate.title)).toBeVisible();
-  expect(calls).toEqual(["discover"]);
+  await expect(page.getByText(/已合并过滤 174 条/)).toBeVisible();
+  expect(calls).toEqual(["start"]);
 
-  await page.getByRole("button", { name: "影子采集" }).click();
-  await expect(page.getByText(/影子采集完成/)).toBeVisible();
-  await expect(page.getByText("这是影子采集得到的正文预览，不创建材料。")).toBeVisible();
-  expect(calls).toEqual(["discover", "shadow"]);
-
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "立即采集" }).click();
-  await expect(page.getByText(/材料 #601 已创建/)).toBeVisible();
-  await expect(page.getByText(/等待人工批准/)).toBeVisible();
-  expect(calls).toEqual(["discover", "shadow", "collect"]);
+  await page.getByRole("button", { name: "加入内容中心", exact: true }).click();
+  await expect(page.getByText(/材料 #601 已加入内容中心/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "立即处理" })).toHaveAttribute("href", "/documents/601/process");
+  await expect(page.getByRole("link", { name: "返回来源" }).last()).toHaveAttribute("href", "/public-sources");
+  expect(calls).toEqual(["start", "collect"]);
 });
