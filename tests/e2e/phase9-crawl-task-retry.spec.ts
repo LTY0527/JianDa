@@ -81,6 +81,7 @@ test("PARTIAL_SUCCESS 错误队列只允许重试未解决的可重试项", asyn
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
     if (path === "/api/public-sources") return json(route, []);
     if (path === "/api/source-registries") return json(route, [registry]);
     if (path === "/api/crawl-tasks" && request.method() === "GET") return json(route, [partialJob, runningJob]);

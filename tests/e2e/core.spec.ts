@@ -44,7 +44,7 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(h5Url);
     const navigation = page.getByRole("navigation", { name: "主要导航" });
-    for (const label of ["首页", "邻里", "简达助手", "办事", "我的"]) {
+    for (const label of ["首页", "邻里", "简达助手", "服务", "我的"]) {
       await expect(navigation.getByRole("link", { name: label, exact: true })).toBeVisible();
     }
     await expect(page.getByRole("heading", { name: "推荐内容" })).toBeVisible();
@@ -53,7 +53,7 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await page.getByRole("button", { name: "健康", exact: true }).click();
     await page.getByRole("button", { name: "重要", exact: true }).click();
     await expect(page.locator(".channel-tabs .active")).toHaveText("健康");
-    await navigation.getByRole("link", { name: "办事", exact: true }).click();
+    await navigation.getByRole("link", { name: "服务", exact: true }).click();
     await expect(page.getByRole("heading", { name: "办事行动中心" })).toBeVisible();
     await page.getByLabel("服务对象").selectOption("老年人");
     await expect(page.getByText(/\d+ 个事项/)).toBeVisible();

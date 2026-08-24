@@ -44,7 +44,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
       ["/news", "权威资讯", "h5-news-375.png"],
       ["/assistant", "简达助手", "h5-assistant-375.png"],
       ["/services", "办事行动中心", "h5-services-375.png"],
-      ["/profile", "居民登录", "h5-profile-375.png"],
+      ["/profile", "游客浏览", "h5-profile-375.png"],
     ] as const;
 
     for (const [route, heading, file] of pages) {
@@ -73,9 +73,22 @@ test.describe("Phase 7.3 rendered acceptance", () => {
   });
 
   test("用户端详情、平板和桌面视口可阅读", async ({ page }, testInfo) => {
+    const response = await page.request.get(`${h5Url}/api/public/items`);
+    expect(response.ok()).toBeTruthy();
+    const payload = await response.json() as { data?: Array<{ slug: string; title: string; content_kind?: string }> };
+    const items = payload.data ?? [];
+    const guide = items.find((item) => item.content_kind === "SERVICE_NOTICE");
+    const news = items.find((item) => item.content_kind !== "SERVICE_NOTICE");
+    const firstDetail = guide ?? news ?? items[0];
+    const secondDetail = news ?? guide ?? items[0];
+    expect(firstDetail, "需要至少一篇已发布内容验证详情页").toBeTruthy();
+    expect(secondDetail, "需要至少一篇已发布内容验证资讯详情页").toBeTruthy();
+    const detailRoute = (item: { slug: string; content_kind?: string }) =>
+      `/${item.content_kind === "SERVICE_NOTICE" ? "guide" : "news"}/${item.slug}`;
+    const displayTitle = (title: string) => title.replace(/[-—－][^-—－]+$/, "").trim();
     const checks = [
-      [375, 812, "/guide/social-security-card-renewal", "社会保障卡到期换领指南", "h5-guide-detail-375.png"],
-      [375, 812, "/news/summer-heat-health", "高温天气老年人健康防护提醒", "h5-news-detail-375.png"],
+      [375, 812, detailRoute(firstDetail!), displayTitle(firstDetail!.title), "h5-guide-detail-375.png"],
+      [375, 812, detailRoute(secondDetail!), displayTitle(secondDetail!.title), "h5-news-detail-375.png"],
       [768, 1024, "/", "推荐内容", "h5-home-768.png"],
       [1440, 900, "/", "推荐内容", "h5-home-1440.png"],
     ] as const;

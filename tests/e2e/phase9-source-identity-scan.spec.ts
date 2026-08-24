@@ -147,16 +147,32 @@ test("扫描筛选和批量保存只提交所选未导入 URL", async ({ page })
     if (path === "/api/public-sources") return fulfill(route, []);
     if (path === "/api/source-registries" && request.method() === "GET") return fulfill(route, [registry]);
     if (path === "/api/crawl-tasks" || path === "/api/ai-queue") return fulfill(route, []);
-    if (path.endsWith("/discover")) {
+    if (path.endsWith("/discover-jobs") && request.method() === "POST") {
       discoverPayload = request.postDataJSON();
       return fulfill(route, {
-        sourceId: 31,
-        method: "SECTION",
-        candidates,
-        duplicateCount: 1,
-        filtered_external_count: 12,
-        filtered_external_domains: ["outside.example"],
-        errors: [],
+        id: 801,
+        source_registry_id: 31,
+        source_name: registry.source_name,
+        domain: registry.domain,
+        original_url: registry.section_url,
+        status: "SUCCESS",
+        trigger_type: "MANUAL",
+        processing_stage: "COMPLETE",
+        discovered_count: 2,
+        added_count: 1,
+        duplicate_count: 1,
+        skipped_count: 12,
+        failed_count: 0,
+        retry_count: 0,
+        discoveryResult: {
+          sourceId: 31,
+          method: "SECTION",
+          candidates,
+          duplicateCount: 1,
+          filtered_external_count: 12,
+          filtered_external_domains: ["outside.example"],
+          errors: [],
+        },
       });
     }
     if (path.endsWith("/collect-batch")) {

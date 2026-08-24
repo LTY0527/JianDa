@@ -48,7 +48,7 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 390, height: 844 }
     await expect(page.getByRole("button", { name: /黄浦区/ })).toBeDisabled();
     await expect(page.getByRole("button", { name: /友谊路街道/ })).toBeDisabled();
     await expect(page.getByRole("button", { name: /大场镇/ }).last()).toBeEnabled();
-    await expect(page.getByText("当前仅开放上海市宝山区大场镇")).toBeVisible();
+    await expect(page.getByText("大场、顾村、庙行已开放。", { exact: false })).toBeVisible();
     await expectNoOverflow(page);
     await page.getByRole("button", { name: /大场镇/ }).last().click();
     await expect(page.getByRole("dialog", { name: "选择所在地区" })).toHaveCount(0);

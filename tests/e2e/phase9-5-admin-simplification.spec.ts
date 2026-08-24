@@ -36,10 +36,10 @@ test("管理员导航和工作台围绕今日待办收束", async ({ page }) => 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(institutionUrl);
   const navigation = page.getByRole("navigation", { name: "主导航" });
-  for (const label of ["工作台", "内容中心", "采集与来源", "数据概览", "系统记录"]) {
+  for (const label of ["工作台", "内容中心", "采集与来源", "商业运营", "数据概览", "系统记录"]) {
     await expect(navigation.getByRole("link", { name: label, exact: true })).toBeVisible();
   }
-  await expect(navigation.getByRole("link")).toHaveCount(5);
+  await expect(navigation.getByRole("link")).toHaveCount(6);
   await expect(navigation).not.toContainText("材料管理");
   await expect(navigation).not.toContainText("公开信息导入");
   await expect(page.getByRole("heading", { name: "早上好，王老师" })).toBeVisible();
@@ -76,4 +76,3 @@ test("内容中心合并状态并提供统一添加入口", async ({ page }) => 
   await expect(page.locator("vite-error-overlay")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
-
