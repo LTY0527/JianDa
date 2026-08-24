@@ -4,7 +4,7 @@ import PageHeader from "../components/PageHeader.vue";
 import StatusTag from "../components/StatusTag.vue";
 import { documentApi, type DocumentRow } from "../api/documents";
 import { apiMessage } from "../api/http";
-import { Search, Plus, Upload, Globe2, FileImage, FileText, PenLine, X } from "lucide-vue-next";
+import { Search, Plus, Upload, Globe2, FileImage, FileText, PenLine, X, RefreshCw } from "lucide-vue-next";
 import { formatDisplayDate, formatDisplayDateTime, statusLabel } from "../utils/display";
 import { isPlatformAdmin } from "../auth";
 import { useRoute } from "vue-router";
@@ -15,6 +15,8 @@ const showAddContent = ref(false);
 const loading = ref(true);
 const error = ref("");
 const documents = ref<DocumentRow[]>([]);
+const refreshing = ref(false);
+const lastUpdatedAt = ref<Date | null>(null);
 const savedState = sessionStorage.getItem("jianda_documents_state");
 if (savedState) {
   const parsed = JSON.parse(savedState);
@@ -71,15 +73,26 @@ function sourceLabel(document: DocumentRow) {
   if (document.source_type === "IMAGE") return "图片材料";
   return "PDF 材料";
 }
-onMounted(async () => {
+async function refreshDocuments(initial = false) {
+  if (refreshing.value) return;
+  refreshing.value = true;
+  if (initial) loading.value = true;
   try {
     documents.value = (await documentApi.list()).data.data;
+    lastUpdatedAt.value = new Date();
+    error.value = "";
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
     loading.value = false;
-    requestAnimationFrame(() => window.scrollTo(0, Number(savedState ? JSON.parse(savedState).scroll : 0)));
+    refreshing.value = false;
   }
+}
+onMounted(async () => {
+  await refreshDocuments(true);
+  try {
+    requestAnimationFrame(() => window.scrollTo(0, Number(savedState ? JSON.parse(savedState).scroll : 0)));
+  } catch { /* Ignore malformed legacy scroll state. */ }
 });
 </script>
 <template>
@@ -87,10 +100,11 @@ onMounted(async () => {
     <PageHeader
       title="内容中心"
       description="在一个地方查看上传材料、网页内容和已发布信息。"
-      ><button class="btn primary" type="button" @click="showAddContent = true"
+      ><button class="btn secondary" type="button" :disabled="refreshing" @click="refreshDocuments()"><RefreshCw :size="17" :class="{ spin: refreshing }" />{{ refreshing ? "正在刷新…" : "刷新" }}</button><button class="btn primary" type="button" @click="showAddContent = true"
         ><Plus :size="17" />添加内容</button
       ></PageHeader
     >
+    <p v-if="lastUpdatedAt" class="content-updated" role="status">{{ refreshing ? "正在同步最新状态" : `最近更新 ${lastUpdatedAt.toLocaleTimeString('zh-CN', { hour12: false })}` }}</p>
     <section class="panel">
       <nav class="content-tabs" aria-label="内容状态">
         <button

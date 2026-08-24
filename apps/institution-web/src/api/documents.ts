@@ -120,6 +120,26 @@ export interface ProcessingJob {
   updated_at?: string;
 }
 
+export interface ProcessingSnapshot {
+  documentId: number;
+  status: string;
+  stage: string;
+  progress: number;
+  elapsed: number;
+  heartbeat?: string;
+  jobId?: number;
+  jobStatus?: string;
+  error?: string;
+  hasReviewContent: boolean;
+  updatedAt?: string;
+  version?: string;
+  totalMs?: number;
+  providerId?: string;
+  modelId?: string;
+  reasonCode?: string;
+  retryCount?: number;
+}
+
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<ApiResponse<{ token: string; user: Record<string, unknown> }>>(
@@ -200,6 +220,8 @@ export const documentApi = {
   },
   jobs: (id: number) =>
     http.get<ApiResponse<ProcessingJob[]>>(`/documents/${id}/jobs`),
+  processingSnapshot: (id: number) =>
+    http.get<ApiResponse<ProcessingSnapshot>>(`/documents/${id}/processing-snapshot`),
   updateField: (
     documentId: number,
     fieldId: number,

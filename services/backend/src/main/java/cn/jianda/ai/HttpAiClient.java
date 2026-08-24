@@ -5,9 +5,14 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.net.HttpURLConnection;
 import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.SocketAddress;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -21,6 +26,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class HttpAiClient implements AiClient {
     private final ObjectMapper objectMapper;
+    private final HttpClient httpClient;
     private final URI analyzeUri;
     private final URI rewriteUri;
     private final URI extractUri;
@@ -35,6 +41,11 @@ public class HttpAiClient implements AiClient {
 
     public HttpAiClient(ObjectMapper objectMapper, @Value("${jianda.ai-service-url}") String baseUrl) {
         this.objectMapper = objectMapper;
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .proxy(new DirectProxySelector())
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
         this.analyzeUri = URI.create(baseUrl + "/internal/analyze");
         this.rewriteUri = URI.create(baseUrl + "/internal/rewrite");
         this.extractUri = URI.create(baseUrl + "/internal/extract-text");
@@ -95,68 +106,42 @@ public class HttpAiClient implements AiClient {
 
     private Map<String, Object> sendFile(URI uri, Path file, String fileName,
                                          String contentType, String operation) {
-        HttpURLConnection connection = null;
         String boundary = "----JianDa" + UUID.randomUUID().toString().replace("-", "");
         try {
-            String extension = fileName.contains(".") ? fileName.substring(fileName.lastIndexOf('.')) : "";
-            String safeName = "upload" + extension;
-            ByteArrayOutputStream payload = new ByteArrayOutputStream();
-            payload.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
-            payload.write(("Content-Disposition: form-data; name=\"file\"; filename=\"" + safeName + "\"\r\n")
-                    .getBytes(StandardCharsets.UTF_8));
-            payload.write(("Content-Type: " + (contentType == null ? "application/octet-stream" : contentType)
-                    + "\r\n\r\n").getBytes(StandardCharsets.UTF_8));
-            Files.copy(file, payload);
-            payload.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
-
-            connection = (HttpURLConnection) uri.toURL().openConnection(Proxy.NO_PROXY);
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-            connection.setConnectTimeout(10_000);
-            connection.setReadTimeout(60_000);
-            connection.setDoOutput(true);
-            connection.setFixedLengthStreamingMode(payload.size());
-            payload.writeTo(connection.getOutputStream());
-            return readResponse(connection, operation);
+            byte[] payload = multipartPayload(boundary, file, fileName, contentType).toByteArray();
+            return readResponse(send(HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofSeconds(60))
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(payload)).build()), operation);
         } catch (IOException exception) {
             throw new IllegalStateException(operation + " service connection failed", exception);
-        } finally {
-            if (connection != null) connection.disconnect();
         }
     }
 
     private byte[] sendFileBytes(URI uri, Path file, String fileName,
                                  String contentType, String operation) {
-        HttpURLConnection connection = null;
         String boundary = "----JianDa" + UUID.randomUUID().toString().replace("-", "");
         try {
-            ByteArrayOutputStream payload = multipartPayload(
-                    boundary, file, fileName, contentType);
-            connection = (HttpURLConnection) uri.toURL().openConnection(Proxy.NO_PROXY);
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-            connection.setConnectTimeout(10_000);
-            connection.setReadTimeout(60_000);
-            connection.setDoOutput(true);
-            connection.setFixedLengthStreamingMode(payload.size());
-            payload.writeTo(connection.getOutputStream());
-            int status = connection.getResponseCode();
+            byte[] payload = multipartPayload(boundary, file, fileName, contentType).toByteArray();
+            HttpResponse<byte[]> response = send(HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofSeconds(60))
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(payload)).build());
+            int status = response.statusCode();
             if (status < 200 || status >= 300) {
                 throw new IllegalStateException(operation + " service returned HTTP " + status);
             }
-            String mime = connection.getContentType();
+            String mime = response.headers().firstValue("Content-Type").orElse("");
             if (mime == null || !mime.toLowerCase(java.util.Locale.ROOT).startsWith("image/")) {
                 throw new IllegalStateException(operation + " returned a non-image response");
             }
-            byte[] bytes = connection.getInputStream().readNBytes(10 * 1024 * 1024 + 1);
+            byte[] bytes = response.body();
             if (bytes.length == 0 || bytes.length > 10 * 1024 * 1024) {
                 throw new IllegalStateException(operation + " returned an invalid image size");
             }
             return bytes;
         } catch (IOException exception) {
             throw new IllegalStateException(operation + " service connection failed", exception);
-        } finally {
-            if (connection != null) connection.disconnect();
         }
     }
 
@@ -217,18 +202,8 @@ public class HttpAiClient implements AiClient {
     }
 
     private Map<String, Object> sendGet(URI uri, String operation, int readTimeout) {
-        HttpURLConnection connection = null;
-        try {
-            connection = (HttpURLConnection) uri.toURL().openConnection(Proxy.NO_PROXY);
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(3_000);
-            connection.setReadTimeout(readTimeout);
-            return readResponse(connection, operation);
-        } catch (IOException exception) {
-            throw new IllegalStateException(operation + " service connection failed", exception);
-        } finally {
-            if (connection != null) connection.disconnect();
-        }
+        return readResponse(send(HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofMillis(readTimeout)).GET().build()), operation);
     }
 
     private Map<String, Object> analyzeRequest(String title, String text, String documentType,
@@ -251,67 +226,48 @@ public class HttpAiClient implements AiClient {
 
     private Map<String, Object> sendJson(URI uri, Map<String, Object> request,
                                          String operation, int readTimeout) {
-        HttpURLConnection connection = null;
         try {
             byte[] payload = objectMapper.writeValueAsBytes(request);
-            connection = (HttpURLConnection) uri.toURL().openConnection(Proxy.NO_PROXY);
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            connection.setConnectTimeout(10_000);
-            connection.setReadTimeout(readTimeout);
-            connection.setDoOutput(true);
-            connection.setFixedLengthStreamingMode(payload.length);
-            connection.getOutputStream().write(payload);
-            return readResponse(connection, operation);
+            return readResponse(send(HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofMillis(readTimeout))
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(payload)).build()), operation);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException(operation + " JSON processing failed", exception);
-        } catch (IOException exception) {
-            throw new IllegalStateException(operation + " service connection failed", exception);
-        } finally {
-            if (connection != null) connection.disconnect();
         }
     }
 
     private BinaryResponse sendJsonBytes(
             URI uri, Map<String, Object> request, String operation, int readTimeout) {
-        HttpURLConnection connection = null;
         try {
             byte[] payload = objectMapper.writeValueAsBytes(request);
-            connection = (HttpURLConnection) uri.toURL().openConnection(Proxy.NO_PROXY);
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            connection.setConnectTimeout(10_000);
-            connection.setReadTimeout(readTimeout);
-            connection.setDoOutput(true);
-            connection.setFixedLengthStreamingMode(payload.length);
-            connection.getOutputStream().write(payload);
-            int status = connection.getResponseCode();
+            HttpResponse<byte[]> response = send(HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofMillis(readTimeout))
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(payload)).build());
+            int status = response.statusCode();
             if (status < 200 || status >= 300) {
                 throw new IllegalStateException(operation + " service returned HTTP " + status);
             }
-            String mime = connection.getContentType();
+            String mime = response.headers().firstValue("Content-Type").orElse("");
             if (mime == null || !mime.toLowerCase(java.util.Locale.ROOT).startsWith("image/")) {
                 throw new IllegalStateException(operation + " returned a non-image response");
             }
-            byte[] bytes = connection.getInputStream().readNBytes(10 * 1024 * 1024 + 1);
+            byte[] bytes = response.body();
             if (bytes.length == 0 || bytes.length > 10 * 1024 * 1024) {
                 throw new IllegalStateException(operation + " returned an invalid image size");
             }
             return new BinaryResponse(bytes, mime.split(";", 2)[0],
-                    integerHeader(connection, "X-Image-Width"),
-                    integerHeader(connection, "X-Image-Height"));
+                    integerHeader(response, "X-Image-Width"),
+                    integerHeader(response, "X-Image-Height"));
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException(operation + " JSON processing failed", exception);
-        } catch (IOException exception) {
-            throw new IllegalStateException(operation + " service connection failed", exception);
-        } finally {
-            if (connection != null) connection.disconnect();
         }
     }
 
-    private static Integer integerHeader(HttpURLConnection connection, String name) {
+    private static Integer integerHeader(HttpResponse<?> response, String name) {
         try {
-            String value = connection.getHeaderField(name);
+            String value = response.headers().firstValue(name).orElse(null);
             return value == null ? null : Integer.valueOf(value);
         } catch (NumberFormatException ignored) {
             return null;
@@ -320,11 +276,22 @@ public class HttpAiClient implements AiClient {
 
     private record BinaryResponse(byte[] bytes, String contentType, Integer width, Integer height) {}
 
-    private Map<String, Object> readResponse(HttpURLConnection connection, String operation) throws IOException {
-        int status = connection.getResponseCode();
-        var stream = status >= 200 && status < 300
-                ? connection.getInputStream() : connection.getErrorStream();
-        byte[] responseBytes = stream == null ? new byte[0] : stream.readNBytes(65_536);
+    private HttpResponse<byte[]> send(HttpRequest request) {
+        try {
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("AI service request interrupted", exception);
+        } catch (IOException exception) {
+            throw new IllegalStateException("AI service connection failed", exception);
+        }
+    }
+
+    private Map<String, Object> readResponse(HttpResponse<byte[]> response, String operation) {
+        int status = response.statusCode();
+        byte[] fullBody = response.body() == null ? new byte[0] : response.body();
+        byte[] responseBytes = fullBody.length <= 65_536
+                ? fullBody : java.util.Arrays.copyOf(fullBody, 65_536);
         String responseBody = new String(responseBytes, StandardCharsets.UTF_8);
         if (status < 200 || status >= 300) {
             Map<String, Object> detail = new LinkedHashMap<>();
@@ -348,6 +315,22 @@ public class HttpAiClient implements AiClient {
             }
             throw new AiServiceException(status, detail);
         }
-        return objectMapper.readValue(responseBody, new TypeReference<Map<String, Object>>() {});
+        try {
+            return objectMapper.readValue(responseBody, new TypeReference<Map<String, Object>>() {});
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException(operation + " returned invalid JSON", exception);
+        }
+    }
+
+    private static final class DirectProxySelector extends ProxySelector {
+        @Override
+        public List<Proxy> select(URI uri) {
+            return List.of(Proxy.NO_PROXY);
+        }
+
+        @Override
+        public void connectFailed(URI uri, SocketAddress address, IOException failure) {
+            // Direct localhost connection has no proxy state to update.
+        }
     }
 }

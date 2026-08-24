@@ -68,6 +68,11 @@ public class DocumentController {
     @GetMapping("/{id}/jobs")
     public ApiResponse<List<Map<String, Object>>> jobs(@PathVariable long id) { return ApiResponse.ok(service.jobs(id, UserContext.current())); }
 
+    @GetMapping("/{id}/processing-snapshot")
+    public ApiResponse<Map<String, Object>> processingSnapshot(@PathVariable long id) {
+        return ApiResponse.ok(service.processingSnapshot(id, UserContext.current()));
+    }
+
     @GetMapping("/{id}/segments")
     public ApiResponse<List<Map<String, Object>>> segments(@PathVariable long id) { return ApiResponse.ok(service.segments(id, UserContext.current())); }
 
@@ -132,6 +137,12 @@ public class DocumentController {
     @PostMapping("/{id}/withdraw")
     public ApiResponse<Void> withdraw(@PathVariable long id) { service.withdraw(id, UserContext.current()); return ApiResponse.ok(null); }
 
+    @PutMapping("/{id}/region-scope")
+    public ApiResponse<Map<String, Object>> regionScope(
+            @PathVariable long id, @Valid @RequestBody RegionScopeRequest request) {
+        return ApiResponse.ok(service.updateRegionScope(id, request, UserContext.current()));
+    }
+
     public record CreateRequest(
             @NotBlank(message = "请输入材料标题") String title,
             String sourceName,
@@ -149,4 +160,11 @@ public class DocumentController {
                                  @NotBlank(message = "请选择分类") String category,
                                  @NotBlank(message = "请输入来源") String sourceName, String sourceUrl,
                                  boolean allowPublicOriginal) {}
+    public record RegionScopeRequest(
+            @NotBlank String localScope,
+            String province,
+            String city,
+            String district,
+            String streetOrTown,
+            String regionCode) {}
 }

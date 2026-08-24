@@ -970,6 +970,116 @@ public class DocumentService {
         return jdbc.queryForList("SELECT * FROM processing_job WHERE document_id=? ORDER BY id DESC", id);
     }
 
+    @Transactional
+    public Map<String, Object> updateRegionScope(
+            long id, DocumentController.RegionScopeRequest request, AuthUser user) {
+        if (!user.isPlatformAdmin()) throw new BusinessException(403, "仅平台管理员可以修正地域归属");
+        detail(id, user);
+        String scope = request.localScope().trim().toUpperCase(java.util.Locale.ROOT);
+        if (!Set.of("LOCAL_TOWN", "DISTRICT_SHARED", "CITY_SHARED", "NATIONAL_SHARED", "UNCLASSIFIED")
+                .contains(scope)) throw new BusinessException(400, "地域范围不正确");
+        String province = nullableString(request.province());
+        String city = nullableString(request.city());
+        String district = nullableString(request.district());
+        String town = nullableString(request.streetOrTown());
+        String code = nullableString(request.regionCode());
+        if ("LOCAL_TOWN".equals(scope)) {
+            if (!"宝山区".equals(district) || !Set.of("310113102", "310113109", "310113112").contains(code)) {
+                throw new BusinessException(400, "本地镇内容必须归属已开通的宝山区镇");
+            }
+        } else if ("DISTRICT_SHARED".equals(scope)) {
+            if (!"宝山区".equals(district)) throw new BusinessException(400, "区级共享内容必须明确归属宝山区");
+            town = "";
+            code = "310113";
+        } else if ("CITY_SHARED".equals(scope)) {
+            if (!"上海市".equals(city)) throw new BusinessException(400, "市级共享内容必须明确归属上海市");
+            district = "";
+            town = "";
+            code = "310000";
+        } else if ("NATIONAL_SHARED".equals(scope)) {
+            province = "全国";
+            city = "";
+            district = "";
+            town = "";
+            code = "100000";
+        } else {
+            province = city = district = town = code = "";
+        }
+        jdbc.update("UPDATE source_document SET province=?,city=?,district=?,street_or_town=?,region_code=?,"
+                        + "local_scope=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                emptyToNull(province), emptyToNull(city), emptyToNull(district), emptyToNull(town), emptyToNull(code), scope, id);
+        jdbc.update("UPDATE published_item SET province=?,city=?,district=?,street_or_town=?,region_code=?,local_scope=? "
+                        + "WHERE document_id=?",
+                emptyToNull(province), emptyToNull(city), emptyToNull(district), emptyToNull(town), emptyToNull(code), scope, id);
+        log(user, "UPDATE_REGION_SCOPE", "SOURCE_DOCUMENT", id, "SUCCESS");
+        return detail(id, user);
+    }
+
+    private static String emptyToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
+    /** Lightweight polling projection. It intentionally excludes source text, fields and generated content. */
+    public Map<String, Object> processingSnapshot(long id, AuthUser user) {
+        assertAccess(id, user);
+        Map<String, Object> document = jdbc.queryForMap(
+                "SELECT processing_status,updated_at FROM source_document WHERE id=?", id);
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT id,status,stage,progress,error_message,started_at,finished_at,updated_at,total_ms,"
+                        + "provider_id,model_id,reason_code,retry_count FROM processing_job "
+                        + "WHERE document_id=? ORDER BY id DESC LIMIT 1", id);
+        Map<String, Object> job = rows.isEmpty() ? Map.of() : rows.get(0);
+        if ("PROCESSING".equals(job.get("status")) && stale(job.get("updated_at"), 10 * 60)) {
+            Object jobId = job.get("id");
+            jdbc.update("UPDATE processing_job SET status='FAILED_RETRYABLE',stage='HEARTBEAT_STALE',"
+                            + "last_failed_stage=COALESCE(stage,'UNKNOWN'),error_message='任务心跳超时，可安全重试',"
+                            + "finished_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'",
+                    jobId);
+            jdbc.update("UPDATE source_document SET processing_status='FAILED',updated_at=CURRENT_TIMESTAMP "
+                    + "WHERE id=? AND processing_status='PROCESSING'", id);
+            rows = jdbc.queryForList(
+                    "SELECT id,status,stage,progress,error_message,started_at,finished_at,updated_at,total_ms,"
+                            + "provider_id,model_id,reason_code,retry_count FROM processing_job WHERE id=?", jobId);
+            job = rows.get(0);
+            document.put("processing_status", "FAILED");
+        }
+        int reviewRows = jdbc.queryForObject(
+                "SELECT (SELECT COUNT(*) FROM extracted_field WHERE document_id=? AND review_status<>'REJECTED') "
+                        + "+ (SELECT COUNT(*) FROM generated_content WHERE document_id=?)",
+                Integer.class, id, id);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("documentId", id);
+        result.put("status", document.get("processing_status"));
+        result.put("stage", job.getOrDefault("stage", "PREPARING"));
+        result.put("progress", job.getOrDefault("progress", 0));
+        result.put("elapsed", elapsedSeconds(job));
+        result.put("heartbeat", job.get("updated_at"));
+        result.put("jobId", job.get("id"));
+        result.put("jobStatus", job.get("status"));
+        result.put("error", job.get("error_message"));
+        result.put("hasReviewContent", reviewRows > 0);
+        result.put("updatedAt", document.get("updated_at"));
+        result.put("version", job.get("updated_at"));
+        result.put("totalMs", job.get("total_ms"));
+        result.put("providerId", job.get("provider_id"));
+        result.put("modelId", job.get("model_id"));
+        result.put("reasonCode", job.get("reason_code"));
+        result.put("retryCount", job.getOrDefault("retry_count", 0));
+        return result;
+    }
+
+    private static boolean stale(Object value, int seconds) {
+        if (!(value instanceof java.util.Date date)) return false;
+        return System.currentTimeMillis() - date.getTime() > seconds * 1000L;
+    }
+
+    private static long elapsedSeconds(Map<String, Object> job) {
+        if (!(job.get("started_at") instanceof java.util.Date started)) return 0;
+        long end = job.get("finished_at") instanceof java.util.Date finished
+                ? finished.getTime() : System.currentTimeMillis();
+        return Math.max(0, (end - started.getTime()) / 1000L);
+    }
+
     public List<Map<String, Object>> fields(long id, AuthUser user) {
         assertAccess(id, user);
         List<Map<String, Object>> fields =

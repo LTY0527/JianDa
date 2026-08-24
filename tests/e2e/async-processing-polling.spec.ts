@@ -33,9 +33,23 @@ async function mockProcessing(
   statusForDetail: () => "PROCESSING" | "WAITING_REVIEW",
 ) {
   const fulfill = (route: Route, data: unknown) => route.fulfill(api(data));
-  let currentStatus: "PROCESSING" | "WAITING_REVIEW" = "PROCESSING";
+  let currentStatus: "PROCESSING" | "WAITING_REVIEW" = statusForDetail();
   await page.route("**/api/documents/108**", (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/processing-snapshot")) {
+      currentStatus = statusForDetail();
+      return fulfill(route, {
+        documentId: 108,
+        status: currentStatus,
+        stage: currentStatus === "WAITING_REVIEW" ? "SUCCEEDED" : "EXTRACTING_FACTS",
+        progress: currentStatus === "WAITING_REVIEW" ? 100 : 35,
+        jobId: 52,
+        jobStatus: currentStatus === "WAITING_REVIEW" ? "SUCCEEDED" : "PROCESSING",
+        hasReviewContent: currentStatus === "WAITING_REVIEW",
+        heartbeat: "2026-07-30T00:00:00+08:00",
+        elapsed: 3,
+      });
+    }
     if (path.endsWith("/fields")) return fulfill(route, []);
     if (path.endsWith("/segments")) {
       return fulfill(route, [
@@ -84,7 +98,6 @@ async function mockProcessing(
         },
       ]);
     }
-    currentStatus = statusForDetail();
     return fulfill(route, {
       id: 108,
       title: "养老服务标准规范",

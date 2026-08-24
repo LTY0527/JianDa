@@ -31,6 +31,8 @@ jianda:
   ai-service-url: ${AI_SERVICE_URL:http://127.0.0.1:8001}
   assistant:
     external-enabled: ${ASSISTANT_EXTERNAL_ENABLED:false}
+  payment:
+    demo-mode: ${PAYMENT_DEMO_MODE:false}
   public-fixture: ${JIANDA_PUBLIC_FIXTURE:}
   crawl:
     scheduler-enabled: ${CRAWL_SCHEDULER_ENABLED:false}

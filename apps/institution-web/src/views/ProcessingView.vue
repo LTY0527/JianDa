@@ -45,6 +45,7 @@ const latestJob = computed(
 const terminalStatuses = new Set([
   "WAITING_REVIEW",
   "FAILED",
+  "FAILED_RETRYABLE",
   "WAITING_BUDGET",
   "WAITING_APPROVAL",
   "CANCELLED",
@@ -236,6 +237,47 @@ async function load(silent = false) {
   }
 }
 
+async function loadSnapshot() {
+  if (refreshing.value) return;
+  refreshing.value = true;
+  let reachedTerminal = false;
+  try {
+    const response = await documentApi.processingSnapshot(documentId);
+    const snapshot = response.data.data;
+    if (document.value) document.value.processing_status = snapshot.status;
+    const current = latestJob.value;
+    const compactJob: ProcessingJob = {
+      ...(current || { id: snapshot.jobId || 0, status: snapshot.jobStatus || snapshot.status, progress: 0 }),
+      id: snapshot.jobId || current?.id || 0,
+      status: snapshot.jobStatus || snapshot.status,
+      stage: snapshot.stage,
+      progress: snapshot.progress,
+      error_message: snapshot.error,
+      updated_at: snapshot.heartbeat || snapshot.updatedAt,
+      total_ms: snapshot.totalMs,
+      provider_id: snapshot.providerId,
+      model_id: snapshot.modelId,
+      reason_code: snapshot.reasonCode,
+      retry_count: snapshot.retryCount,
+    };
+    jobs.value = [compactJob, ...jobs.value.filter((item) => item.id !== compactJob.id)];
+    elapsedSeconds.value = snapshot.elapsed;
+    lastUpdatedAt.value = new Date();
+    reachedTerminal = terminalStatuses.has(snapshot.status)
+      || terminalStatuses.has(snapshot.jobStatus || "")
+      || snapshot.jobStatus === "FAILED_RETRYABLE";
+    error.value = "";
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    refreshing.value = false;
+  }
+  if (reachedTerminal) {
+    stopPolling();
+    await load(true);
+  }
+}
+
 function stopPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
@@ -244,7 +286,7 @@ function stopPolling() {
 function startPolling() {
   stopPolling();
   pollTimer = setInterval(() => {
-    if (!terminal.value) void load(true);
+    if (!terminal.value) void loadSnapshot();
     else stopPolling();
   }, 2000);
 }
