@@ -7,6 +7,7 @@ const client = axios.create({
 });
 const anonymousUser = getOrCreateAnonymousUserId();
 client.defaults.headers.common["X-Anonymous-User"] = anonymousUser;
+client.defaults.headers.common["X-Visitor-Id"] = anonymousUser;
 
 export interface PublicItem {
   id: number;
@@ -304,11 +305,15 @@ export async function askAssistant(
   regionCode?: string,
 ): Promise<AssistantReply> {
   try {
-    const response = await client.post("/public/assistant/chat", {
-      message,
-      contextSlug: contextSlug || undefined,
-      regionCode: regionCode || undefined,
-    });
+    const response = await client.post(
+      "/public/assistant/chat",
+      {
+        message,
+        contextSlug: contextSlug || undefined,
+        regionCode: regionCode || undefined,
+      },
+      { headers: residentHeaders() },
+    );
     const data = response.data?.data;
     if (
       !data ||

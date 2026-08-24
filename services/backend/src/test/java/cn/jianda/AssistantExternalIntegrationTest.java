@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.sun.net.httpserver.HttpServer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
@@ -28,9 +29,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:jianda-assistant-external-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "jianda.assistant.external-enabled=true",
-        "jianda.assistant.global-daily-call-limit=10",
-        "jianda.assistant.global-daily-token-limit=10000"
+        "jianda.assistant.external-enabled=true"
 })
 @AutoConfigureMockMvc
 class AssistantExternalIntegrationTest {
@@ -41,6 +40,7 @@ class AssistantExternalIntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
+    @Autowired ObjectMapper objectMapper;
 
     @DynamicPropertySource
     static void aiService(DynamicPropertyRegistry registry) {
@@ -144,6 +144,33 @@ class AssistantExternalIntegrationTest {
                 "SELECT COUNT(*) FROM assistant_query_event "
                         + "WHERE mode='general_ai' AND evidence_count=0 AND total_tokens=90",
                 Integer.class) == 1);
+    }
+
+    @Test
+    void loggedInResidentCanContinueAfterThirtyAssistantCallsWithoutDailyBlocking() throws Exception {
+        String login = mvc.perform(post("/api/public/resident/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"demo_chen\",\"password\":\"Resident@123\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String token = objectMapper.readTree(login).path("data").path("token").asText();
+
+        for (int index = 1; index <= 30; index++) {
+            mvc.perform(post("/api/public/assistant/chat")
+                            .header("X-Resident-Token", token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"message\":\"请用通俗语言解释量子纠缠第" + index + "问\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.mode").value("general_ai"));
+        }
+
+        assertTrue(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM assistant_query_event WHERE resident_user_id IS NOT NULL "
+                        + "AND mode='general_ai'", Integer.class) == 30);
+        assertTrue(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM assistant_query_event WHERE error_code IN "
+                        + "('GLOBAL_BUDGET_LIMIT','RESIDENT_BUDGET_LIMIT','GUEST_BUDGET_LIMIT')",
+                Integer.class) == 0);
     }
 
     @Test

@@ -35,34 +35,16 @@ public class AssistantService {
     private final AiClient aiClient;
     private final PublishedContentRetriever retriever;
     private final boolean externalEnabled;
-    private final int globalDailyCallLimit;
-    private final int globalDailyTokenLimit;
-    private final int residentDailyCallLimit;
-    private final int residentDailyTokenLimit;
-    private final int guestDailyCallLimit;
-    private final int guestDailyTokenLimit;
 
     public AssistantService(
             JdbcTemplate jdbc,
             AiClient aiClient,
             PublishedContentRetriever retriever,
-            @Value("${jianda.assistant.external-enabled:false}") boolean externalEnabled,
-            @Value("${jianda.assistant.global-daily-call-limit:200}") int globalDailyCallLimit,
-            @Value("${jianda.assistant.global-daily-token-limit:200000}") int globalDailyTokenLimit,
-            @Value("${jianda.assistant.resident-daily-call-limit:20}") int residentDailyCallLimit,
-            @Value("${jianda.assistant.resident-daily-token-limit:30000}") int residentDailyTokenLimit,
-            @Value("${jianda.assistant.guest-daily-call-limit:5}") int guestDailyCallLimit,
-            @Value("${jianda.assistant.guest-daily-token-limit:5000}") int guestDailyTokenLimit) {
+            @Value("${jianda.assistant.external-enabled:false}") boolean externalEnabled) {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
         this.retriever = retriever;
         this.externalEnabled = externalEnabled;
-        this.globalDailyCallLimit = globalDailyCallLimit;
-        this.globalDailyTokenLimit = globalDailyTokenLimit;
-        this.residentDailyCallLimit = residentDailyCallLimit;
-        this.residentDailyTokenLimit = residentDailyTokenLimit;
-        this.guestDailyCallLimit = guestDailyCallLimit;
-        this.guestDailyTokenLimit = guestDailyTokenLimit;
     }
 
     public List<String> suggestions() {
@@ -148,13 +130,7 @@ public class AssistantService {
 
         if (ranked.isEmpty()) {
             if (!requiresGroundedEvidence(question) && externalEnabled) {
-                BudgetCheck budget = withinDailyBudget(residentUserId, visitorId);
-                if (budget.passed()) {
-                    return generalAiResponse(question, contextSlug, residentUserId, visitorId);
-                }
-                recordEvent(question, contextSlug, "retrieval", 0, 0, true,
-                        null, null, 0, 0, 0, 0, budget.errorCode(), residentUserId, visitorId);
-                return retrievalResponse(budget.userMessage(), List.of(), budget.errorCode());
+                return generalAiResponse(question, contextSlug, residentUserId, visitorId);
             }
             String grounded = requiresGroundedEvidence(question) ? "NO_EVIDENCE" : (externalEnabled ? "AI_DISABLED" : "NO_EVIDENCE");
             recordEvent(question, contextSlug, "retrieval", 0, 0, true,
@@ -174,14 +150,7 @@ public class AssistantService {
                 .orElse("");
         String answer = "根据平台已审核发布的内容，您可以先查看" + titles
                 + "。下方列出了与问题最相关的原文片段，请结合完整原文确认适用条件、材料和时限。";
-        BudgetCheck budget = externalEnabled ? withinDailyBudget(residentUserId, visitorId) : BudgetCheck.disabled();
-        if (!budget.passed()) {
-            recordEvent(question, contextSlug, "retrieval", citations.size(), citations.size(),
-                    true, null, null, 0, 0, 0, 0, budget.errorCode(), residentUserId, visitorId);
-            Map<String, Object> resp = retrievalResponse(answer, citations, budget.errorCode());
-            resp.put("budgetHint", budget.userMessage());
-            return resp;
-        }
+        if (!externalEnabled) return retrievalResponse(answer, citations, "AI_DISABLED");
         long started = System.nanoTime();
         try {
             List<Map<String, Object>> evidence = new ArrayList<>();
@@ -376,43 +345,6 @@ public class AssistantService {
         }
         dates.appendTail(canonical);
         return canonical.toString().replaceAll("[—–－-]+", "");
-    }
-
-    private BudgetCheck withinDailyBudget(Long residentUserId, String visitorId) {
-        Map<String, Object> globalUsage = jdbc.queryForMap(
-                "SELECT COUNT(*) call_count,COALESCE(SUM(total_tokens),0) token_count "
-                        + "FROM assistant_query_event WHERE mode IN ('ai','general_ai') "
-                        + "AND created_at>=CURRENT_DATE");
-        int globalCalls = number(globalUsage.get("call_count"));
-        int globalTokens = number(globalUsage.get("token_count"));
-        if (globalCalls >= globalDailyCallLimit || globalTokens >= globalDailyTokenLimit) {
-            return BudgetCheck.fail("GLOBAL_BUDGET_LIMIT", "今日全局 AI 预算保护已触发，请明日再试或联系管理员。");
-        }
-        if (residentUserId != null) {
-            Map<String, Object> userUsage = jdbc.queryForMap(
-                    "SELECT COUNT(*) call_count,COALESCE(SUM(total_tokens),0) token_count "
-                            + "FROM assistant_query_event WHERE resident_user_id=? "
-                            + "AND mode IN ('ai','general_ai') AND created_at>=CURRENT_DATE",
-                    residentUserId);
-            int userCalls = number(userUsage.get("call_count"));
-            int userTokens = number(userUsage.get("token_count"));
-            if (userCalls >= residentDailyCallLimit || userTokens >= residentDailyTokenLimit) {
-                return BudgetCheck.fail("RESIDENT_BUDGET_LIMIT", "今日您的个人 AI 额度已用完，请明日再试。");
-            }
-        } else {
-            String vid = visitorId == null ? "anon-default" : visitorId;
-            Map<String, Object> guestUsage = jdbc.queryForMap(
-                    "SELECT COUNT(*) call_count,COALESCE(SUM(total_tokens),0) token_count "
-                            + "FROM assistant_query_event WHERE visitor_id=? "
-                            + "AND mode IN ('ai','general_ai') AND created_at>=CURRENT_DATE",
-                    vid);
-            int guestCalls = number(guestUsage.get("call_count"));
-            int guestTokens = number(guestUsage.get("token_count"));
-            if (guestCalls >= guestDailyCallLimit || guestTokens >= guestDailyTokenLimit) {
-                return BudgetCheck.fail("GUEST_BUDGET_LIMIT", "今日游客 AI 额度已用完，注册居民账号可获得更高额度。");
-            }
-        }
-        return BudgetCheck.pass();
     }
 
     private Map<String, Object> generalAiResponse(String question, String contextSlug,
@@ -649,9 +581,4 @@ public class AssistantService {
 
     private record RankedItem(Map<String, Object> row, int score) {}
 
-    private record BudgetCheck(boolean passed, String errorCode, String userMessage) {
-        static BudgetCheck pass() { return new BudgetCheck(true, "", ""); }
-        static BudgetCheck fail(String code, String msg) { return new BudgetCheck(false, code, msg); }
-        static BudgetCheck disabled() { return new BudgetCheck(false, "AI_DISABLED", "AI 整理能力未启用。"); }
-    }
 }
