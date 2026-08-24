@@ -204,6 +204,35 @@ export async function fetchServiceDirectory(regionCode: string): Promise<Service
   return response.data.data;
 }
 
+export interface CommercialService {
+  id: number; name: string; category: string; description: string; region_code: string;
+  service_area: string; price_cents: number; provider_id: number; provider_name: string;
+  verification_status: string; contact_phone?: string; refund_policy?: string;
+}
+export interface ServiceOrder {
+  id: number; order_no: string; quantity: number; amount_cents: number; status: string;
+  created_at: string; product_name: string; provider_name: string;
+}
+export async function fetchCommercialServices(regionCode: string): Promise<CommercialService[]> {
+  const response = await client.get("/public/commercial/services", { params: { regionCode } });
+  return response.data.data;
+}
+export async function fetchPaymentCapabilities(): Promise<{ available: boolean; provider: string; message: string }> {
+  const response = await client.get("/public/commercial/payment-capabilities");
+  return response.data.data;
+}
+export async function createServiceOrder(productId: number, quantity = 1): Promise<{ orderNo: string; status: string; amountCents: number; payment: { available: boolean; message: string } }> {
+  const response = await client.post("/public/commercial/orders", { productId, quantity }, { headers: residentHeaders() });
+  return response.data.data;
+}
+export async function fetchServiceOrders(): Promise<ServiceOrder[]> {
+  const response = await client.get("/public/commercial/orders", { headers: residentHeaders() });
+  return response.data.data;
+}
+export async function cancelServiceOrder(id: number): Promise<void> {
+  await client.post(`/public/commercial/orders/${id}/cancel`, null, { headers: residentHeaders() });
+}
+
 export async function createReminder(
   id: number,
   reminderType: ResidentReminder["reminder_type"],

@@ -4,7 +4,7 @@ import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
 import { fetchDetail, fetchItems, fetchServiceDirectory, setFavorite, type PublicItem, type ServiceDirectoryItem } from "../api";
 import { saveFavorite } from "../library";
-import { Search, ClipboardList, Building2, Users, WifiOff, CalendarClock, FileCheck2, ListChecks, MapPin, Heart, MessageCircleQuestion, ChevronRight, Phone, ExternalLink } from "lucide-vue-next";
+import { Search, ClipboardList, Building2, Users, WifiOff, CalendarClock, FileCheck2, ListChecks, MapPin, Heart, MessageCircleQuestion, ChevronRight, Phone, ExternalLink, ShieldCheck } from "lucide-vue-next";
 import { activeRegion } from "../region";
 import { truncateSummary } from "../content";
 import { buildTelephoneHref } from "../utils/contactActions";
@@ -78,6 +78,7 @@ watch(() => activeRegion.value.region_code, load);
 </script>
 <template><div class="h5-page"><H5Header /><main class="h5-main services-page">
   <header class="app-section-head"><ClipboardList /><div><h1>办事行动中心</h1><p>先确认是否适用，再准备材料、地点和办理步骤。</p></div></header>
+  <RouterLink class="trusted-service-entry" to="/trusted-services"><ShieldCheck/><span><b>已核验合作服务</b><small>助餐、陪诊、家政和适老维修；与政府公开信息分开展示</small></span><ChevronRight/></RouterLink>
   <label class="search-input"><Search /><input v-model="query" placeholder="搜索办事事项" /></label>
   <section class="local-service-directory"><header class="stream-heading"><div><h2>长辈常用服务</h2><p>只展示已发布内容中的真实地点、电话和官方来源</p></div></header><div class="local-service-directory__grid"><article v-for="service in directory" :key="service.id"><span>{{ service.service_type }}</span><h3>{{ service.name }}</h3><p>{{ service.description }}</p><dl><div v-if="service.address"><dt><MapPin/>地址</dt><dd>{{ service.address }}</dd></div><div v-if="service.phone"><dt><Phone/>电话</dt><dd><a :href="buildTelephoneHref(service.phone)">{{ service.phone }}</a></dd></div><div v-if="service.opening_hours"><dt><CalendarClock/>时间</dt><dd>{{ service.opening_hours }}</dd></div></dl><a :href="service.source_url" target="_blank" rel="noopener noreferrer"><ExternalLink/>查看官方来源</a><small v-if="service.last_verified_at">核验于 {{ String(service.last_verified_at).slice(0,10) }}</small></article></div><p v-if="!loading && !directory.length" class="compact-empty">当前没有同时满足“已发布、可追溯、属于大场镇”的服务目录信息，平台不会补写未知电话或地址。</p></section>
   <section class="service-filters" aria-label="办事筛选"><label><Users />服务对象<select v-model="audience"><option>全部对象</option><option>老年人</option><option>居民家庭</option></select></label><label><ClipboardList />事项类型<select v-model="type"><option>全部类型</option><option>养老</option><option>健康</option><option>生活服务</option></select></label><label><Building2 />发布机构<select v-model="institution"><option v-for="item in institutions" :key="item">{{ item }}</option></select></label></section>

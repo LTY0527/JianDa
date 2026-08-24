@@ -32,6 +32,7 @@
 @media(max-width:768px){.assistant-history-page{padding:18px 14px 50px}.assistant-session-bar>span{font-size:12px}.assistant-session-bar a,.assistant-session-bar button{padding:0 5px}}
 .assistant-session-bar a,.assistant-session-bar button{min-height:48px}
 :where(a,button,input,select,textarea):focus-visible{outline:3px solid #d97706;outline-offset:3px}
+.trusted-service-entry{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:14px;margin:14px 0;padding:16px 18px;border:1px solid #dcc89f;background:#fffaf0;color:#3e493f}.trusted-service-entry>svg{color:#9a5716}.trusted-service-entry b,.trusted-service-entry small{display:block}.trusted-service-entry small{margin-top:4px;color:#68746f;line-height:1.45}
 .switch{position:relative}.switch input{display:block;position:absolute;width:1px;height:1px;opacity:0}.switch input:focus-visible+i{outline:3px solid #d97706;outline-offset:3px}
 .filter-tabs button{min-height:48px}
 

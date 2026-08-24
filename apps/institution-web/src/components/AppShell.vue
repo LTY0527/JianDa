@@ -9,6 +9,7 @@ import {
   HeartHandshake,
   RadioTower,
   Activity,
+  BadgeCheck,
 } from "lucide-vue-next";
 import { currentUser } from "../auth";
 const route = useRoute();
@@ -21,6 +22,7 @@ const menus = computed(() => [
     ? [
         { path: "/public-sources", label: "采集与来源", icon: RadioTower },
         { path: "/operations", label: "数据概览", icon: Activity },
+        { path: "/commercial", label: "商业运营", icon: BadgeCheck },
       ]
     : []),
   { path: "/logs", label: "系统记录", icon: ScrollText },

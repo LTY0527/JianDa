@@ -20,6 +20,7 @@ const router = createRouter({
         { path: "public-sources/:sourceId/check/:jobId", component: () => import("./views/SourceDiscoveryJobView.vue"), meta: { title: "来源检查", showBack: true, backTo: "/public-sources", platformOnly: true } },
         { path: "public-import", component: () => import("./views/PublicImportView.vue"), meta: { title: "添加内容", showBack: true, backTo: "/documents", platformOnly: true } },
         { path: "operations", component: () => import("./views/OperationsView.vue"), meta: { title: "数据概览", showBack: false, platformOnly: true } },
+        { path: "commercial", component: () => import("./views/CommercialOperationsView.vue"), meta: { title: "商业运营", showBack: false, platformOnly: true } },
         { path: "community-moderation", component: () => import("./views/CommunityModerationView.vue"), meta: { title: "邻里内容治理", showBack: true, backTo: "/operations", platformOnly: true } },
         { path: "forbidden", component: () => import("./views/ForbiddenView.vue"), meta: { title: "无权访问", showBack: true, backTo: "/" } },
         { path: "logs", component: () => import("./views/LogsView.vue"), meta: { title: "系统记录", showBack: false } },
