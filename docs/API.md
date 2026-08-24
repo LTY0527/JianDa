@@ -79,7 +79,8 @@ v1.1 通用结构还包括：
 - `GET /api/source-registries`、`GET /api/source-registries/{id}`：查看来源域名、发现方式、调度时间、每轮上限、安全默认值、文章/Token 预算和最近运行状态。
 - `POST /api/source-registries`、`PUT /api/source-registries/{id}`：新增或更新来源。新来源固定为停用、禁止原图缓存、禁止自动采集、要求人工审核；启用由独立接口完成。
 - `PUT /api/source-registries/{id}/enabled`：显式启用或停用来源。
-- `POST /api/source-registries/{id}/discover`：对单个启用来源执行一次有界发现；只返回候选 URL，不创建材料、不调用 AI。
+- `POST /api/source-registries/{id}/discover-jobs`：创建一次有界异步发现任务；只发现候选 URL，不创建材料、不调用 AI，并返回用于独立进度页的 job。
+- `GET /api/source-registries/discover-jobs/{jobId}`：查询连接、栏目读取、文章识别、去重和结果整理进度及最终候选。
 - `POST /api/source-registries/{id}/shadow`：抓取指定候选并返回正文、封面策略和图片候选预览；不创建材料、不调用 AI、不发布。
 - `POST /api/source-registries/{id}/collect`：确认指定候选后创建材料并进入 `WAITING_APPROVAL`；不会自动审核或发布。
 - `POST /api/source-registries/{id}/collect-batch`：请求体为已勾选的 canonical URL 列表；
@@ -132,8 +133,8 @@ URL，不使用图片 URL。
 ## 用户端公开接口
 
 - `GET /api/public/items|categories|search`
-- `GET /api/public/regions`：返回当前已开放的区域；试点阶段为上海市宝山区大场镇，区域
-  编码 `310113102`。
+- `GET /api/public/regions`：返回当前已开放的区域；当前试点为大场镇 `310113102`、顾村镇
+  `310113109`、庙行镇 `310113112`。
 - `GET /api/public/items?regionCode=310113102`：优先返回指定试点区域的已发布内容，并保留
   允许公开的全局内容；不会返回未审核或未发布材料。
 - `GET /api/public/items/{slug}`
@@ -156,7 +157,21 @@ URL，不使用图片 URL。
 - `POST /api/public/community/posts/{id}/report`：提交举报并将帖子进入 `REPORTED` 待核对状态。
 - `GET /api/community-admin/posts`、`POST /api/community-admin/posts/{id}/status`：仅平台管理员查看举报并在 `VISIBLE/REPORTED/HIDDEN` 间治理。
 
-居民 DEMO 账号只用于本地产品验收。后端拒绝非 `310113102` 的社区写操作；帖子不支持图片、私信或精确门牌。
+居民 DEMO 账号只用于本地产品验收。后端只接受当前三个已开放地区的社区写操作，并按
+`regionCode` 隔离 Feed；帖子不支持私信或精确门牌。
+
+## Phase 9.9 商业化边界接口
+
+- `GET /api/public/commercial/services?regionCode=`：仅返回当前地区 `VERIFIED + ACTIVE` 的可信服务；合作服务不冒充政府事项。
+- `GET /api/public/commercial/sponsors?regionCode=`：最多返回一个当前有效的 ACTIVE 合作/公益位，并携带明确标签。
+- `GET|POST /api/public/commercial/orders`：居民查询本人订单或为真实服务产品创建 `PENDING_PAYMENT` 订单。
+- `POST /api/public/commercial/orders/{id}/cancel`：仅取消本人的待支付订单。
+- `POST /api/public/commercial/orders/{id}/refund`：仅对允许退款的已支付状态提交申请。
+- `GET /api/public/commercial/payment-capabilities`：返回 Provider 可用性；当前无商户凭据时为 `available=false`。
+- `GET /api/commercial/overview`：仅平台管理员读取套餐、授权、服务商、商品、赞助、订单、退款与支付能力真实计数。
+
+支付由 `PaymentProvider` 抽象承载。当前 `DisabledPaymentProvider` 对未配置的创建支付或退款
+请求返回明确不可用状态，不生成支付成功事件。
 
 助手请求示例：
 
