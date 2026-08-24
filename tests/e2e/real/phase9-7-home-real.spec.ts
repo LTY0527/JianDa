@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const h5Url = process.env.JIANDA_H5_PROD_URL ?? "http://127.0.0.1";
-const channels = ["推荐", "大场", "健康", "养老", "办事", "防诈", "活动", "社区"];
+const channels = ["推荐", "健康", "养老", "助餐", "办事", "防诈", "活动", "社区"];
 
 test.describe("Phase 9.7 H5 首页无 Mock 真实验收", () => {
   test("频道可恢复且切换不重复请求首页数据", async ({ page }) => {

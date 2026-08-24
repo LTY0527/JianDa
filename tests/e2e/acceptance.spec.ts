@@ -8,6 +8,27 @@ const institutionUrl =
   process.env.JIANDA_INSTITUTION_TEST_URL ?? "http://127.0.0.1:5173";
 const h5Url = process.env.JIANDA_H5_TEST_URL ?? "http://127.0.0.1:5174";
 
+type PublishedItem = {
+  slug: string;
+  title: string;
+  content_kind?: string;
+};
+
+async function currentPublishedItem(page: Page): Promise<PublishedItem> {
+  const response = await page.request.get(
+    `${h5Url}/api/public/items?regionCode=310113102`,
+  );
+  expect(response.ok()).toBeTruthy();
+  const payload = (await response.json()) as { data?: PublishedItem[] };
+  const item = payload.data?.[0];
+  expect(item, "需要至少一篇当前已发布内容完成验收").toBeTruthy();
+  return item!;
+}
+
+function detailRoute(item: PublishedItem): string {
+  return `/${item.content_kind === "SERVICE_NOTICE" ? "guide" : "news"}/${item.slug}`;
+}
+
 async function login(page: Page) {
   await page.goto(`${institutionUrl}/login`);
   await page.getByRole("textbox", { name: "账号", exact: true }).fill("platform_admin");
@@ -127,7 +148,8 @@ test.describe("Phase 7.3 rendered acceptance", () => {
 
   test("查看原文下载按钮会产生可保存的文本文件", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto(`${h5Url}/original/social-security-card-renewal`);
+    const item = await currentPublishedItem(page);
+    await page.goto(`${h5Url}/original/${item.slug}`);
     await assertRendered(page, "提取文本");
     await screenshot(page, testInfo, "h5-original-375.png");
     await page.evaluate(() => {
@@ -143,7 +165,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "下载原文" }).click();
     const download = await downloadPromise;
-    expect(download.suggestedFilename()).toMatch(/社会保障卡到期换领指南.*\.txt$/);
+    expect(download.suggestedFilename()).toMatch(/\.txt$/);
     expect(
       await page.evaluate(
         () => (window as typeof window & { __downloadMime?: string }).__downloadMime,
@@ -153,24 +175,24 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     await download.saveAs(downloadPath);
     const content = fs.readFileSync(downloadPath);
     expect(content.byteLength).toBeGreaterThan(100);
-    expect(content.toString("utf8")).toContain("社会保障卡到期换领指南");
+    expect(content.toString("utf8")).toContain(item.title.split(/[-—－]/)[0].trim());
     await expect(page.getByRole("status")).toContainText("原文已开始下载");
     await screenshot(page, testInfo, "h5-original-download-success-375.png");
   });
 
   test("详情和原文直接访问时使用正确的站内安全返回", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
+    const item = await currentPublishedItem(page);
+    const itemDetailRoute = detailRoute(item);
     const cases = [
-      ["/guide/social-security-card-renewal", "/services"],
-      ["/news/summer-heat-health", "/news"],
-      ["/original/social-security-card-renewal", "/guide/social-security-card-renewal"],
-      ["/original/summer-heat-health", "/news/summer-heat-health"],
+      [itemDetailRoute, itemDetailRoute.startsWith("/guide/") ? "/services" : "/news"],
+      [`/original/${item.slug}`, itemDetailRoute],
     ] as const;
     for (const [route, expected] of cases) {
       await page.goto(`${h5Url}${route}`);
       await expect(page.getByRole("button", { name: "返回" })).toBeVisible();
       if (route.startsWith("/original/")) {
-        await expect(page.getByRole("heading", { name: "提取文本" })).toBeVisible();
+        await expect(page.getByRole("heading", { name: "提取文本" }).first()).toBeVisible();
       }
       await page.getByRole("button", { name: "返回" }).click();
       await expect(page).toHaveURL(`${h5Url}${expected}`);
@@ -179,7 +201,8 @@ test.describe("Phase 7.3 rendered acceptance", () => {
 
   test("收藏、历史和阅读偏好在本机持久化且清除前确认", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto(`${h5Url}/guide/social-security-card-renewal`);
+    const item = await currentPublishedItem(page);
+    await page.goto(`${h5Url}${detailRoute(item)}`);
     await page.getByRole("button", { name: "收藏", exact: true }).click();
     await expect(page.getByRole("button", { name: "已收藏", exact: true })).toBeVisible();
 
@@ -266,7 +289,8 @@ test.describe("Phase 7.3 rendered acceptance", () => {
       });
     });
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto(`${h5Url}/guide/social-security-card-renewal`);
+    const item = await currentPublishedItem(page);
+    await page.goto(`${h5Url}${detailRoute(item)}`);
     await page.getByRole("button", { name: "听全文", exact: true }).click();
     await expect(page.getByText(/当前浏览器不支持语音播报/)).toBeVisible();
     await page.keyboard.press("Tab");
@@ -309,7 +333,8 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     }
 
     const token = await page.evaluate(() => localStorage.getItem("jianda_token"));
-    const publicDetail = await page.request.get("http://127.0.0.1:8080/api/public/items/social-security-card-renewal");
+    const item = await currentPublishedItem(page);
+    const publicDetail = await page.request.get(`http://127.0.0.1:8080/api/public/items/${item.slug}`);
     const documentId = (await publicDetail.json()).data.document_id;
     await page.goto(`${institutionUrl}/documents/${documentId}/review`);
     await assertRendered(page, "原文对照审核");

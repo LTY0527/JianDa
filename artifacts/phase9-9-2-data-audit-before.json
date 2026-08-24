@@ -1,0 +1,9 @@
+{
+  "audit_date": "2026-08-25",
+  "scope": "published public content",
+  "issues": [
+    { "document_ids": [14, 15, 16, 17, 18, 30, 71], "decision": "WITHDRAW" },
+    { "document_ids": [27, 31, 32, 34, 62, 67, 68, 78], "decision": "REVIEW_REGION_SCOPE" },
+    { "document_id": 63, "decision": "VERIFY_LOCAL_TOWN" }
+  ]
+}

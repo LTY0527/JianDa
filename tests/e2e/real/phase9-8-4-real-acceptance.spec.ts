@@ -20,11 +20,15 @@ const platformUsername = process.env.REAL_PLATFORM_ADMIN_USERNAME ?? "platform_a
 const platformPassword = process.env.REAL_PLATFORM_ADMIN_PASSWORD ?? "Jianda@123";
 const artifactRoot = path.resolve("artifacts/phase9-8-4-final");
 
-// 选择已处于 WAITING_REVIEW 且带 SUMMARY 生成内容的真实网页文章，
-// 用以走完“审核 -> 发布 -> H5 验证”链路（agent 上轮在此截断）。
-const reviewDocumentId = Number(process.env.PHASE9_8_4_REVIEW_DOC_ID ?? 71);
+// 该组用例会真实改变审核与发布状态，必须由调用者显式指定一个当前
+// WAITING_REVIEW 文档。历史默认文档可能已发布或撤回，不能重复消费。
+const reviewDocumentId = Number(process.env.PHASE9_8_4_REVIEW_DOC_ID ?? 0);
 
 test.describe("Phase 9.8_4 真实 Admin 全链路", () => {
+  test.skip(
+    !reviewDocumentId,
+    "需要 PHASE9_8_4_REVIEW_DOC_ID 指向可消费的 WAITING_REVIEW 文档",
+  );
   test.describe.configure({ mode: "serial" });
   test.beforeAll(() => {
     fs.mkdirSync(artifactRoot, { recursive: true });

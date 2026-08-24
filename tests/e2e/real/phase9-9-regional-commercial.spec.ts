@@ -61,10 +61,13 @@ test("REAL 平台管理员可查看采集与商业运营真实状态", async ({ 
   await expect(page).toHaveURL(`${institutionUrl}/`);
   await page.goto(`${institutionUrl}/public-sources`, { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "采集与来源" })).toBeVisible();
-  await expect(page.locator(".source-card")).toHaveCount(7);
+  expect(await page.locator(".source-card").count()).toBeGreaterThanOrEqual(12);
   await page.screenshot({ path: path.join(artifactRoot, "admin-sources-1440.png"), fullPage: false });
   await page.goto(`${institutionUrl}/commercial`, { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "商业运营" })).toBeVisible();
-  await expect(page.getByText("REAL_PAYMENT_PROVIDER_ACCEPTANCE = BLOCKED_BY_CREDENTIALS")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "支付配置" })).toBeVisible();
+  await expect(page.getByText("线上支付：未配置")).toBeVisible();
+  await expect(page.getByText(/支付宝：未接入/)).toBeVisible();
+  await expect(page.getByText(/REAL_PAYMENT_PROVIDER_ACCEPTANCE|运营边界/)).toHaveCount(0);
   await page.screenshot({ path: path.join(artifactRoot, "platform-commercial-1440.png"), fullPage: false });
 });
