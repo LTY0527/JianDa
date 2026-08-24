@@ -153,7 +153,8 @@ class SourceRegistryOperationsIntegrationTest {
         org.junit.jupiter.api.Assertions.assertEquals(0, disabledImageSources);
         Map<String, Object> dachang = jdbc.queryForMap(
                 "SELECT enabled,allow_auto_crawl,allow_image_candidates,allow_image_cache,image_cache_allowed,"
-                        + "schedule_mode,interval_hours FROM source_registry WHERE domain='xxgk.shbsq.gov.cn'");
+                        + "schedule_mode,interval_hours FROM source_registry WHERE domain='xxgk.shbsq.gov.cn' "
+                        + "AND region_code='310113102'");
         org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE, dachang.get("enabled"));
         org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE, dachang.get("allow_auto_crawl"));
         org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE, dachang.get("allow_image_candidates"));

@@ -153,7 +153,12 @@ public class AssistantService {
                 .orElse("");
         String answer = "根据平台已审核发布的内容，您可以先查看" + titles
                 + "。下方列出了与问题最相关的原文片段，请结合完整原文确认适用条件、材料和时限。";
-        if (!externalEnabled) return retrievalResponse(answer, citations, "AI_DISABLED");
+        if (!externalEnabled) {
+            recordEvent(question, contextSlug, "retrieval", citations.size(), citations.size(),
+                    true, null, null, 0, 0, 0, 0, "AI_DISABLED",
+                    residentUserId, visitorId);
+            return retrievalResponse(answer, citations, "AI_DISABLED");
+        }
         long started = System.nanoTime();
         try {
             List<Map<String, Object>> evidence = new ArrayList<>();
