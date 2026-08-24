@@ -467,3 +467,12 @@ H5 首页已收口为“地区品牌 + 强搜索 + 8 频道 + 单 Hero + 5 个�
 - V33 提供机构套餐/授权/席位、可信服务、合作展示、订单、退款和支付审计基础。真实数据库为空时页面显示零值或空状态，不写入演示商家、价格、订单或赞助。
 - 当前支付 Provider 为 `UNCONFIGURED`；没有商户号、证书和公网回调时线上支付明确不可用，不伪造支付成功。
 - Phase 9.9 REAL 结论为 `PARTIAL`：三镇切换、采集体验和商业边界已通过真实 Docker Chromium；来源 7 个、PUBLISHED 16 篇，顾村/庙行本地精品与真实商业数据仍待运营补齐。详见 `docs/PHASE9_9_REAL_ACCEPTANCE_REPORT.md`。
+
+## Phase 9.9.2 可靠性、地图与会员
+
+- 公开内容改为严格的 LOCAL_TOWN、DISTRICT_SHARED、CITY_SHARED、NATIONAL_SHARED 和 UNCLASSIFIED；UNCLASSIFIED 不进入地区首页，三镇 LOCAL 串区数为 0。
+- 批量加入改为 202 后台任务，Processing 运行中只轮询轻量 snapshot，并用心跳将陈旧任务转为可重试失败；内容中心可无闪白刷新。
+- 地区选择已接入高德 JS API 2.0。`VITE_AMAP_KEY` 与 `VITE_AMAP_SECURITY_JS_CODE` 未配置时显示明确降级，不使用假地图。
+- `/membership` 提供周/月/年可选会员和支付宝/微信课堂 Demo 二维码；Demo 不扣款且绝不写真实 `PAID`。正式支付仍需要商户凭据。
+- 权威来源扩展到 13 条，新来源默认停用、不自动 AI、必须人工审核。候选按居民相关度分层，LOW 默认不选择。
+- 当前总体结论为 `PARTIAL`：高德、Web Search、真实支付受凭据阻塞；本轮无新的 External 外发授权；顾村/庙行仍缺 LOCAL 精品内容。详见 `docs/PHASE9_9_2_CHECKLIST.md`。

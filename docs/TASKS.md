@@ -621,3 +621,19 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [ ] `PARTIAL`：真实来源 7 / 目标 10，PUBLISHED 16 / 目标 35～50，顾村和庙行 LOCAL 均为 0。
 - [ ] `BLOCKED_BY_AUTHORIZATION`：本轮未获新的 External 数据发送授权，未执行 30 问 DeepSeek REAL 质量验收。
 - [ ] `BLOCKED_BY_CREDENTIALS`：无真实支付商户凭据，不执行或伪造真实支付成功。
+
+## Phase 9.9.2 — 人工验收缺陷、地图、会员与可靠性（自动收口完成）
+
+- [x] V34 建立严格地域 scope；首页、搜索、助手和相邻内容统一隔离，LOCAL 串区数为 0。
+- [x] 通过业务 API 精准撤回 14/15/16/17/18/30/71，修正全国共享内容，不删除 volume 或历史记录。
+- [x] 接入高德 JS API 2.0 与缺凭据降级；移除三圆圈假地图。
+- [x] 批量导入改为 202 后台 job，支持进度、终态和刷新恢复；候选增加相关度筛选。
+- [x] Processing 改为轻量 snapshot 轮询，V36 增加心跳与陈旧任务保护，Backend 复用 AI HTTP 连接。
+- [x] 内容中心增加无闪白刷新和最近更新时间。
+- [x] 权威来源扩展到 13 条，新增来源保持安全默认值和人工审核。
+- [x] V35、会员中心、周/月/年套餐、支付宝/微信 Demo QR 和非 PAID 状态完成。
+- [x] 商业运营后台改用真实指标并移除工程 Gate 文案。
+- [x] AI 118、Maven 95、两端 typecheck/build、Phase 9.9.2 定向 Playwright 和 Docker 四健康检查通过。
+- [x] 全量 Playwright 的历史数据硬编码已迁移到当前真实发布内容；缺凭据和一次性审核场景明确 skip。
+- [ ] `BLOCKED_BY_CREDENTIALS`：高德真实渲染、Web Search、真实支付。
+- [ ] `PARTIAL`：本轮没有新的 External 外发授权；顾村/庙行缺 LOCAL 精品；真机体验待人工验收。

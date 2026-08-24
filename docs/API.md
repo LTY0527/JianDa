@@ -173,6 +173,20 @@ URL，不使用图片 URL。
 支付由 `PaymentProvider` 抽象承载。当前 `DisabledPaymentProvider` 对未配置的创建支付或退款
 请求返回明确不可用状态，不生成支付成功事件。
 
+## Phase 9.9.2 新增接口
+
+- `PUT /api/documents/{id}/region-scope`：平台管理员修正已核验材料的地域范围。
+- `POST /api/source-registries/{id}/collect-batch`：异步加入选中候选，返回 HTTP 202 和 jobId。
+- `GET /api/source-registries/import-jobs/{jobId}`：读取批量任务进度、成功、重复、失败和当前条目。
+- `GET /api/documents/{id}/processing-snapshot`：处理页轻量轮询；不返回 raw_text、segments、fields 或 generated 正文。
+- `GET /api/public/membership/plans`：读取已启用周/月/年会员套餐。
+- `GET /api/public/membership/capabilities`：返回 Demo 开关和真实支付可用性，不返回凭据。
+- `GET /api/public/membership/me`：读取当前居民 Demo 会员状态。
+- `POST /api/public/membership/demo-payments`：创建支付宝/微信 Demo 会话；仅返回 DEMO 状态和本地二维码 payload。
+- `POST /api/public/membership/demo-payments/{id}/confirm`：确认课堂 Demo，不生成真实 PAID。
+
+批量任务与处理 snapshot 都要求登录并校验组织/平台权限。会员 Demo 不能作为真实支付凭证；生产关闭 Demo 后，无商户 Provider 时明确返回不可用。
+
 助手请求示例：
 
 ```json
