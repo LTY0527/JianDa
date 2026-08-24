@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.List;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -14,19 +15,24 @@ import org.springframework.transaction.annotation.Transactional;
 public class DemoDataInitializer implements ApplicationRunner {
     private final JdbcTemplate jdbc;
     private final PasswordEncoder passwordEncoder;
+    private final boolean demoContentEnabled;
 
-    public DemoDataInitializer(JdbcTemplate jdbc, PasswordEncoder passwordEncoder) {
+    public DemoDataInitializer(JdbcTemplate jdbc, PasswordEncoder passwordEncoder,
+            @Value("${jianda.demo-content-enabled:true}") boolean demoContentEnabled) {
         this.jdbc = jdbc;
         this.passwordEncoder = passwordEncoder;
+        this.demoContentEnabled = demoContentEnabled;
     }
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
         if (jdbc.queryForObject("SELECT COUNT(*) FROM organization", Integer.class) > 0) {
-            seedPublicSources();
-            seedPublishedCatalog();
-            seedResidentCommunity();
+            if (demoContentEnabled) {
+                seedPublicSources();
+                seedPublishedCatalog();
+                seedResidentCommunity();
+            }
             return;
         }
         jdbc.update("INSERT INTO organization(name,code,type) VALUES (?,?,?)", "简达平台运营中心", "PLATFORM", "PLATFORM");
@@ -39,10 +45,12 @@ public class DemoDataInitializer implements ApplicationRunner {
                 "org_admin", password, "李敏", "ORG_ADMIN");
         jdbc.update("INSERT INTO staff_user(organization_id,username,password_hash,display_name,role) VALUES (2,?,?,?,?)",
                 "reviewer", password, "王芳", "REVIEWER");
-        seedPublishedGuide();
-        seedPublicSources();
-        seedPublishedCatalog();
-        seedResidentCommunity();
+        if (demoContentEnabled) {
+            seedPublishedGuide();
+            seedPublicSources();
+            seedPublishedCatalog();
+            seedResidentCommunity();
+        }
     }
 
     private void seedResidentCommunity() {

@@ -24,6 +24,7 @@ spring:
   jackson:
     default-property-inclusion: non_null
 jianda:
+  demo-content-enabled: ${JIANDA_DEMO_CONTENT_ENABLED:true}
   jwt-secret: ${JWT_SECRET:jianda-local-development-secret-must-be-at-least-32-bytes}
   jwt-expiration-hours: 12
   upload-dir: ${UPLOAD_DIR:./uploads}

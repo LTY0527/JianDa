@@ -69,8 +69,10 @@ public class SourceRegistryService {
     @Transactional
     public Map<String, Object> create(SourceConfiguration request, AuthUser user) {
         ValidatedSource value = validate(request);
-        Integer duplicate = jdbc.queryForObject("SELECT COUNT(*) FROM source_registry WHERE domain=?", Integer.class, value.domain());
-        if (duplicate != null && duplicate > 0) throw new BusinessException(409, "该完整域名已存在");
+        Integer duplicate = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM source_registry WHERE domain=? AND COALESCE(section_url,'')=COALESCE(?,'')",
+                Integer.class, value.domain(), value.sectionUrl());
+        if (duplicate != null && duplicate > 0) throw new BusinessException(409, "该域名和栏目入口的来源已存在");
         GeneratedKeyHolder keys = new GeneratedKeyHolder();
         jdbc.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
@@ -96,8 +98,9 @@ public class SourceRegistryService {
         get(id);
         ValidatedSource value = validate(request);
         Integer duplicate = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM source_registry WHERE domain=? AND id<>?", Integer.class, value.domain(), id);
-        if (duplicate != null && duplicate > 0) throw new BusinessException(409, "该完整域名已存在");
+                "SELECT COUNT(*) FROM source_registry WHERE domain=? AND COALESCE(section_url,'')=COALESCE(?,'') AND id<>?",
+                Integer.class, value.domain(), value.sectionUrl(), id);
+        if (duplicate != null && duplicate > 0) throw new BusinessException(409, "该域名和栏目入口的来源已存在");
         int changed = jdbc.update("UPDATE source_registry SET domain=?,allowed_hosts=?,source_name=?,source_type=?,authority_level=?,"
                         + "discovery_mode=?,homepage_url=?,rss_url=?,sitemap_url=?,section_url=?,daily_crawl_time=?,"
                         + "max_articles_per_run=?,allow_image_candidates=?,allow_auto_ai=?,daily_article_budget=?,daily_token_budget=?,"
