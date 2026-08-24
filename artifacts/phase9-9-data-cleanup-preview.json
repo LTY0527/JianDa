@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-08-24T23:28:00+08:00",
+  "database": "docker-mysql",
+  "mode": "preview-only",
+  "selection": {
+    "published_items": "exact known DemoDataInitializer slugs",
+    "community_posts": "is_demo=true",
+    "source_documents": "only document IDs referenced by the selected demo published items"
+  },
+  "published_items": {
+    "count": 12,
+    "ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    "document_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    "slugs": [
+      "elderly-subsidy", "social-security-card-renewal", "senior-canteen-application",
+      "home-accessibility-renovation", "summer-heat-health", "anti-fraud-screen-sharing",
+      "rainstorm-travel-safety", "vaccination-summer-notice", "pension-qualification-reminder",
+      "museum-senior-service", "fall-prevention-home", "government-subsidy-scam"
+    ]
+  },
+  "community_posts": {
+    "count": 13,
+    "ids": [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14]
+  },
+  "safety": {
+    "full_table_delete": false,
+    "docker_volumes_deleted": false,
+    "resident_accounts_deleted": false,
+    "real_web_articles_selected": false,
+    "real_uploads_selected": false
+  }
+}

@@ -600,3 +600,16 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] AI 105 项、Backend 75 项、两端 typecheck/build、Playwright 110 项通过；Docker 四服务 healthy。
 - [ ] `BLOCKED`：大场镇官网实时 discover 未在验收窗口返回，来源已恢复停用，没有创建材料或发布数据。
 - [ ] `DEVICE_ACCEPTANCE: PENDING_USER_MANUAL_CHECK`：仅剩 iPhone/Android 的触控、系统声音、拨号器和主观观感。
+# Phase 9.9 多区域真实内容运营与商业化扩展（2026-08-24）
+
+- [x] 从 Phase 9.8.4 REAL Gate 基线建立 `feat/phase9-9-commercial-regional-v1`，未清理历史工作区或 Docker volume。
+- [x] 修复 H5 Assistant 未携带居民 token；取消全局/居民/游客每日 call/token 业务阻断，保留用量统计和安全边界；居民连续 30 次集成测试通过。
+- [x] 首页频道改为推荐、健康、养老、助餐、办事、防诈、活动、社区，地区不再冒充主题频道。
+- [x] 社区卫生、长者食堂、便民电话、活动报名、办事指南进入五个独立路由并只展示当前地区真实数据。
+- [x] 大场、顾村、庙行可切换并增加区域关系示意图；首页、服务、邻里按地区重新请求。
+- [x] 真实验证三镇宝山区政府信息公开目录均 HTTP 200；V32 登记顾村/庙行并设置三镇 12h Scheduler、人工审核、默认不自动 AI。
+- [x] 生成精确清理预览；移除 12 个固定演示发布项和 13 个 `is_demo=true` 帖子，保留真实文章、上传、账号和 volume；Docker 重启不再补写演示内容。
+- [ ] 补齐三镇真实高价值内容、地区 scope、Assistant 地区召回与搜索联动。
+- [ ] 完成独立采集进度、候选结果、加入内容中心下一步与发布后导航。
+- [ ] 完成 SaaS 授权、可信增值服务、赞助区分、订单退款和 PaymentProvider 真实边界。
+- [ ] 完成 Phase 9.9 REAL Playwright、截图、全量测试和 Final Gate。
