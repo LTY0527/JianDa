@@ -18,6 +18,7 @@ const previewFields = ref<Array<{ label: string; value: string }>>([]);
 const previewSteps = ref<string[]>([]);
 const previewFont = ref<20 | 24>(20);
 const publishedSlug = ref("");
+const nextReviewDocumentId = ref<number | null>(null);
 const error = ref("");
 const submitting = ref(false);
 const agreed = ref(true);
@@ -124,6 +125,14 @@ async function publish() {
     });
     publishedSlug.value = response.data.data.slug;
     allowLeave.value = true;
+    try {
+      const documents = await documentApi.list();
+      nextReviewDocumentId.value = documents.data.data.find(
+        (item) => item.id !== documentId && ["WAITING_REVIEW", "AI_PROCESSED"].includes(item.status),
+      )?.id || null;
+    } catch {
+      nextReviewDocumentId.value = null;
+    }
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -150,6 +159,10 @@ async function publish() {
         >
         <a class="btn secondary" :href="h5Url" target="_blank" rel="noreferrer"
           >打开用户端</a
+        >
+        <RouterLink class="btn secondary" to="/">返回工作台</RouterLink>
+        <RouterLink v-if="nextReviewDocumentId" class="text-action" :to="`/documents/${nextReviewDocumentId}/review`"
+          >继续处理下一篇</RouterLink
         >
       </div>
     </div>
