@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
+import java.util.Locale;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -14,9 +15,9 @@ public final class OriginalFileHttp {
     private OriginalFileHttp() {}
 
     public static ResponseEntity<byte[]> response(
-            DocumentService.OriginalFile file, String rangeHeader) throws IOException {
+            DocumentService.OriginalFile file, String rangeHeader, boolean download) throws IOException {
         byte[] all = Files.readAllBytes(file.path());
-        HttpHeaders headers = baseHeaders(file);
+        HttpHeaders headers = baseHeaders(file, download);
         if (rangeHeader == null || rangeHeader.isBlank()) {
             headers.setContentLength(all.length);
             return new ResponseEntity<>(all, headers, HttpStatus.OK);
@@ -34,15 +35,34 @@ public final class OriginalFileHttp {
         return new ResponseEntity<>(part, headers, HttpStatus.PARTIAL_CONTENT);
     }
 
-    private static HttpHeaders baseHeaders(DocumentService.OriginalFile file) {
+    private static HttpHeaders baseHeaders(DocumentService.OriginalFile file, boolean download) {
         HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.parseMediaType(file.mimeType()));
-        headers.setContentDisposition(ContentDisposition.inline()
+        headers.setContentType(MediaType.parseMediaType(effectiveMimeType(file)));
+        ContentDisposition.Builder disposition = download
+                ? ContentDisposition.attachment() : ContentDisposition.inline();
+        headers.setContentDisposition(disposition
                 .filename(file.filename(), StandardCharsets.UTF_8).build());
         headers.set(HttpHeaders.ACCEPT_RANGES, "bytes");
         headers.setETag("\"" + file.sha256() + "\"");
         headers.set("X-Content-SHA256", file.sha256());
         return headers;
+    }
+
+    private static String effectiveMimeType(DocumentService.OriginalFile file) {
+        String mimeType = file.mimeType();
+        if (mimeType != null && !mimeType.isBlank()
+                && !mimeType.toLowerCase(Locale.ROOT)
+                        .startsWith(MediaType.APPLICATION_OCTET_STREAM_VALUE)) {
+            return mimeType;
+        }
+        String filename = file.filename().toLowerCase(Locale.ROOT);
+        if (filename.endsWith(".pdf")) return MediaType.APPLICATION_PDF_VALUE;
+        if (filename.endsWith(".png")) return MediaType.IMAGE_PNG_VALUE;
+        if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) {
+            return MediaType.IMAGE_JPEG_VALUE;
+        }
+        if (filename.endsWith(".webp")) return "image/webp";
+        return MediaType.APPLICATION_OCTET_STREAM_VALUE;
     }
 
     private static long[] parseRange(String value, int length) {

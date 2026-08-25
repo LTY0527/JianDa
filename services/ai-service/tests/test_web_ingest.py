@@ -16,8 +16,9 @@ def _run_preview(
     monkeypatch,
     html: str,
     image_status: int = 200,
-    allow_image_download: bool = True,
+    allow_image_candidates: bool = True,
     requests: list[str] | None = None,
+    url: str = "https://www.news.cn/article",
 ):
     async def allow_public(_url: str) -> None:
         return None
@@ -43,11 +44,41 @@ def _run_preview(
     web_ingest._CACHE.clear()
     try:
         return asyncio.run(preview_web_article(
-            "https://www.news.cn/article",
-            allow_image_download=allow_image_download,
+            url,
+            allow_image_candidates=allow_image_candidates,
         ))
     finally:
         asyncio.run(client.aclose())
+
+
+def test_download_validated_image_enforces_declared_size_and_dimensions(monkeypatch):
+    async def allow_public(_url: str) -> None:
+        return None
+
+    async def no_wait(_domain: str, _seconds: int) -> None:
+        return None
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(
+            200,
+            content=_png(1200, 675),
+            headers={"Content-Type": "image/png"},
+        )),
+        follow_redirects=True,
+    )
+    monkeypatch.setattr(web_ingest, "_CLIENT", client)
+    monkeypatch.setattr(web_ingest, "_assert_public_host", allow_public)
+    monkeypatch.setattr(web_ingest, "_rate_limit", no_wait)
+    try:
+        data, content_type, width, height = asyncio.run(
+            web_ingest.download_validated_image("https://www.news.cn/cover.png")
+        )
+    finally:
+        asyncio.run(client.aclose())
+
+    assert data.startswith(b"\x89PNG")
+    assert content_type == "image/png"
+    assert (width, height) == (1200, 675)
 
 
 def test_extracts_json_ld_open_graph_and_cleans_navigation(monkeypatch):
@@ -139,12 +170,117 @@ def test_source_without_image_cache_permission_does_not_download_images(monkeypa
     result = _run_preview(
         monkeypatch,
         html,
-        allow_image_download=False,
+        allow_image_candidates=False,
         requests=requests,
     )
     assert result.cover_image_url == ""
     assert result.cover_image_type == "CATEGORY_DEFAULT"
     assert "/cover.png" not in requests
+
+
+@pytest.mark.parametrize(
+    ("markup", "expected_path"),
+    [
+        ('<img src="/src.png" alt="主题图片">', "/src.png"),
+        ('<img data-src="/data-src.png" alt="主题图片">', "/data-src.png"),
+        ('<img data-original="/original.png" alt="主题图片">', "/original.png"),
+        ('<img data-lazy-src="/lazy.png" alt="主题图片">', "/lazy.png"),
+        ('<img data-echo="/echo.png" alt="主题图片">', "/echo.png"),
+        ('<img srcset="/small.png 480w, /srcset.png 1200w" alt="主题图片">', "/small.png"),
+        ('<img data-srcset="/data-srcset.png 2x" alt="主题图片">', "/data-srcset.png"),
+        ('<picture><source srcset="/picture.png 1200w"></picture>', "/picture.png"),
+        ('<video poster="/poster.png"></video>', "/poster.png"),
+    ],
+)
+def test_discovers_common_lazy_picture_and_video_image_attributes(
+    monkeypatch, markup, expected_path
+):
+    requests: list[str] = []
+    html = f"""<html><head><title>公共服务文章图片测试</title></head><body><article>
+    {markup}
+    <p>这是一篇公开公共服务文章，用于验证通用网页图片候选发现能力和机构端人工审核流程。</p>
+    <p>候选图片只供审核人员查看，未经确认不得直接发布到用户端，也不得被当作已授权缓存图片。</p>
+    <p>页面结构不依赖任何特定网站选择器，可以覆盖常见延迟加载、响应式图片和视频封面写法。</p>
+    </article></body></html>"""
+    result = _run_preview(monkeypatch, html, requests=requests)
+    assert expected_path in requests
+    assert any(image.url.endswith(expected_path) for image in result.images)
+
+
+def test_candidate_download_switch_is_independent_from_public_cache_permission(monkeypatch):
+    requests: list[str] = []
+    html = """<html><head><title>候选与缓存权限分离</title>
+    <meta property="og:image" content="/candidate.png"></head><body><main>
+    <p>机构端可以下载少量图片数据来验证尺寸、媒体类型和哈希，并生成等待人工审核的图片候选。</p>
+    <p>这一过程不表示平台已经获得公开缓存许可，也不会把未经审核的第三方图片直接展示给用户。</p>
+    <p>只有管理员确认来源和使用依据后，后续公开流程才能根据来源配置决定是否缓存图片。</p>
+    </main></body></html>"""
+    result = _run_preview(
+        monkeypatch,
+        html,
+        allow_image_candidates=True,
+        requests=requests,
+    )
+    assert "/candidate.png" in requests
+    assert result.images[0].image_cached is False
+    assert result.images[0].candidate_status == "VALID"
+
+
+def test_article_image_records_nearby_context_and_relevance(monkeypatch):
+    html = """<html><head><title>大场镇长者助餐服务开放</title></head><body><article>
+    <h1>大场镇长者助餐服务开放</h1>
+    <p>大场镇社区食堂为老年居民提供午餐和助餐咨询。</p>
+    <figure><img src="/canteen.png" alt="长者在大场镇社区食堂用餐">
+    <figcaption>社区工作人员介绍助餐服务安排</figcaption></figure>
+    <p>具体开放时间和申请条件请以属地官方公告为准。</p>
+    </article></body></html>"""
+    result = _run_preview(monkeypatch, html)
+    candidate = next(image for image in result.images if image.url.endswith("/canteen.png"))
+    assert "社区食堂" in candidate.context_text
+    assert candidate.relevance_score >= 20
+
+
+def test_large_navigation_banner_is_not_accepted_as_article_image(monkeypatch):
+    html = """<html><head><title>社区健康服务通知</title></head><body>
+    <header class="navigation"><img src="/portal-banner.png" alt="网站服务导航"></header>
+    <article><p>社区卫生服务中心发布健康服务通知，请居民关注属地官方安排。</p>
+    <p>本文说明服务时间变化，具体事项以社区卫生服务中心公开信息为准。</p>
+    <p>如有疑问请通过官方联系电话咨询，不要相信非官方收费链接。</p></article>
+    </body></html>"""
+    result = _run_preview(monkeypatch, html)
+    assert not any(image.url.endswith("/portal-banner.png") for image in result.images)
+    assert result.cover_image_type == "CATEGORY_DEFAULT"
+
+
+def test_empty_alt_recommendation_after_article_does_not_borrow_article_title(monkeypatch):
+    html = """<html><head><title>老年人夏季健康提醒</title></head><body>
+    <article><p>老年人夏季应注意补水和休息，持续不适时及时就医。</p>
+    <p>本文为公开健康提示，不能替代医务人员结合个人情况作出的判断。</p>
+    <p>具体健康服务安排请以属地卫生健康部门公开信息为准。</p></article>
+    <aside class="recommendation"><p>国际体育赛事最新赛况</p>
+    <a href="/other"><img src="/unrelated.png" alt=""></a></aside>
+    </body></html>"""
+    result = _run_preview(monkeypatch, html)
+    assert not any(image.url.endswith("/unrelated.png") for image in result.images)
+    assert result.cover_image_type == "CATEGORY_DEFAULT"
+
+
+def test_wechat_identity_hints_do_not_claim_official_status(monkeypatch):
+    html = """<html><head><title>社区健康提醒</title>
+    <meta name="profile_nickname" content="浦江健康服务">
+    <script>var biz = "MzA-test-account";</script></head><body><main>
+    <p>社区卫生服务中心发布夏季健康提醒，请居民关注高温天气和日常补水。</p>
+    <p>老年人如出现持续胸闷、头晕等异常信号，应及时联系医疗机构。</p>
+    <p>本文为公开健康提示，具体诊疗事项需要由专业医务人员判断。</p>
+    </main></body></html>"""
+    result = _run_preview(
+        monkeypatch,
+        html,
+        url="https://mp.weixin.qq.com/s/example",
+    )
+    assert result.wechat_account_name == "浦江健康服务"
+    assert result.wechat_biz == "MzA-test-account"
+    assert result.source_name == "浦江健康服务"
 
 
 def test_policy_and_health_classification_are_distinct():

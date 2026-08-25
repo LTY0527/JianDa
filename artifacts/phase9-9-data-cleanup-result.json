@@ -1,0 +1,26 @@
+{
+  "executed_at": "2026-08-24T23:30:00+08:00",
+  "database": "docker-mysql",
+  "transaction": "committed",
+  "result": {
+    "known_demo_published_removed": 12,
+    "demo_community_posts_removed": 13,
+    "demo_source_documents_withdrawn": 12,
+    "remaining_known_demo_published": 0,
+    "remaining_demo_community_posts": 0,
+    "real_published_items_after": 16
+  },
+  "preserved": {
+    "resident_demo_accounts": ["demo_chen", "demo_li"],
+    "real_web_articles": true,
+    "real_uploads": true,
+    "docker_volumes": true,
+    "test_fixtures": true
+  },
+  "notes": [
+    "No full-table delete was used.",
+    "Published items were selected by the exact DemoDataInitializer slug allowlist.",
+    "Community posts were selected only by is_demo=true.",
+    "Demo source documents were retained for audit but moved to WITHDRAWN and are not in the H5 feed."
+  ]
+}

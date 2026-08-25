@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
 
-const h5Url = process.env.H5_E2E_URL || "http://127.0.0.1:5174";
+const h5Url = process.env.JIANDA_H5_TEST_URL || process.env.H5_E2E_URL || "http://127.0.0.1:5174";
 
 const items = [
   {
@@ -36,10 +36,25 @@ const items = [
     image_source_name: "简达本地分类默认图",
     importance: 90,
   },
+  {
+    id: 903,
+    slug: "news-health-default",
+    title: "老年人科学运动提示",
+    summary: "结合身体情况选择适合自己的活动强度。",
+    category: "健康",
+    source_name: "权威健康来源",
+    source_url: "https://official.example/health-2",
+    published_at: "2026-07-24T08:00:00+08:00",
+    content_kind: "HEALTH_EDUCATION",
+    cover_image_type: "CATEGORY_DEFAULT",
+    image_alt_text: "健康科普分类插图",
+    image_source_name: "简达本地分类默认图",
+    importance: 80,
+  },
 ];
 
 test.beforeEach(async ({ page }) => {
-  await page.route("**/api/public/items", (route) =>
+  await page.route("**/api/public/items?*", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json; charset=utf-8",
@@ -51,7 +66,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("broken and missing covers use responsive category defaults", async ({
+test("broken hero cover becomes text while category defaults stay as text feed", async ({
   page,
 }) => {
   const consoleErrors: string[] = [];
@@ -66,18 +81,23 @@ test("broken and missing covers use responsive category defaults", async ({
   await expect(page.locator("#app")).not.toBeEmpty();
   await expect(page.locator("vite-error-overlay")).toHaveCount(0);
 
-  const featured = page.locator(".featured-story > img");
-  await expect(featured).toHaveAttribute("alt", "高温天气健康提示");
-  await expect(featured).toHaveAttribute("src", /\/images\/defaults\/health\.svg$/);
-  await expect(featured).toHaveCSS("object-fit", "cover");
-  const featuredBox = await featured.boundingBox();
-  expect(featuredBox).not.toBeNull();
-  expect(featuredBox!.width / featuredBox!.height).toBeCloseTo(16 / 9, 1);
+  const featured = page.locator(".commercial-hero");
+  await expect(featured).toHaveClass(/commercial-hero--text/);
+  await expect(featured.locator("img")).toHaveCount(0);
+  await expect(featured.getByRole("heading")).toContainText("三伏天老年人健康提醒");
 
-  const listCover = page.locator(".editorial-card__image img");
-  await expect(listCover).toHaveAttribute("loading", "lazy");
-  await expect(listCover).toHaveAttribute("src", /\/images\/defaults\/policy\.svg$/);
-  await expect(listCover).toHaveCSS("object-fit", "cover");
+  const feedEntries = page.locator(".mixed-feed .feed-entry");
+  await expect(feedEntries).toHaveCount(2);
+  await expect(feedEntries.locator("img")).toHaveCount(0);
+  const beforeReload = await feedEntries.evaluateAll((entries) =>
+    entries.map((entry) => entry.className),
+  );
+  await page.reload();
+  await expect(page.locator(".mixed-feed .feed-entry")).toHaveCount(beforeReload.length);
+  const afterReload = await page.locator(".mixed-feed .feed-entry").evaluateAll((entries) =>
+    entries.map((entry) => entry.className),
+  );
+  expect(afterReload).toEqual(beforeReload);
   await expect
     .poll(() =>
       page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -88,9 +108,12 @@ test("broken and missing covers use responsive category defaults", async ({
     path: path.join(os.tmpdir(), "jianda-phase9-cover-mobile.png"),
     fullPage: true,
   });
-  expect(consoleErrors).toEqual([
-    "Failed to load resource: the server responded with a status of 404 (Not Found)",
-  ]);
+  expect(consoleErrors.length).toBeGreaterThanOrEqual(1);
+  expect(new Set(consoleErrors)).toEqual(
+    new Set([
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    ]),
+  );
   expect(pageErrors).toEqual([]);
 });
 

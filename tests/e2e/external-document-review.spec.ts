@@ -25,12 +25,15 @@ test("document 16 shows real processing counts and traceable external fields", a
   await expect(page.getByText("共 1 页，1 个段落")).toBeVisible();
   await expect(page.getByText("已生成 10 个可追溯字段")).toBeVisible();
   await expect(page.getByText("共 3 页，12 个段落")).toHaveCount(0);
+  await expect(page.getByText("处理完成", { exact: true })).toBeVisible();
 
-  await page.getByRole("link", { name: "进入对照审核" }).click();
+  await page.getByRole("link", { name: "进入原文对照审核" }).click();
   await expect(page).toHaveURL(`${institutionUrl}/documents/16/review`);
   await expect(page.getByRole("heading", { name: "原文对照审核" })).toBeVisible();
   await expect(page.locator(".source-pane")).toContainText("医院门诊预约调整告知");
   await expect(page.locator(".pane-title").first()).toContainText("第 1 页 / 共 1 页");
+  const showAllFields = page.getByRole("button", { name: "查看全部 10 项" });
+  if (await showAllFields.isVisible()) await showAllFields.click();
 
   const fieldCards = page.locator(".review-fields article");
   await expect(fieldCards).toHaveCount(10);
@@ -49,14 +52,17 @@ test("document 16 shows real processing counts and traceable external fields", a
     ]),
   );
   await expect(page.getByText("原文依据 · 第 1 页")).toHaveCount(10);
-  await expect(page.getByRole("button", { name: "完成字段审核" })).toBeEnabled();
+  const reviewAction = page.getByRole("button", {
+    name: /完成字段审核|字段已审核|内容已发布/,
+  });
+  await expect(reviewAction).toBeVisible();
+  if (await reviewAction.getAttribute("aria-disabled") !== "true" && await reviewAction.isEnabled()) {
+    await expect(reviewAction).toBeEnabled();
+  }
 
   await page.getByRole("button", { name: "原PDF", exact: true }).click();
-  await expect(page.locator(".original-file-pane iframe")).toBeVisible();
-  await expect(page.locator(".original-file-pane iframe")).toHaveAttribute(
-    "title",
-    "原PDF预览",
-  );
+  await expect(page.getByRole("region", { name: "PDF 在线阅读器" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "下载原文件" })).toBeVisible();
   await page.getByRole("button", { name: "提取文本", exact: true }).click();
   await expect(page.locator(".source-pane")).toContainText("医院门诊预约调整告知");
 

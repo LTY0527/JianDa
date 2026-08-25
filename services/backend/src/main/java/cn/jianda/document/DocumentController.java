@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -59,8 +60,18 @@ public class DocumentController {
     @PostMapping("/{id}/process")
     public ApiResponse<Map<String, Object>> process(@PathVariable long id) { return ApiResponse.ok(service.process(id, UserContext.current())); }
 
+    @PostMapping("/{id}/retry-rewrite")
+    public ApiResponse<Map<String, Object>> retryRewrite(@PathVariable long id) {
+        return ApiResponse.ok(service.retryRewrite(id, UserContext.current()));
+    }
+
     @GetMapping("/{id}/jobs")
     public ApiResponse<List<Map<String, Object>>> jobs(@PathVariable long id) { return ApiResponse.ok(service.jobs(id, UserContext.current())); }
+
+    @GetMapping("/{id}/processing-snapshot")
+    public ApiResponse<Map<String, Object>> processingSnapshot(@PathVariable long id) {
+        return ApiResponse.ok(service.processingSnapshot(id, UserContext.current()));
+    }
 
     @GetMapping("/{id}/segments")
     public ApiResponse<List<Map<String, Object>>> segments(@PathVariable long id) { return ApiResponse.ok(service.segments(id, UserContext.current())); }
@@ -68,20 +79,40 @@ public class DocumentController {
     @GetMapping("/{id}/original-file")
     public ResponseEntity<byte[]> originalFile(
             @PathVariable long id,
-            @RequestHeader(value = "Range", required = false) String range) throws IOException {
-        return OriginalFileHttp.response(service.originalFile(id, UserContext.current()), range);
+            @RequestHeader(value = "Range", required = false) String range,
+            @RequestParam(defaultValue = "false") boolean download) throws IOException {
+        return OriginalFileHttp.response(service.originalFile(id, UserContext.current()), range, download);
     }
 
     @GetMapping("/{id}/fields")
     public ApiResponse<List<Map<String, Object>>> fields(@PathVariable long id) { return ApiResponse.ok(service.fields(id, UserContext.current())); }
 
+    @PostMapping("/{id}/cover")
+    public ApiResponse<Map<String, Object>> uploadCover(
+            @PathVariable long id, @RequestPart("file") MultipartFile file) throws IOException {
+        return ApiResponse.ok(service.uploadCustomCover(id, file, UserContext.current()));
+    }
+
     @GetMapping("/{id}/generated")
     public ApiResponse<List<Map<String, Object>>> generated(@PathVariable long id) { return ApiResponse.ok(service.generated(id, UserContext.current())); }
+
+    @PutMapping("/{id}/generated/{contentType}")
+    public ApiResponse<Void> updateGenerated(@PathVariable long id, @PathVariable String contentType,
+            @Valid @RequestBody GeneratedContentRequest request) {
+        service.updateGenerated(id, contentType, request.plainText(), request.contentJson(), UserContext.current());
+        return ApiResponse.ok(null);
+    }
 
     @PutMapping("/{documentId}/fields/{fieldId}")
     public ApiResponse<Void> updateField(@PathVariable long documentId, @PathVariable long fieldId,
                                          @Valid @RequestBody FieldRequest request) {
         service.updateField(documentId, fieldId, request.value(), request.confirmed(), UserContext.current());
+        return ApiResponse.ok(null);
+    }
+
+    @DeleteMapping("/{documentId}/fields/{fieldId}")
+    public ApiResponse<Void> rejectField(@PathVariable long documentId, @PathVariable long fieldId) {
+        service.rejectField(documentId, fieldId, UserContext.current());
         return ApiResponse.ok(null);
     }
 
@@ -100,11 +131,25 @@ public class DocumentController {
     @PostMapping("/{id}/publish")
     public ApiResponse<Map<String, Object>> publish(@PathVariable long id, @Valid @RequestBody PublishRequest request) {
         return ApiResponse.ok(service.publish(id, request.title(), request.category(), request.sourceName(),
-                request.sourceUrl(), request.allowPublicOriginal(), UserContext.current()));
+                request.sourceUrl(), request.allowPublicOriginal(), request.publishChannel(),
+                request.promoteToRecommend(), request.importanceLevel(), UserContext.current()));
     }
 
     @PostMapping("/{id}/withdraw")
     public ApiResponse<Void> withdraw(@PathVariable long id) { service.withdraw(id, UserContext.current()); return ApiResponse.ok(null); }
+
+    @PutMapping("/{id}/publication-channel")
+    public ApiResponse<Void> updatePublicationChannel(
+            @PathVariable long id, @Valid @RequestBody PublicationChannelRequest request) {
+        service.updatePublicationChannel(id, request.publishChannel(), UserContext.current());
+        return ApiResponse.ok(null);
+    }
+
+    @PutMapping("/{id}/region-scope")
+    public ApiResponse<Map<String, Object>> regionScope(
+            @PathVariable long id, @Valid @RequestBody RegionScopeRequest request) {
+        return ApiResponse.ok(service.updateRegionScope(id, request, UserContext.current()));
+    }
 
     public record CreateRequest(
             @NotBlank(message = "请输入材料标题") String title,
@@ -117,9 +162,22 @@ public class DocumentController {
             String evidenceType,
             Integer pageNo) {}
     public record FieldRequest(@NotBlank(message = "字段内容不能为空") String value, boolean confirmed) {}
+    public record GeneratedContentRequest(String plainText, Object contentJson) {}
     public record ReviewRequest(String comment) {}
     public record PublishRequest(@NotBlank(message = "请输入标题") String title,
                                  @NotBlank(message = "请选择分类") String category,
                                  @NotBlank(message = "请输入来源") String sourceName, String sourceUrl,
-                                 boolean allowPublicOriginal) {}
+                                 boolean allowPublicOriginal,
+                                 String publishChannel,
+                                 boolean promoteToRecommend,
+                                 String importanceLevel) {}
+    public record PublicationChannelRequest(
+            @NotBlank(message = "请选择发布栏目") String publishChannel) {}
+    public record RegionScopeRequest(
+            @NotBlank String localScope,
+            String province,
+            String city,
+            String district,
+            String streetOrTown,
+            String regionCode) {}
 }

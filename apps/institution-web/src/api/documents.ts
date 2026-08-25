@@ -9,6 +9,14 @@ export interface DocumentRow {
   original_published_at?: string;
   category?: string;
   content_kind?: string;
+  publish_channel?: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+  suggested_publish_channel?: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+  channel_confidence?: number;
+  channel_reason?: string;
+  region_code?: string;
+  region_display?: string;
+  stage?: string;
+  queue_position?: number;
   organization_name: string;
   status: string;
   progress: number;
@@ -31,6 +39,7 @@ export interface DocumentDetail {
   title: string;
   raw_text?: string;
   page_count?: number;
+  extraction_method?: "pymupdf" | "ocr" | "pymupdf+ocr" | "manual" | "manual_required" | "unknown";
   category?: string;
   import_url?: string;
   source_published_at?: string;
@@ -56,6 +65,16 @@ export interface DocumentDetail {
   extracted_text?: string;
   original_page_available?: boolean;
   content_kind?: string;
+  publish_channel?: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+  suggested_publish_channel?: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+  channel_confidence?: number;
+  channel_reason?: string;
+  version_root_id?: number;
+  previous_version_id?: number;
+  version_no?: number;
+  old_content_hash?: string;
+  new_content_hash?: string;
+  content_change_summary?: string;
   processing_status: string;
 }
 
@@ -94,8 +113,46 @@ export interface ProcessingJob {
   progress: number;
   error_message?: string;
   stage?: string;
+  last_failed_stage?: string;
+  provider_request_id?: string;
+  reason_code?: string;
+  provider_id?: string;
+  model_id?: string;
+  response_fingerprint?: string;
+  crossed_provider_boundary?: boolean;
+  fact_checkpoint_json?: string;
+  retry_count?: number;
   cache_hit?: boolean;
   total_ms?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  started_at?: string;
+  finished_at?: string;
+  updated_at?: string;
+}
+
+export interface ProcessingSnapshot {
+  documentId: number;
+  status: string;
+  stage: string;
+  progress: number;
+  elapsed: number;
+  estimatedMs?: string;
+  queuePosition?: number;
+  activeProcessing?: number;
+  heartbeat?: string;
+  jobId?: number;
+  jobStatus?: string;
+  error?: string;
+  hasReviewContent: boolean;
+  updatedAt?: string;
+  version?: string;
+  totalMs?: number;
+  providerId?: string;
+  modelId?: string;
+  reasonCode?: string;
+  retryCount?: number;
 }
 
 export const authApi = {
@@ -136,8 +193,19 @@ export const documentApi = {
     );
   },
   process: (id: number) =>
-    http.post<ApiResponse<{ status: string; progress: number }>>(
+    http.post<ApiResponse<{
+      documentId: number;
+      jobId: number;
+      status: string;
+      stage: string;
+      progress: number;
+      alreadyRunning?: boolean;
+    }>>(
       `/documents/${id}/process`,
+    ),
+  retryRewrite: (id: number) =>
+    http.post<ApiResponse<{ status: string; progress: number }>>(
+      `/documents/${id}/retry-rewrite`,
     ),
   detail: (id: number) =>
     http.get<ApiResponse<DocumentDetail>>(`/documents/${id}`),
@@ -149,8 +217,26 @@ export const documentApi = {
     http.get<ApiResponse<DocumentSegment[]>>(`/documents/${id}/segments`),
   originalFile: (id: number) =>
     http.get<Blob>(`/documents/${id}/original-file`, { responseType: "blob" }),
+  originalFileUrl: (id: number, download = false) => {
+    const base = String(import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
+    return `${base}/documents/${id}/original-file${download ? "?download=true" : ""}`;
+  },
+  originalFileHeaders: (): Record<string, string> => {
+    const token = localStorage.getItem("jianda_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  },
+  uploadCover: (id: number, file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    return http.post<ApiResponse<{ filename: string }>>(
+      `/documents/${id}/cover`,
+      body,
+    );
+  },
   jobs: (id: number) =>
     http.get<ApiResponse<ProcessingJob[]>>(`/documents/${id}/jobs`),
+  processingSnapshot: (id: number) =>
+    http.get<ApiResponse<ProcessingSnapshot>>(`/documents/${id}/processing-snapshot`),
   updateField: (
     documentId: number,
     fieldId: number,
@@ -161,6 +247,8 @@ export const documentApi = {
       value,
       confirmed,
     }),
+  rejectField: (documentId: number, fieldId: number) =>
+    http.delete<ApiResponse<void>>(`/documents/${documentId}/fields/${fieldId}`),
   review: (id: number, comment = "字段与原文一致") =>
     http.post<ApiResponse<void>>(`/documents/${id}/review`, { comment }),
   publish: (
@@ -171,6 +259,9 @@ export const documentApi = {
       sourceName: string;
       sourceUrl?: string;
       allowPublicOriginal?: boolean;
+      publishChannel: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+      promoteToRecommend?: boolean;
+      importanceLevel?: "NORMAL" | "IMPORTANT" | "URGENT";
     },
   ) =>
     http.post<ApiResponse<{ slug: string }>>(
@@ -179,4 +270,18 @@ export const documentApi = {
     ),
   withdraw: (id: number) =>
     http.post<ApiResponse<void>>(`/documents/${id}/withdraw`),
+  updatePublicationChannel: (
+    id: number,
+    publishChannel:
+      | "HEALTH"
+      | "ELDERLY"
+      | "MEALS"
+      | "SERVICES"
+      | "FRAUD"
+      | "ACTIVITY"
+      | "COMMUNITY",
+  ) =>
+    http.put<ApiResponse<void>>(`/documents/${id}/publication-channel`, {
+      publishChannel,
+    }),
 };

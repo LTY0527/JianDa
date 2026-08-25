@@ -43,9 +43,26 @@ export function clearLocalLibrary() {
   historyItems().forEach((item) => localStorage.removeItem(`jianda_read_${item.id}`));
   writeList(FAVORITES, []); writeList(HISTORY, []); writeList(LISTEN_HISTORY, []);
 }
-export interface ReaderPreferences { autoRead: boolean; showRecent: boolean; channels: string[]; }
+export interface ReaderPreferences {
+  autoRead: boolean;
+  showRecent: boolean;
+  channels: string[];
+  desktopSideNavigation: boolean;
+  mobileSwipeNavigation: boolean;
+  stopSpeechOnNavigation: boolean;
+  preferSameCategory: boolean;
+}
+const DEFAULT_PREFERENCES: ReaderPreferences = {
+  autoRead: false,
+  showRecent: true,
+  channels: [],
+  desktopSideNavigation: true,
+  mobileSwipeNavigation: true,
+  stopSpeechOnNavigation: true,
+  preferSameCategory: true,
+};
 export function readerPreferences(): ReaderPreferences {
-  try { return { autoRead: false, showRecent: true, channels: [], ...JSON.parse(localStorage.getItem(PREFERENCES) || "{}") }; }
-  catch { return { autoRead: false, showRecent: true, channels: [] }; }
+  try { return { ...DEFAULT_PREFERENCES, ...JSON.parse(localStorage.getItem(PREFERENCES) || "{}") }; }
+  catch { return { ...DEFAULT_PREFERENCES }; }
 }
 export function saveReaderPreferences(value: ReaderPreferences) { localStorage.setItem(PREFERENCES, JSON.stringify(value)); window.dispatchEvent(new CustomEvent("jianda-preference-change")); }

@@ -1,20 +1,26 @@
 package cn.jianda;
 
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import cn.jianda.document.DocumentService;
 import cn.jianda.ai.AiClient;
+import cn.jianda.ai.AiServiceException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -35,16 +41,24 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:jianda-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "jianda.upload-dir=./target/test-uploads"
+        "jianda.upload-dir=./target/test-uploads",
+        "jianda.processing.async-enabled=false",
+        "jianda.crawl.daily-ai-max-articles=1000",
+        "jianda.crawl.daily-ai-max-tokens=10000000"
 })
 @AutoConfigureMockMvc
 class CoreFlowIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper objectMapper;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @MockitoBean AiClient aiClient;
 
     @BeforeEach
     void configureAi() {
+        jdbc.update("DELETE FROM ai_execution_audit");
+        jdbc.update("DELETE FROM ai_budget_reservation");
+        jdbc.update("DELETE FROM ai_budget_usage");
+        jdbc.update("DELETE FROM ai_processing_queue");
         when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap())).thenReturn(Map.of(
                 "fields", List.of(
                         Map.of("field_type", "TARGET_AUDIENCE", "label", "适用对象", "value", "年满80周岁的本市户籍老人",
@@ -60,10 +74,17 @@ class CoreFlowIntegrationTest {
         when(aiClient.extractText(any(Path.class), anyString(), anyString())).thenReturn(Map.of(
                 "text", "第一页真实正文\n第二页真实正文",
                 "page_count", 2,
+                "ocr_page_count", 1,
+                "extraction_method", "pymupdf+ocr",
+                "quality_pages", List.of(
+                        Map.of("page_no", 1, "quality", "GOOD", "selected_method", "pymupdf"),
+                        Map.of("page_no", 2, "quality", "POOR", "selected_method", "ocr")),
                 "segments", List.of(
                         Map.of("page_no", 1, "segment_no", 1, "text", "第一页真实正文",
+                                "raw_text", "第一页真实正文 原始",
                                 "start_offset", 0, "end_offset", 7),
                         Map.of("page_no", 2, "segment_no", 1, "text", "第二页真实正文",
+                                "raw_text", "第二页真实正文 原始",
                                 "start_offset", 8, "end_offset", 15))));
         when(aiClient.previewMetadata(any(Path.class), anyString(), anyString())).thenReturn(Map.of(
                 "title", "秋冬季流感疫苗集中接种登记说明",
@@ -124,6 +145,20 @@ class CoreFlowIntegrationTest {
     }
 
     @Test
+    void publicationSummaryPrefersStructuredSummaryAndCleansMarkup() {
+        String summary = DocumentService.compactPublicationSummary(
+                List.of("## 第一条 **重点**", "<b>第二条</b> [查看](https://example.org)"),
+                "不应优先使用的 plain text");
+        org.junit.jupiter.api.Assertions.assertEquals("第一条 重点 第二条 查看", summary);
+
+        String longSummary = DocumentService.compactPublicationSummary(
+                null, "# " + "办事摘要".repeat(40));
+        org.junit.jupiter.api.Assertions.assertTrue(longSummary.length() <= 121);
+        org.junit.jupiter.api.Assertions.assertTrue(longSummary.endsWith("…"));
+        org.junit.jupiter.api.Assertions.assertFalse(longSummary.contains("#"));
+    }
+
+    @Test
     void uploadProcessReviewPublishFlow() throws Exception {
         String token = login();
         String auth = "Bearer " + token;
@@ -155,7 +190,9 @@ class CoreFlowIntegrationTest {
                 .andExpect(status().isForbidden());
 
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"))
+                .andExpect(jsonPath("$.data.jobId").isNumber());
 
         String fieldsBody = mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(2))
@@ -186,6 +223,11 @@ class CoreFlowIntegrationTest {
                 .andExpect(status().isPartialContent())
                 .andExpect(result -> org.junit.jupiter.api.Assertions.assertArrayEquals(
                         "demo".getBytes(), result.getResponse().getContentAsByteArray()));
+        mvc.perform(get("/api/public/items/{slug}/original-file", slug)
+                        .param("download", "true"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition",
+                        org.hamcrest.Matchers.containsString("attachment")));
     }
 
     @Test
@@ -201,12 +243,18 @@ class CoreFlowIntegrationTest {
         mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(pdf).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.raw_text").value("第一页真实正文\n第二页真实正文"))
-                .andExpect(jsonPath("$.data.page_count").value(2));
+                .andExpect(jsonPath("$.data.page_count").value(2))
+                .andExpect(jsonPath("$.data.extraction_method").value("pymupdf+ocr"))
+                .andExpect(jsonPath("$.data.ocr_page_count").value(1));
         mvc.perform(get("/api/documents/{id}/segments", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(2))
                 .andExpect(jsonPath("$.data[0].text").value("第一页真实正文"))
+                .andExpect(jsonPath("$.data[0].raw_text").value("第一页真实正文 原始"))
                 .andExpect(jsonPath("$.data[1].page_no").value(2));
+        String qualityJson = jdbc.queryForObject(
+                "SELECT extraction_quality_json FROM source_document WHERE id=?", String.class, documentId);
+        org.junit.jupiter.api.Assertions.assertTrue(qualityJson.contains("selected_method"));
 
         when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap())).thenReturn(Map.of(
                 "fields", List.of(Map.of(
@@ -255,8 +303,8 @@ class CoreFlowIntegrationTest {
         when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
                 .thenThrow(new IllegalStateException("AI service unavailable"));
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.message").value("AI 服务暂时不可用，任务已标记失败，可稍后重试"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
         mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.processing_status").value("FAILED"));
@@ -267,7 +315,7 @@ class CoreFlowIntegrationTest {
     }
 
     @Test
-    void emptyAiFieldsFailWithoutGeneratedContentAndCanBeRetried() throws Exception {
+    void generatedModulesWithoutFlatFieldsCanEnterReviewAndBeReprocessed() throws Exception {
         String auth = "Bearer " + login();
         String created = mvc.perform(post("/api/documents").header("Authorization", auth)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -281,58 +329,176 @@ class CoreFlowIntegrationTest {
                         .header("Authorization", auth).param("manualText", sourceText))
                 .andExpect(status().isOk());
 
-        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
-                .thenReturn(Map.of(
+        Map<String, Object> noFieldsResult = Map.of(
                         "fields", List.of(),
                         "summary", List.of("没有字段的摘要"),
                         "plain_text", "没有字段的通俗版",
                         "steps", List.of(),
                         "term_explanations", Map.of(),
                         "warnings", List.of(),
-                        "audio_script", "没有字段的朗读稿"));
+                        "audio_script", "没有字段的朗读稿");
+        Map<String, Object> contactFieldResult = Map.of(
+                "fields", List.of(Map.of(
+                        "field_type", "CONTACT",
+                        "label", "咨询电话",
+                        "value", "021-5558 7301",
+                        "source_quote", "咨询电话：021-5558 7301。",
+                        "confidence", 0.95)),
+                "summary", List.of("请按通知咨询。"),
+                "plain_text", "请拨打通知中的电话咨询。",
+                "steps", List.of(),
+                "term_explanations", Map.of(),
+                "warnings", List.of(),
+                "audio_script", "请拨打通知中的电话咨询。");
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
+                .thenReturn(noFieldsResult, contactFieldResult);
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.message").value(
-                        "AI未生成可追溯的关键字段，请检查模型输出后重新处理"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
         mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.processing_status").value("FAILED"))
+                .andExpect(jsonPath("$.data.processing_status").value("WAITING_REVIEW"))
                 .andExpect(jsonPath("$.data.raw_text").value(sourceText));
         mvc.perform(get("/api/documents/{id}/jobs", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].status").value("FAILED"))
-                .andExpect(jsonPath("$.data[0].error_message").value(
-                        "AI未生成可追溯的关键字段，请检查模型输出后重新处理"));
+                .andExpect(jsonPath("$.data[0].status").value("SUCCEEDED"));
         mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(0));
         mvc.perform(get("/api/documents/{id}/generated", documentId).header("Authorization", auth))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(0));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(greaterThanOrEqualTo(2)));
         mvc.perform(get("/api/documents/{id}/segments", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].text").value(sourceText));
 
-        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
-                .thenReturn(Map.of(
-                        "fields", List.of(Map.of(
-                                "field_type", "CONTACT",
-                                "label", "咨询电话",
-                                "value", "021-5558 7301",
-                                "source_quote", "咨询电话：021-5558 7301。",
-                                "confidence", 0.95)),
-                        "summary", List.of("请按通知咨询。"),
-                        "plain_text", "请拨打通知中的电话咨询。",
-                        "steps", List.of(),
-                        "term_explanations", Map.of(),
-                        "warnings", List.of(),
-                        "audio_script", "请拨打通知中的电话咨询。"));
         mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
         mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].source_quote").value("咨询电话：021-5558 7301。"));
+    }
+
+    @Test
+    void rewriteSchemaFailureKeepsFactCheckpointAndRetrySkipsFactExtraction() throws Exception {
+        String auth = "Bearer " + login();
+        String created = mvc.perform(post("/api/documents").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"阶段恢复测试\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+        String sourceText = "咨询电话：021-5558 7301。";
+        mvc.perform(multipart("/api/documents/{id}/upload", documentId)
+                        .file(new MockMultipartFile("file", "恢复.pdf", "application/pdf", "%PDF".getBytes()))
+                        .header("Authorization", auth).param("manualText", sourceText))
+                .andExpect(status().isOk());
+        Map<String, Object> fact = Map.of(
+                "field_type", "CONTACT", "label", "咨询电话", "value", "021-5558 7301",
+                "source_quote", sourceText, "page_no", 1, "segment_id", 1,
+                "confidence", 0.95, "needs_human_review", false);
+        Map<String, Object> facts = Map.of("prompt_version", "v1", "fields", List.of(fact), "sessions", List.of());
+        Map<String, Object> checkpoint = Map.of(
+                "prompt_version", "v1", "schema_version", "1.1", "model", "test-model",
+                "response_fingerprint", "0123456789abcdef", "request_id", "req-fact",
+                "fact_extract_ms", 12, "prompt_tokens", 10, "completion_tokens", 5,
+                "total_tokens", 15, "facts", facts);
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
+                .thenThrow(new AiServiceException(503, Map.ofEntries(
+                        Map.entry("error_code", "LLM_SCHEMA_VALIDATION_FAILED"),
+                        Map.entry("message", "缺少必填字段：quick_summary"),
+                        Map.entry("stage", "accessible_rewrite"),
+                        Map.entry("json_path", "$.quick_summary"),
+                        Map.entry("request_id", "req-rewrite"),
+                        Map.entry("provider", "external"),
+                        Map.entry("model", "deepseek-v4-flash"),
+                        Map.entry("prompt_tokens", 23),
+                        Map.entry("completion_tokens", 12),
+                        Map.entry("total_tokens", 35),
+                        Map.entry("retryable", true),
+                        Map.entry("fact_checkpoint", checkpoint))));
+        mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"));
+        mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(1));
+        mvc.perform(get("/api/documents/{id}/jobs", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].provider_id").value("external"))
+                .andExpect(jsonPath("$.data[0].model_id").value("deepseek-v4-flash"))
+                .andExpect(jsonPath("$.data[0].provider_request_id").value("req-rewrite"))
+                .andExpect(jsonPath("$.data[0].crossed_provider_boundary").value(true))
+                .andExpect(jsonPath("$.data[0].total_tokens").value(35));
+        when(aiClient.rewrite(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap(), anyMap()))
+                .thenReturn(Map.of(
+                        "fields", List.of(fact), "summary", List.of("请按原文咨询。"),
+                        "plain_text", "请按原文电话咨询。", "steps", List.of(),
+                        "term_explanations", Map.of(), "warnings", List.of(),
+                        "audio_script", "请按原文电话咨询。", "metrics", Map.ofEntries(
+                                Map.entry("provider", "external"),
+                                Map.entry("model", "deepseek-v4-flash"),
+                                Map.entry("request_id", "req-rewrite-success"),
+                                Map.entry("response_fingerprint", "fedcba9876543210"),
+                                Map.entry("accessible_rewrite_ms", 18),
+                                Map.entry("prompt_tokens", 5),
+                                Map.entry("completion_tokens", 3),
+                                Map.entry("total_tokens", 8))));
+        mvc.perform(post("/api/documents/{id}/retry-rewrite", documentId).header("Authorization", auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_REVIEW"));
+        mvc.perform(get("/api/documents/{id}/jobs", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].provider_id").value("external"))
+                .andExpect(jsonPath("$.data[0].model_id").value("deepseek-v4-flash"))
+                .andExpect(jsonPath("$.data[0].provider_request_id").value("req-rewrite-success"))
+                .andExpect(jsonPath("$.data[0].response_fingerprint").value("fedcba9876543210"))
+                .andExpect(jsonPath("$.data[0].crossed_provider_boundary").value(true))
+                .andExpect(jsonPath("$.data[0].total_tokens").value(8));
+        String fieldsAfterRewrite = mvc.perform(get("/api/documents/{id}/fields", documentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andReturn().getResponse().getContentAsString();
+        long irrelevantFieldId = objectMapper.readTree(fieldsAfterRewrite).path("data").get(0).path("id").asLong();
+        mvc.perform(delete("/api/documents/{documentId}/fields/{fieldId}", documentId, irrelevantFieldId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/documents/{id}/fields", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(0));
+        verify(aiClient).rewrite(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap(), anyMap());
+        verify(aiClient).analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap());
+    }
+
+    @Test
+    void automaticBudgetUsageDoesNotBlockManualProcessingOrEraseExistingResults() throws Exception {
+        String auth = "Bearer " + login();
+        String created = mvc.perform(post("/api/documents").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"预算保留结果测试\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+        String source = "预算拒绝时必须保留已经审核中的结果。";
+        mvc.perform(multipart("/api/documents/{id}/upload", documentId)
+                        .file(new MockMultipartFile("file", "预算.pdf", "application/pdf", "%PDF".getBytes()))
+                        .header("Authorization", auth).param("manualText", source))
+                .andExpect(status().isOk());
+        jdbc.update("INSERT INTO extracted_field(document_id,field_type,field_label,field_value,page_no,source_quote,confidence) "
+                + "VALUES (?,'TEST','既有字段','保留',1,?,0.9)", documentId, source);
+        jdbc.update("INSERT INTO generated_content(document_id,content_type,title,plain_text) "
+                + "VALUES (?,'SUMMARY','既有摘要','必须保留')", documentId);
+        jdbc.update("INSERT INTO ai_budget_usage(budget_date,scope_type,scope_id,settled_articles) "
+                + "VALUES (CURRENT_DATE,'GLOBAL',0,1000)");
+        mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("PROCESSING"));
+        for (int attempt = 0; attempt < 50; attempt++) {
+            String status = jdbc.queryForObject(
+                    "SELECT status FROM processing_job WHERE document_id=? ORDER BY id DESC LIMIT 1",
+                    String.class, documentId);
+            if (!"PROCESSING".equals(status) && !"PENDING".equals(status)) break;
+            Thread.sleep(100);
+        }
+        org.junit.jupiter.api.Assertions.assertNotEquals("WAITING_BUDGET",
+                jdbc.queryForObject("SELECT status FROM processing_job WHERE document_id=? ORDER BY id DESC LIMIT 1",
+                        String.class, documentId));
     }
 
     @Test
@@ -349,8 +515,11 @@ class CoreFlowIntegrationTest {
             mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(image)
                             .header("Authorization", auth))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.file_name").value("材料." + extension));
+                    .andExpect(jsonPath("$.data.file_name").value("材料." + extension))
+                    .andExpect(jsonPath("$.data.extraction_method").value("pymupdf+ocr"))
+                    .andExpect(jsonPath("$.data.ocr_page_count").value(1));
         }
+        verify(aiClient, times(2)).extractText(any(Path.class), anyString(), anyString());
 
         String created = mvc.perform(post("/api/documents").header("Authorization", auth)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"非法格式验收\"}"))
@@ -362,6 +531,47 @@ class CoreFlowIntegrationTest {
                         .header("Authorization", auth))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("仅支持 PDF、PNG、JPG 文件"));
+    }
+
+    @Test
+    void deterministicRewriteFallbackRemainsReviewableAndPersistsStatus() throws Exception {
+        String auth = "Bearer " + login();
+        String created = mvc.perform(post("/api/documents").header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"适老化降级验收\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+        mvc.perform(multipart("/api/documents/{id}/upload", documentId)
+                        .file(new MockMultipartFile("file", "降级.pdf", "application/pdf", "%PDF".getBytes()))
+                        .header("Authorization", auth).param("manualText", "办理地点：社区服务中心。"))
+                .andExpect(status().isOk());
+
+        when(aiClient.analyze(anyString(), anyString(), anyString(), anyString(), anyList(), anyMap()))
+                .thenReturn(Map.ofEntries(
+                        Map.entry("fields", List.of()),
+                        Map.entry("summary", List.of("请到社区服务中心办理。")),
+                        Map.entry("plain_text", "请到社区服务中心办理。"),
+                        Map.entry("steps", List.of()),
+                        Map.entry("term_explanations", Map.of()),
+                        Map.entry("warnings", List.of()),
+                        Map.entry("audio_script", "请到社区服务中心办理。"),
+                        Map.entry("rewrite_mode", "DETERMINISTIC_FALLBACK"),
+                        Map.entry("normalization_applied", true),
+                        Map.entry("normalization_rules", List.of("action_checklist.priority"))));
+
+        mvc.perform(post("/api/documents/{id}/process", documentId).header("Authorization", auth))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.processing_status").value("WAITING_REVIEW"));
+        mvc.perform(get("/api/documents/{id}/jobs", documentId).header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.data[0].reason_code").value("DETERMINISTIC_FALLBACK"));
+        Integer rewriteStatusCount = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM generated_content WHERE document_id=? AND content_type='REWRITE_STATUS'",
+                Integer.class, documentId);
+        org.junit.jupiter.api.Assertions.assertEquals(1, rewriteStatusCount);
     }
 
     private String login() throws Exception {

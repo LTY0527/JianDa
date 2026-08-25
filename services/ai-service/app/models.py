@@ -39,6 +39,34 @@ ContentKind = Literal[
     "ANTI_FRAUD",
     "COMMUNITY_SERVICE",
     "GENERAL_NEWS",
+    "SERVICE_GUIDE",
+    "ACTIVITY_NOTICE",
+    "POLICY_DOCUMENT",
+    "STANDARD_SPECIFICATION",
+    "ANTI_FRAUD",
+    "ELDERLY_SERVICE",
+    "NEWS_ARTICLE",
+    "GENERAL_PUBLIC_SERVICE",
+]
+DocumentKind = Literal[
+    "SERVICE_GUIDE",
+    "ACTIVITY_NOTICE",
+    "POLICY_DOCUMENT",
+    "STANDARD_SPECIFICATION",
+    "HEALTH_EDUCATION",
+    "ANTI_FRAUD",
+    "ELDERLY_SERVICE",
+    "NEWS_ARTICLE",
+    "GENERAL_PUBLIC_SERVICE",
+]
+PublishChannel = Literal[
+    "HEALTH",
+    "ELDERLY",
+    "MEALS",
+    "SERVICES",
+    "FRAUD",
+    "ACTIVITY",
+    "COMMUNITY",
 ]
 
 
@@ -61,6 +89,11 @@ class TextRequest(BaseModel):
     processing_job_id: int | None = None
     trace_id: str = ""
     content_kind: ContentKind | None = None
+    prompt_version: Literal["v1", "v1.1", "web-v1.1"] | None = None
+
+
+class RewriteOnlyRequest(TextRequest):
+    fact_checkpoint: dict[str, object]
 
 
 class ExtractedField(BaseModel):
@@ -185,6 +218,23 @@ class ProcessingMetrics(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    source_char_count: int = 0
+    accessible_char_count: int = 0
+    summary_compression_ratio: float = 0
+    key_fact_count: int = 0
+    action_item_count: int = 0
+    trace_pass_rate: float = 0
+    hallucinated_field_count: int = 0
+    markdown_residue_count: int = 0
+    provider: str = "mock"
+    model: str = ""
+    http_status: int = 200
+    request_id: str = ""
+    response_fingerprint: str = ""
+    rewrite_mode: Literal["MODEL", "DETERMINISTIC_FALLBACK"] = "MODEL"
+    rewrite_attempts: int = 1
+    normalization_applied: bool = False
+    normalization_rules: list[str] = Field(default_factory=list)
 
 
 class StepCard(BaseModel):
@@ -193,6 +243,51 @@ class StepCard(BaseModel):
     order: int = Field(ge=1)
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)
+
+
+class ActionChecklistItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: str = Field(min_length=1)
+    priority: Literal["立即", "近期", "了解即可"]
+    source_quote: str = Field(min_length=1)
+    segment_id: int
+
+
+class KeyFactItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    label: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+    source_quote: str = Field(min_length=1)
+    segment_id: int
+
+
+class FaqItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    question: str = Field(min_length=1)
+    answer: str = Field(min_length=1)
+    source_quote: str = Field(min_length=1)
+    segment_id: int | None = None
+
+
+class ContentScope(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    national_or_local: Literal["全国", "地方", "具体机构", "原文未说明"]
+    applicable_region: str | None = None
+    needs_personal_action: bool | None = None
+
+
+class DocumentOutlineItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    title: str = Field(min_length=1)
+    page_no: int = Field(ge=1)
+    segment_ids: list[int] = Field(default_factory=list)
+    summary: str = ""
+
+
+class TypeSpecificFact(TraceableItem):
+    label: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+    confidence: float = Field(ge=0, le=1)
 
 
 class AnalyzeResult(BaseModel):
@@ -211,7 +306,27 @@ class AnalyzeResult(BaseModel):
     result_delivery: list[ResultDelivery] = Field(default_factory=list)
     deadline_rules: list[DeadlineRule] = Field(default_factory=list)
     amendments: list[Amendment] = Field(default_factory=list)
+    quick_summary: list[str] = Field(default_factory=list)
+    why_it_matters: list[str] = Field(default_factory=list)
+    action_checklist: list[ActionChecklistItem] = Field(default_factory=list)
+    key_facts: list[KeyFactItem] = Field(default_factory=list)
+    common_mistakes: list[str] = Field(default_factory=list)
+    faq: list[FaqItem] = Field(default_factory=list)
+    scope: ContentScope | None = None
+    uncertainties: list[str] = Field(default_factory=list)
+    document_kind: DocumentKind = "GENERAL_PUBLIC_SERVICE"
+    document_outline: list[DocumentOutlineItem] = Field(default_factory=list)
+    section_summaries: list[DocumentOutlineItem] = Field(default_factory=list)
+    standard_sections: list[TypeSpecificFact] = Field(default_factory=list)
+    policy_sections: list[TypeSpecificFact] = Field(default_factory=list)
+    health_guidance: list[TypeSpecificFact] = Field(default_factory=list)
     metrics: ProcessingMetrics = Field(default_factory=ProcessingMetrics)
+    rewrite_mode: Literal["MODEL", "DETERMINISTIC_FALLBACK"] = "MODEL"
+    normalization_applied: bool = False
+    normalization_rules: list[str] = Field(default_factory=list)
+    suggested_publish_channel: PublishChannel = "COMMUNITY"
+    channel_confidence: float = Field(default=0.35, ge=0, le=1)
+    channel_reason: str = "未识别到明确频道特征，建议由管理员根据原文确认"
 
 
 class FactField(BaseModel):
@@ -248,6 +363,13 @@ class FactExtractionResponse(BaseModel):
     result_delivery: list[ResultDelivery] = Field(default_factory=list)
     deadline_rules: list[DeadlineRule] = Field(default_factory=list)
     amendments: list[Amendment] = Field(default_factory=list)
+    uncertain_fields: list[str] = Field(default_factory=list)
+    document_kind: DocumentKind = "GENERAL_PUBLIC_SERVICE"
+    document_outline: list[DocumentOutlineItem] = Field(default_factory=list)
+    section_summaries: list[DocumentOutlineItem] = Field(default_factory=list)
+    standard_sections: list[TypeSpecificFact] = Field(default_factory=list)
+    policy_sections: list[TypeSpecificFact] = Field(default_factory=list)
+    health_guidance: list[TypeSpecificFact] = Field(default_factory=list)
 
 
 class RewriteResponse(BaseModel):
@@ -260,6 +382,15 @@ class RewriteResponse(BaseModel):
     warnings: list[str]
     term_explanations: dict[str, str]
     audio_script: str = Field(min_length=1)
+    quick_summary: list[str] = Field(default_factory=list)
+    why_it_matters: list[str] = Field(default_factory=list)
+    action_checklist: list[ActionChecklistItem] = Field(default_factory=list)
+    key_facts: list[KeyFactItem] = Field(default_factory=list)
+    common_mistakes: list[str] = Field(default_factory=list)
+    faq: list[FaqItem] = Field(default_factory=list)
+    terms: dict[str, str] = Field(default_factory=dict)
+    scope: ContentScope | None = None
+    uncertainties: list[str] = Field(default_factory=list)
 
     @field_validator("plain_text", "audio_script")
     @classmethod
@@ -283,13 +414,35 @@ class Segment(BaseModel):
     text: str
     start_offset: int
     end_offset: int
+    raw_text: str = ""
+
+
+class PageExtractionQuality(BaseModel):
+    page_no: int = Field(ge=1)
+    quality: Literal["GOOD", "UNCERTAIN", "POOR"]
+    score: float = 0
+    selected_source: Literal["TEXT_LAYER", "OCR"]
+    text_char_count: int = 0
+    valid_chinese_ratio: float = 0
+    replacement_char_ratio: float = 0
+    whitespace_ratio: float = 0
+    image_count: int = 0
+    image_area_ratio: float = 0
+    text_block_count: int = 0
+    suspicious_garbage_ratio: float = 0
+    ocr_attempted: bool = False
+    ocr_error: str | None = None
+    needs_human_review: bool = False
 
 
 class ExtractTextResult(BaseModel):
     text: str
+    raw_text: str = ""
     page_count: int
     segments: list[Segment]
     extraction_method: str
+    ocr_page_count: int = 0
+    quality_pages: list[PageExtractionQuality] = Field(default_factory=list)
 
 
 class MetadataPreview(BaseModel):
@@ -309,19 +462,65 @@ class MetadataPreview(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ArticleDiscoveryRequest(BaseModel):
+    source_id: int = Field(gt=0)
+    source_url: str = Field(min_length=8, max_length=1500)
+    entry_url: str = Field(min_length=8, max_length=1500)
+    method: Literal["RSS", "ATOM", "SITEMAP", "JSON_LD", "SECTION", "MIXED"]
+    rate_limit_seconds: int = Field(default=3, ge=0, le=60)
+
+
+class ArticleDiscoveryCandidate(BaseModel):
+    source_id: int
+    discovered_url: str
+    canonical_url: str
+    title: str = ""
+    published_time: str | None = None
+    discovery_method: str
+    discovery_page: str
+    content_kind_candidate: str
+    discovered_at: str
+    dedup_key: str
+
+
+class ArticleDiscoveryResponse(BaseModel):
+    candidates: list[ArticleDiscoveryCandidate] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    filtered_navigation_count: int = 0
+
+
 class WebArticleRequest(BaseModel):
     url: str = Field(min_length=8, max_length=1500)
+    allow_image_candidates: bool = False
+    # Kept for rolling upgrades between backend and AI service containers.
     allow_image_download: bool = False
+    # 当后端已通过 source_registry 白名单人工审核时，
+    # 对政府网站全站 Disallow: / 或 robots 不可用的场景执行软豁免，
+    # 保留 robots_status 原值用于追溯。
+    robots_soft_allow: bool = False
 
 
 class WebArticleImage(BaseModel):
     url: str
     caption: str = ""
+    context_text: str = ""
+    relevance_score: int = 0
+    discovery_method: Literal["OPEN_GRAPH", "JSON_LD", "ARTICLE_IMAGE"] = "ARTICLE_IMAGE"
+    mime_type: str = ""
+    width: int | None = None
+    height: int | None = None
+    image_hash: str = ""
+    image_cached: bool = False
+    candidate_status: Literal["VALID", "REJECTED"] = "VALID"
+    rejection_reason: str = ""
 
 
 class WebArticlePreview(BaseModel):
     title: str
     source_name: str = ""
+    wechat_account_name: str = ""
+    account_subject: str = ""
+    wechat_biz: str = ""
     published_at: datetime | None = None
     author: str = ""
     cover_image_url: str = ""
@@ -345,3 +544,63 @@ class WebArticlePreview(BaseModel):
     original_page_available: bool = True
     images: list[WebArticleImage] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class AssistantStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["ready", "degraded", "disabled"]
+    external_enabled: bool
+    provider_configured: bool
+
+
+class AssistantEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=1, le=5)
+    title: str = Field(min_length=1, max_length=200)
+    slug: str = Field(min_length=1, max_length=180)
+    source_name: str = Field(min_length=1, max_length=160)
+    quote: str = Field(min_length=1, max_length=500)
+
+
+class AssistantAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=500)
+    evidence: list[AssistantEvidence] = Field(min_length=1, max_length=5)
+
+
+class AssistantAnswerResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str = Field(min_length=1, max_length=3000)
+    actions: list[str] = Field(default_factory=list, max_length=8)
+    used_citation_indexes: list[int] = Field(min_length=1, max_length=5)
+    model: str
+    request_id: str
+    prompt_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+    elapsed_ms: int = Field(ge=0)
+    answer_quality: Literal["normal", "short", "safety", "rich"] = "normal"
+
+
+class GeneralAssistantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=500)
+
+
+class GeneralAssistantResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str = Field(min_length=1, max_length=3000)
+    actions: list[str] = Field(default_factory=list, max_length=8)
+    model: str
+    request_id: str
+    prompt_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+    elapsed_ms: int = Field(ge=0)
+    answer_quality: Literal["normal", "short", "safety", "rich"] = "normal"

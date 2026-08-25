@@ -1,31 +1,33 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { Eye, FileInput, Info, Play, RefreshCw, X } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import WebArticleImportPanel from "../components/WebArticleImportPanel.vue";
 import { apiMessage } from "../api/http";
 import { publicSourceApi, type FixtureContent, type ImportRecord, type PublicSource } from "../api/publicSources";
 const router = useRouter();
-const tab = ref<"web" | "fixture" | "manual">("web"), sources = ref<PublicSource[]>([]), fixtures = ref<FixtureContent[]>([]), imports = ref<ImportRecord[]>([]);
+const route = useRoute();
+const devFixturesEnabled = import.meta.env.VITE_ENABLE_DEV_FIXTURES === "true";
+const tab = ref<"web" | "fixture" | "manual">(route.query.mode === "manual" ? "manual" : "web"), sources = ref<PublicSource[]>([]), fixtures = ref<FixtureContent[]>([]), imports = ref<ImportRecord[]>([]);
 const preview = ref<Record<string, unknown> | null>(null), loading = ref(true), busyId = ref<string | number | null>(null), error = ref(""), success = ref("");
 const manual = reactive({ sourceId: 0, title: "", sourceUrl: "", publishedAt: new Date().toISOString().slice(0, 10), category: "健康", body: "" });
 const selectedSource = computed(() => sources.value.find((item) => item.id === manual.sourceId));
 const statusText: Record<string, string> = { UPLOADED: "待处理", PROCESSING: "处理中", WAITING_REVIEW: "待审核", REVIEWED: "已审核", PUBLISHED: "已发布", FAILED: "处理失败", WITHDRAWN: "已撤回" };
-async function load() { loading.value = true; error.value = ""; try { const [a,b,c] = await Promise.all([publicSourceApi.sources(), publicSourceApi.fixtures(), publicSourceApi.imports()]); sources.value=a.data.data.filter(s=>s.enabled); fixtures.value=b.data.data; imports.value=c.data.data; if(!manual.sourceId&&sources.value.length) manual.sourceId=sources.value[0].id; } catch(cause){error.value=apiMessage(cause)} finally{loading.value=false} }
+async function load() { loading.value = true; error.value = ""; try { const [a,c] = await Promise.all([publicSourceApi.sources(), publicSourceApi.imports()]); sources.value=a.data.data.filter(s=>s.enabled); imports.value=c.data.data; if(devFixturesEnabled) fixtures.value=(await publicSourceApi.fixtures()).data.data; if(!manual.sourceId&&sources.value.length) manual.sourceId=sources.value[0].id; } catch(cause){error.value=apiMessage(cause)} finally{loading.value=false} }
 async function importFixture(item: FixtureContent){busyId.value=item.fixtureId;error.value="";success.value="";try{await publicSourceApi.importFixture(item.fixtureId);success.value=`“${item.title}”已导入，等待发起 AI 处理。`;await load()}catch(cause){error.value=apiMessage(cause)}finally{busyId.value=null}}
 async function importManual(){const source=selectedSource.value;if(!source)return;busyId.value="manual";error.value="";success.value="";try{await publicSourceApi.importManual({sourceId:source.id,title:manual.title,sourceName:source.source_name,sourceType:source.source_type,sourceUrl:manual.sourceUrl,publisher:source.publisher,publishedAt:`${manual.publishedAt}T00:00:00`,body:manual.body,category:manual.category});success.value=`“${manual.title}”已导入，等待发起 AI 处理。`;Object.assign(manual,{title:"",sourceUrl:"",body:""});await load()}catch(cause){error.value=apiMessage(cause)}finally{busyId.value=null}}
 async function showPreview(id:number){try{preview.value=(await publicSourceApi.preview(id)).data.data}catch(cause){error.value=apiMessage(cause)}}
-async function process(record:ImportRecord){busyId.value=record.id;error.value="";try{await publicSourceApi.process(record.id);await router.push(`/documents/${record.id}/review`)}catch(cause){error.value=apiMessage(cause);await load()}finally{busyId.value=null}}
+async function process(record:ImportRecord){busyId.value=record.id;error.value="";try{await publicSourceApi.process(record.id);await router.push(`/documents/${record.id}/process`)}catch(cause){error.value=apiMessage(cause);await load()}finally{busyId.value=null}}
 async function recrawl(record:ImportRecord){busyId.value=`recrawl-${record.id}`;error.value="";success.value="";try{await publicSourceApi.recrawlWebArticle(record.id);success.value=`“${record.title}”已重新采集，请发起 AI 处理。`;await load()}catch(cause){error.value=apiMessage(cause)}finally{busyId.value=null}}
 function webImported(documentId:number){success.value=`网页文章已导入为文档 ${documentId}，正在进入处理页。`}
 onMounted(load);
 </script>
 <template>
-<div><PageHeader title="权威公开信息导入" description="从白名单来源导入公开内容，复用现有 AI、审核、发布和撤回流程。"><RouterLink class="btn secondary" to="/public-sources">管理权威来源</RouterLink></PageHeader>
+<div><PageHeader title="添加内容" description="粘贴网页链接或手工录入公开信息，保存后统一进入处理和人工审核。" :breadcrumbs="['内容中心', '添加内容']"><RouterLink class="btn secondary" to="/public-sources">查看采集与来源</RouterLink></PageHeader>
 <div class="info-note"><Info :size="20"/><span>系统只采集白名单中的公开网页并遵守 robots.txt，不会抓取任意站点；重复 URL 或相同正文会被拦截，所有内容须人工审核后才能发布。</span></div>
 <div v-if="success" class="inline-success">{{success}}</div><div v-if="error" class="inline-error">{{error}}</div>
-<section class="panel import-workbench"><div class="import-tabs"><button :class="{active:tab==='web'}" @click="tab='web'">导入网页文章</button><button :class="{active:tab==='fixture'}" @click="tab='fixture'">本地示例导入</button><button :class="{active:tab==='manual'}" @click="tab='manual'">手工录入</button></div>
+<section class="panel import-workbench"><div class="import-tabs"><button :class="{active:tab==='web'}" @click="tab='web'">粘贴网页链接</button><button v-if="devFixturesEnabled" :class="{active:tab==='fixture'}" @click="tab='fixture'">开发示例</button><button :class="{active:tab==='manual'}" @click="tab='manual'">手工录入</button></div>
 <div v-if="tab==='web'" class="web-import">
   <WebArticleImportPanel @imported="webImported" />
 </div>

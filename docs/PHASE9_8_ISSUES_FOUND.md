@@ -1,0 +1,35 @@
+# Phase 9.8 问题台账
+
+| 编号 | 级别 | 问题 | 状态 |
+| --- | --- | --- | --- |
+| P98-001 | P0 | `action_checklist.priority` 等非事实展示字段格式错误会拖垮整篇 rewrite | PARTIAL |
+| P98-002 | P0 | PDF 页面只以“文字是否为空”决定 OCR | DONE |
+| P98-003 | P0 | PNG/JPG 上传未进入 OCR | PARTIAL |
+| P98-004 | P0 | 官网发现失败类型和下一步不清晰 | PARTIAL |
+| P98-005 | P1 | 历史 WEB_ARTICLE 真实封面覆盖率不足 | FAILED |
+| P98-006 | P1 | 办事卡片可出现长文和 Markdown 残留 | PARTIAL |
+| P98-007 | P1 | 助手尚未优先识别邻里帖子问题 | PARTIAL |
+| P98-008 | P1 | 居民登录表单仍与“我的”页面耦合，帖子不支持图片 | PARTIAL |
+| P98-009 | P0 | Retry 子任务未到退避时间即被消费，且导入二次失败会错误切换为发现流程 | DONE |
+| P98-010 | P0 | 图文发帖先发布再绑定媒体且用 `MAX(id)` 取键，失败或并发时会留下公开/串绑帖子 | DONE |
+| P98-011 | P1 | 图片在尺寸检查前完整解码，可能被高像素压缩图耗尽内存 | DONE |
+| P98-012 | P1 | 当前部署关闭 Scheduler，过期 `next_run_at` 不会产生调度任务 | BLOCKED |
+| P98-013 | P1 | 真实官方来源仅 5 个，且大场/宝山高价值内容仅 4 个 | FAILED |
+| P98-014 | P1 | 31 篇 WEB_ARTICLE 仅 1 篇有真实文章图/自定义封面 | FAILED |
+| P98-015 | P1 | Assistant 当日预算耗尽导致真实 External 测试全部安全降级 | BLOCKED |
+| P98-016 | P1 | 真实管理员凭据未注入，Admin 全链路不可验收 | BLOCKED |
+
+## 续跑验证说明
+
+- P98-002：真实 72 页扫描件仅有 125 个文字层字符，系统采用 OCR 65 页；OCR 后仍 POOR 的 7 页不进入成功正文。
+- P98-003：统一路由与 JPEG/低质量测试已通过，但真实原始 JPG/PNG 通知仍受外部文件端点和材料缺口阻塞，所以不标 DONE。
+- P98-009：重试任务的到期时间写入 `crawl_job.discovered_at`，消费者只取已到期任务；IMPORT 失败保持 IMPORT；聚焦集成测试通过。
+- P98-010：发帖改为事务 + JDBC generated key；媒体绑定失败会回滚帖子，移除并发 `MAX(id)`。
+- P98-011：先通过 ImageIO reader 元数据检查尺寸/像素上限，再进行完整栅格解码。
+- P98-012：Job 28、29 已证明 Scheduler 路径曾真实成功；但当前容器非敏感配置为 `CRAWL_SCHEDULER_ENABLED=false`，来源 5 的过期 `next_run_at` 在重部署后没有触发新 Job。需在明确启用配置的真实运行批次重验，不能用历史结果替代当前门禁。
+- P98-013：MySQL 只读盘点为 5 个已登记来源、大场/宝山相关 WEB_ARTICLE 4 个、已发布 1 个；没有伪造第 6 来源或未经确认批量保存/发布候选。
+- P98-014：WEB_ARTICLE 共 31，真实文章图/自定义封面 1，缓存成功 1，默认图或待补齐 30；覆盖率约 3.23%，图片开关存在不能替代历史回填。
+- P98-015：真实 Assistant Playwright 在 2026-08-24 运行时，当日已有 30 calls / 22,486 tokens，应用预算门禁返回 BUDGET_LIMIT；没有清库、调高预算或绕过门禁，External Assistant 门禁保持 BLOCKED。
+- P98-016：真实 Admin 浏览器测试依赖显式环境变量注入的管理员密码；当前未注入，未伪造 JWT 或绕过认证，Admin REAL 门禁保持 BLOCKED。
+
+只在真实复现或代码审计后更新状态，不用历史 Mock 测试冲淡真实失败。

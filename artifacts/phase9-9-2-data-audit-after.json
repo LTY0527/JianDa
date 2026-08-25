@@ -1,0 +1,8 @@
+{
+  "audit_date": "2026-08-25",
+  "withdrawn_document_ids": [14, 15, 16, 17, 18, 30, 71],
+  "national_shared_document_ids": [27, 31, 32, 34, 62, 67, 68, 78],
+  "local_town": { "document_id": 63, "region_code": "310113102" },
+  "public_counts": { "310113102": 8, "310113109": 7, "310113112": 7 },
+  "wrong_local_cross_region": 0
+}

@@ -26,12 +26,12 @@ async function authenticate(page: Page) {
     localStorage.setItem(
       "jianda_user_info",
       JSON.stringify({
-        id: 2,
-        organizationId: 2,
-        username: "org_admin",
-        displayName: "机构管理员",
-        role: "ORG_ADMIN",
-        organizationName: "简达演示机构",
+        id: 1,
+        organizationId: 1,
+        username: "platform_admin",
+        displayName: "平台管理员",
+        role: "PLATFORM_ADMIN",
+        organizationName: "简达平台",
       }),
     );
   });
@@ -52,7 +52,7 @@ test.beforeEach(async ({ page }) => {
 test("上传页可预览网页文章并使用真实文档 ID 进入处理页", async ({
   page,
 }) => {
-  await page.route("**/api/web-articles/preview", (route) =>
+  await page.route("**/api/web-articles/preview-any", (route) =>
     route.fulfill(
       api({
         title: "三伏天老年人健康提示",
@@ -67,11 +67,21 @@ test("上传页可预览网页文章并使用真实文档 ID 进入处理页", a
         robots_status: "ALLOWED",
         warnings: ["未发现可安全使用的原图，将采用分类默认图"],
         image_cached: false,
+        external_source_verified: true,
       }),
     ),
   );
+  await page.route("**/api/public-sources", (route) =>
+    route.fulfill(api([])),
+  );
+  await page.route("**/api/public-sources/imports", (route) =>
+    route.fulfill(api([])),
+  );
   await page.route("**/api/web-articles/import", (route) =>
     route.fulfill(api({ documentId: 27, imageReviewRequired: true })),
+  );
+  await page.route("**/api/documents/27/process", (route) =>
+    route.fulfill(api({ documentId: 27, status: "WAITING_REVIEW" })),
   );
   await page.route("**/api/documents/27", (route) =>
     route.fulfill(
@@ -99,19 +109,20 @@ test("上传页可预览网页文章并使用真实文档 ID 进入处理页", a
     ),
   );
 
-  await page.goto(`${institutionUrl}/documents/upload`);
-  await page.getByRole("button", { name: "导入网页文章" }).click();
+  await page.goto(`${institutionUrl}/public-import`);
   await page
-    .getByLabel("官方文章 URL")
+    .getByLabel("公开网页 URL")
     .fill("https://www.news.cn/example/c.html");
   await page.getByRole("button", { name: "识别网页内容" }).click();
 
   await expect(page.getByRole("heading", { name: "三伏天老年人健康提示" })).toBeVisible();
   await expect(page.getByText("新华网")).toBeVisible();
+  await page.getByText("技术信息", { exact: true }).click();
   await expect(page.getByText("https://www.news.cn/example/c.html")).toBeVisible();
-  await expect(page.getByText("robots：ALLOWED")).toBeVisible();
+  await expect(page.getByText("抓取规则")).toBeVisible();
+  await expect(page.getByText("ALLOWED")).toBeVisible();
 
-  await page.getByRole("button", { name: "导入并开始处理" }).click();
+  await page.getByRole("button", { name: "从可信来源导入" }).click();
   await expect(page).toHaveURL(
     `${institutionUrl}/documents/27/process?imported=web`,
   );
@@ -124,11 +135,10 @@ test("工作台和材料列表将网页文章计入待审核", async ({ page }) 
   );
 
   await page.goto(institutionUrl);
-  await expect(page.getByText("等待审核").locator("..").getByText("1")).toBeVisible();
-  await expect(
-    page.getByRole("cell", { name: /三伏天老年人健康提示/ }),
-  ).toBeVisible();
-  await expect(page.getByText(/新华网.*健康.*2026-07-26/)).toBeVisible();
+  await expect(page.getByText("待审核").locator("..").getByText("1")).toBeVisible();
+  const todo = page.getByRole("listitem").filter({ hasText: "三伏天老年人健康提示" });
+  await expect(todo).toBeVisible();
+  await expect(todo).toContainText(/新华网.*健康.*2026年7月26日/);
 
   await page.goto(`${institutionUrl}/documents`);
   await expect(page.getByText("三伏天老年人健康提示")).toBeVisible();
@@ -214,6 +224,9 @@ test("网页文章审核页读取快照且不会请求 PDF 原文件", async ({ 
         },
       ]),
     ),
+  );
+  await page.route("**/api/web-articles/27/image-candidates", (route) =>
+    route.fulfill(api([])),
   );
 
   await page.setViewportSize({ width: 1440, height: 900 });

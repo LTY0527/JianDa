@@ -1,12 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
-import fs from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
+import { acceptanceArtifactPath } from "./support/acceptanceArtifacts";
 
-const institutionUrl = "http://127.0.0.1:5173";
-const h5Url = "http://127.0.0.1:5174";
-const acceptanceArtifactDir = path.resolve("artifacts/phase7-3");
-fs.mkdirSync(acceptanceArtifactDir, { recursive: true });
+const institutionUrl =
+  process.env.JIANDA_INSTITUTION_TEST_URL ?? "http://127.0.0.1:5173";
+const h5Url = process.env.JIANDA_H5_TEST_URL ?? "http://127.0.0.1:5174";
 
 async function login(page: Page, username: string) {
   await page.goto(`${institutionUrl}/login`);
@@ -45,23 +44,24 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(h5Url);
     const navigation = page.getByRole("navigation", { name: "主要导航" });
-    for (const label of ["首页", "听一听", "简达助手", "办事", "我的"]) {
+    for (const label of ["首页", "邻里", "简达助手", "服务", "我的"]) {
       await expect(navigation.getByRole("link", { name: label, exact: true })).toBeVisible();
     }
-    await expect(page.getByRole("heading", { name: "重要提醒" })).toBeVisible();
-    await page.getByRole("link", { name: "查看全部权威资讯" }).click();
+    await expect(page.getByRole("heading", { name: "推荐内容" })).toBeVisible();
+    await page.getByRole("link", { name: "查看全部" }).click();
     await expect(page.getByRole("heading", { name: "权威资讯" })).toBeVisible();
     await page.getByRole("button", { name: "健康", exact: true }).click();
     await page.getByRole("button", { name: "重要", exact: true }).click();
     await expect(page.locator(".channel-tabs .active")).toHaveText("健康");
-    await navigation.getByRole("link", { name: "办事", exact: true }).click();
+    await navigation.getByRole("link", { name: "服务", exact: true }).click();
     await expect(page.getByRole("heading", { name: "办事行动中心" })).toBeVisible();
     await page.getByLabel("服务对象").selectOption("老年人");
     await expect(page.getByText(/\d+ 个事项/)).toBeVisible();
     await navigation.getByRole("link", { name: "简达助手", exact: true }).click();
     await expect(page.getByRole("heading", { name: "简达助手" })).toBeVisible();
     await navigation.getByRole("link", { name: "我的", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "游客使用" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "游客浏览" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "居民登录" })).toBeVisible();
   });
 
   test("用户端在 375、768 和 1440 宽度无横向溢出", async ({ page }) => {
@@ -96,7 +96,11 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
   });
   test("平台管理员导入、处理、审核、发布并撤回权威公开信息", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    test.skip(
+      process.env.RUN_MUTATING_E2E !== "1",
+      "该流程会调用当前 AI Provider 并写入本地业务数据，仅在显式授权时运行",
+    );
     test.setTimeout(90_000);
     const consoleErrors: string[] = [];
     page.on("console", (message) => {
@@ -110,6 +114,7 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
       page.getByRole("heading", { name: "权威公开信息导入" }),
     ).toBeVisible();
 
+    await page.getByRole("button", { name: "本地示例导入" }).click();
     await expect(page.locator(".fixture-list article")).toHaveCount(3);
     const runId = Date.now();
     const title = "高血压患者夏季日常管理提示（人工验收）";
@@ -167,7 +172,14 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await expect(
       page.getByRole("heading", { name: "内容已成功发布" }),
     ).toBeVisible();
-    await page.screenshot({ path: path.join(acceptanceArtifactDir, "admin-publish-success-1440.png"), fullPage: true });
+    await page.screenshot({
+      path: acceptanceArtifactPath(
+        testInfo,
+        "admin-publish-success-1440.png",
+        page.viewportSize() ?? { width: 1440, height: 900 },
+      ),
+      fullPage: true,
+    });
     const publicLink = page.getByRole("link", { name: "打开用户端" });
     const href = await publicLink.getAttribute("href");
     expect(href).toMatch(new RegExp("/guide/guide-[0-9]+$"));

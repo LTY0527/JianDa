@@ -1,0 +1,2 @@
+POST /payments (planId=1, method=ALIPAY, 5x) p95=26ms status=200 sessionId=807fc46e-55f0-41ab-a4ca-0ee89c760e4a
+[19,22,22,25,26]

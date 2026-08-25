@@ -1,11 +1,14 @@
 from pathlib import Path
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 
-from app.extraction import extract_file
+import app.extraction as extraction
+from app.extraction import OcrUnavailableError, extract_file, render_pdf_first_page
 from app.main import app
-from app.models import TextRequest
+from app.providers.external import ExternalProviderError
+from app.models import MetadataPreview, TextRequest
 from app.providers.mock import MockProvider
 
 
@@ -107,6 +110,186 @@ def test_pdf_extraction_saves_one_traceable_segment_per_page() -> None:
         pdf_path.unlink(missing_ok=True)
 
 
+def _insert_scanned_page(document: fitz.Document) -> None:
+    page = document.new_page(width=595, height=842)
+    pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 400, 200), False)
+    pixmap.clear_with(255)
+    page.insert_image(fitz.Rect(72, 72, 472, 272), stream=pixmap.tobytes("png"))
+
+
+def test_scanned_pdf_uses_page_aware_local_ocr(monkeypatch) -> None:
+    pdf_path = Path(__file__).with_name("_generated-scanned.pdf")
+    try:
+        document = fitz.open()
+        _insert_scanned_page(document)
+        document.save(pdf_path)
+        document.close()
+        monkeypatch.setattr(
+            extraction,
+            "_ocr_page_text",
+            lambda page: "大场镇社区服务扫描通知",
+        )
+
+        result = extract_file(pdf_path)
+
+        assert result.extraction_method == "ocr"
+        assert result.page_count == 1
+        assert result.text == "大场镇社区服务扫描通知"
+        assert result.segments[0].page_no == 1
+        assert result.segments[0].text == result.text
+    finally:
+        pdf_path.unlink(missing_ok=True)
+
+
+def test_mixed_pdf_only_ocr_scanned_page(monkeypatch) -> None:
+    pdf_path = Path(__file__).with_name("_generated-mixed.pdf")
+    try:
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 72), "digital first page")
+        _insert_scanned_page(document)
+        document.save(pdf_path)
+        document.close()
+        calls: list[int] = []
+
+        def fake_ocr(page: fitz.Page) -> str:
+            calls.append(page.number + 1)
+            return "第二页扫描正文"
+
+        monkeypatch.setattr(extraction, "_ocr_page_text", fake_ocr)
+        result = extract_file(pdf_path)
+
+        assert calls == [2]
+        assert result.extraction_method == "pymupdf+ocr"
+        assert [item.page_no for item in result.segments] == [1, 2]
+        assert result.text == "digital first page\n第二页扫描正文"
+    finally:
+        pdf_path.unlink(missing_ok=True)
+
+
+def test_thin_fake_text_layer_with_dominant_image_uses_ocr(monkeypatch) -> None:
+    pdf_path = Path(__file__).with_name("_generated-thin-layer.pdf")
+    try:
+        document = fitz.open()
+        page = document.new_page(width=595, height=842)
+        pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 900, 1200), False)
+        pixmap.clear_with(255)
+        page.insert_image(page.rect, stream=pixmap.tobytes("png"))
+        page.insert_text((20, 20), "fake")
+        document.save(pdf_path)
+        document.close()
+        monkeypatch.setattr(
+            extraction, "_ocr_page_text",
+            lambda page: "大场镇公开通知：请居民按时到社区服务中心办理。",
+        )
+
+        result = extract_file(pdf_path)
+
+        assert result.extraction_method == "ocr"
+        assert result.ocr_page_count == 1
+        assert result.quality_pages[0].selected_source == "OCR"
+        assert "社区服务中心" in result.text
+        assert result.segments[0].raw_text == "fake"
+    finally:
+        pdf_path.unlink(missing_ok=True)
+
+
+def test_png_upload_enters_real_ocr_pipeline(monkeypatch) -> None:
+    image_path = Path(__file__).with_name("_generated-notice.png")
+    try:
+        pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 800, 600), False)
+        pixmap.clear_with(255)
+        image_path.write_bytes(pixmap.tobytes("png"))
+        monkeypatch.setattr(
+            extraction, "_ocr_page_text",
+            lambda page: "图片通知：8月25日在大场镇社区服务中心办理。",
+        )
+
+        result = extract_file(image_path)
+
+        assert result.page_count == 1
+        assert result.extraction_method == "ocr"
+        assert result.ocr_page_count == 1
+        assert result.segments[0].page_no == 1
+        assert "8月25日" in result.text
+    finally:
+        image_path.unlink(missing_ok=True)
+
+
+def test_scanned_pdf_reports_local_ocr_failure(monkeypatch) -> None:
+    pdf_path = Path(__file__).with_name("_generated-ocr-failure.pdf")
+    try:
+        document = fitz.open()
+        _insert_scanned_page(document)
+        document.save(pdf_path)
+        document.close()
+
+        def fail_ocr(page: fitz.Page) -> str:
+            raise OcrUnavailableError("扫描页需要本地 OCR，但 OCR 引擎不可用")
+
+        monkeypatch.setattr(extraction, "_ocr_page_text", fail_ocr)
+        with pytest.raises(OcrUnavailableError, match="OCR 引擎不可用"):
+            extract_file(pdf_path)
+    finally:
+        pdf_path.unlink(missing_ok=True)
+
+
+def test_pdf_first_page_cover_is_real_png() -> None:
+    pdf_path = Path(__file__).with_name("_generated-cover.pdf")
+    try:
+        document = fitz.open()
+        page = document.new_page(width=595, height=842)
+        page.insert_text((72, 100), "JianDa public service document")
+        document.save(pdf_path)
+        document.close()
+
+        image = render_pdf_first_page(pdf_path, target_width=900)
+        assert image.startswith(b"\x89PNG\r\n\x1a\n")
+        assert len(image) > 1000
+    finally:
+        pdf_path.unlink(missing_ok=True)
+
+
+def test_metadata_preview_defaults_to_no_llm(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "external")
+    monkeypatch.setattr("app.main.detect_metadata", lambda path, filename: (
+        MetadataPreview(
+            title="待确认材料", source_name="", document_number="", source_type="",
+            authority_status="UNCONFIRMED", confidence=0.3, evidence_quote="",
+            evidence_type="FILENAME", page_no=1, warnings=[]
+        ),
+        "需要智能补充的正文",
+    ))
+
+    class ForbiddenExternal:
+        def preview_metadata(self, *args, **kwargs):
+            raise AssertionError("default metadata preview must not call external LLM")
+
+    monkeypatch.setattr("app.main.ExternalLlmProvider", ForbiddenExternal)
+    response = TestClient(app).post(
+        "/internal/metadata-preview",
+        files={"file": ("material.pdf", b"%PDF", "application/pdf")},
+    )
+    assert response.status_code == 200
+    assert response.json()["authority_status"] == "UNCONFIRMED"
+
+
+def test_assistant_status_requires_no_secret(monkeypatch) -> None:
+    client = TestClient(app)
+    monkeypatch.delenv("EXTERNAL_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("ASSISTANT_EXTERNAL_ENABLED", raising=False)
+    assert client.get("/internal/assistant/status").json() == {
+        "status": "disabled",
+        "external_enabled": False,
+        "provider_configured": False,
+    }
+
+    monkeypatch.setenv("ASSISTANT_EXTERNAL_ENABLED", "true")
+    assert client.get("/internal/assistant/status").json()["status"] == "degraded"
+    monkeypatch.setenv("EXTERNAL_LLM_API_KEY", "configured-for-test")
+    assert client.get("/internal/assistant/status").json()["status"] == "ready"
+
+
 def test_health_and_unknown_analyze() -> None:
     client = TestClient(app)
     assert client.get("/health").json()["status"] == "ok"
@@ -117,6 +300,35 @@ def test_health_and_unknown_analyze() -> None:
     assert response.status_code == 200
     assert response.json()["fields"] == []
     assert response.json()["plain_text"] == "待人工填写。"
+
+
+def test_analyze_returns_structured_safe_provider_error(monkeypatch) -> None:
+    class FailedProvider:
+        def analyze(self, request):
+            raise ExternalProviderError(
+                "缺少必填字段：quick_summary",
+                error_code="LLM_SCHEMA_VALIDATION_FAILED",
+                stage="accessible_rewrite",
+                schema_version="web-v1.1",
+                json_path="$.quick_summary",
+                keyword="required",
+                response_fingerprint="0123456789abcdef",
+                request_id="req-safe",
+                retryable=True,
+            )
+
+    monkeypatch.setattr("app.main.get_provider", lambda: FailedProvider())
+    response = TestClient(app).post(
+        "/internal/analyze",
+        json={"title": "资讯", "text": "短测试正文", "document_type": "public_news"},
+    )
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["error_code"] == "LLM_SCHEMA_VALIDATION_FAILED"
+    assert detail["json_path"] == "$.quick_summary"
+    assert detail["request_id"] == "req-safe"
+    assert detail["retryable"] is True
+    assert "短测试正文" not in response.text
 
 
 def test_public_news_has_warning() -> None:

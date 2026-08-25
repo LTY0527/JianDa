@@ -1,0 +1,106 @@
+# Phase 9.3——资讯采集运营化、配图审核与连续阅读体验
+
+## 起点
+
+- 起始提交：3ca103f
+- 当前分支：feat/phase9-3-crawl-operations-v1
+- Schema 恢复基线：3ca3c9d、fcc45af、3ca103f
+
+## 阶段目标
+
+1. 在既有 source_registry、crawl_job 与 WebArticleService 基础上增加来源运营配置和安全调度框架。
+2. 建立 RSS/Atom、Sitemap、JSON-LD、栏目链接的有界文章发现。
+3. 增加图片候选元数据、权利审核和公开封面安全回退。
+4. 提供采集任务中心、失败重试、内容变化版本保护。
+5. 增加公开资讯上一篇/下一篇、路由重载、桌面点击、移动滑动和阅读设置。
+6. 默认关闭定时采集真实 AI，使用文章数与 token 双预算保护。
+
+## 里程碑
+
+- [x] 数据库与配置基础
+- [x] 来源管理和调度锁
+- [x] 通用文章发现与 Fixture
+- [x] 任务中心与错误队列
+- [x] 图片候选审核
+- [x] 内容变化版本
+- [x] 连续阅读与设置
+- [x] 首页小幅优化
+- [x] 隔离 Playwright、Docker 和离线受控采集验证
+
+## 安全边界
+
+- 只处理启用白名单来源，遵守 robots、SSRF 和单站限速。
+- 新来源默认停用，默认禁止图片公开缓存并必须人工审核。
+- 未确认图片不得成为用户端公开封面。
+- CRAWL_SCHEDULER_ENABLED 和 CRAWL_AUTO_AI_ENABLED 默认 false。
+- Fixture 不含真实完整文章；自动测试不访问真实网络和真实模型。
+- 不自动审核、不自动发布、不 push、不删除 Docker volumes。
+
+## 测试结果
+
+Phase 9.3-A 连续阅读收尾（2026-07-29）：
+
+- 后端公开接口集成测试 4 项通过，其中新增 3 项覆盖 pinned、importance、published_at、id 稳定排序，同分类逐方向优先及全局回退、撤回过滤和首尾边界。
+- Playwright Chromium 连续阅读测试 3 项通过，覆盖桌面侧边按钮、键盘、浏览器前进后退、路由加载状态隔离、375px 左右滑动、交互控件排除、pointercancel、纵向与短距离手势、正文选择和首尾禁用状态。
+- user-h5 与 institution-web 的 typecheck、生产构建均通过。
+- Phase 9.3-B 来源运营与调度锁集成测试 3 项通过：覆盖新来源安全默认值、URL/域名/协议校验、平台管理员权限隔离、更新与启停、敏感字段响应排除、租约竞争、持有者释放和过期接管；V13 在 H2 MySQL 模式下由 Flyway 成功升级。
+- institution-web 来源运营页面 typecheck 与生产构建通过，新增编辑、启停确认、调度和预算摘要、加载/空状态与错误摘要。
+- Phase 9.3-C 离线文章发现测试 14 项通过：覆盖 RSS 2.0、Atom、Sitemap、Sitemap index、JSON-LD Article/NewsArticle、栏目页链接、相对地址、canonical 去 fragment/default port、重复过滤、非法协议、外域链接、空栏目、XML 错误/深度限制、响应体上限、手动重定向上限、robots、SSRF/DNS 与单域限速复用。
+- 后端发现接入与来源回归测试 5 项通过：仅启用白名单来源可发现、同源入口校验、候选二次去重、部分失败状态、平台管理员权限边界，并确认发现过程不创建 published_item、不审核、不发布且不调用 AI 分析。
+- Phase 9.3-D 任务中心及来源/发现回归测试 9 项通过：覆盖 SUCCESS、PARTIAL_SUCCESS、FAILED、CANCELLED、DISABLED/PENDING/RUNNING 状态基础，任务计数、单条和批量重试、不可重试、最大 3 次、有界退避、同 URL 幂等、同来源租约竞争、取消释放、403 权限和 Authorization/Cookie/API Key/堆栈/URL 用户信息脱敏；V14 迁移成功。
+- institution-web 任务中心 typecheck 与生产构建通过，提供状态/来源筛选、任务详情、计数摘要、错误队列、单条/整批重试、取消确认和空状态。自动 AI 执行及图片审核未纳入本阶段。
+- Phase 9.3-E 后端版本、图片审核与任务回归 8 项通过：正文 hash 未变化不创建版本，变化后保存 canonical、版本根/版本号、旧新 SHA-256、采集时间和变更摘要；已发布版本保持 PUBLISHED 且公开指针不变，新版本进入 WAITING_REVIEW，多次无变化不增版本。
+- 图片候选从 OpenGraph、JSON-LD 和正文图片统一持久化 URL、来源页、方法、alt、尺寸、MIME、hash、缓存、权利和审核状态；Logo/二维码/广告/头像/图标/追踪像素、小尺寸及异常比例继续过滤。发布前必须由人工填写来源和许可说明并确认，拒绝或无候选时回退分类默认图。
+- ai-service 图片过滤回归 7 项、institution-web 图片候选审核 typecheck/生产构建通过；未调用真实 AI，未自动审核或发布。
+- 本阶段未调用真实 DeepSeek，未读取真实 .env。
+- Phase 9.3-F 增加持久化 `ai_processing_queue`、按日期/全局/来源原子预留与结算的 `ai_budget_usage` / `ai_budget_reservation`，以及只含来源、采集任务、材料、原因、预算类型、预计/实际 token、批准标记和 provider/model 非敏感标识的 `ai_execution_audit`。
+- 所有人工 `process` 和队列执行都在 `AiClient.analyze` 前完成预算判断；不足时正文、版本和事实检查点保持不变，状态为 `WAITING_BUDGET`，实际 token 固定为 0，返回原因和次日预算恢复时间，不计文章处理失败且没有自动反复重试。
+- 网页首次导入和新内容版本都会按正文 hash 同步 AI 队列。`CRAWL_AUTO_AI_ENABLED=false` 时仅进入 `WAITING_APPROVAL`；平台管理员批准后才可执行，产物仍是候选/草稿和 `WAITING_REVIEW`，不会自动审核或发布。
+- AI 服务失败时保留正文、版本和已有事实检查点，队列标记 `FAILED/AI_UNAVAILABLE`，允许再次人工批准并重试。审计不保存 key、Authorization、prompt 或响应全文。
+- Phase 9.3-F 离线 mock/stub 集成测试覆盖默认不调用、允许、来源/全局文章与 token 耗尽、过长、正文 hash 重复、并发预留、日期切换、人工批准及 AI 失败恢复；真实模型调用为 0。
+- 自动队列消费者只有在 `CRAWL_SCHEDULER_ENABLED=true` 且 `CRAWL_AUTO_AI_ENABLED=true` 时才消费有限批次；默认两个开关均为 false。预算等待和失败任务不会自动重新入队，必须由人工在恢复日期后执行或重新批准。元数据预览固定传递 `no_llm=true`，仅执行本地提取和规则识别。
+- Phase 9.3 功能实现已完成；当前收口仅保留真机人工验收和后续真实来源“只发现、不调用真实 AI、不发布”的影子运行。
+
+## 验收分层
+
+### 已实现
+
+- 来源安全默认值、显式启停、调度租约、发现适配器、错误队列、有限重试、版本保护、图片权利审核、AI 双预算和连续阅读均已接入主流程。
+- 自动调度、自动 AI、图片缓存和公开发布相互独立；默认关闭外部调用，任何采集结果都不能绕过人工审核。
+
+### 已自动测试
+
+- 普通 Playwright 不再写 `artifacts/phase7-3`；默认截图进入测试独立输出目录，显式验收目录也使用包含 spec、视口、运行 ID 和 worker 的唯一文件名。
+- 来源调度预算、PARTIAL_SUCCESS 重试、V2/图片候选、fixture 导入和 24px 连续阅读组合均使用 mock API 验收，不访问真实来源或真实 AI。
+- 2026-07-29 收口结果：AI 71 项通过，Maven 45 项通过，两端 typecheck/build 通过；默认全量 Playwright 75 项通过、9 项按外部调用/可变本地数据条件显式跳过、0 项失败。
+- Docker 的 MySQL、AI、Backend、Frontend 均为 healthy，8001、8080、8090、80 四个健康地址均返回 HTTP 200。
+- 具有模型调用和业务写入副作用的旧全链路测试仅在 `RUN_MUTATING_E2E=1` 时执行；默认回归不会调用当前 External Provider。
+
+### 待人工验收
+
+- 1440px 平台运营页和 375px 审核/H5 真机的视觉密度、长链接换行、确认弹窗及手势体验。
+- 候选图片版权/许可说明和正式来源命名口径。
+
+### 后续真实来源影子运行
+
+- 只对白名单授权来源执行有限发现，禁止真实 AI 与发布；记录发现、重复、跳过、失败和预算估算后再决定是否进入 Phase 9.4。
+
+## 阻塞问题
+
+暂无。工作区中 15 张 Phase 7.3 截图是进入本阶段前已存在的独立修改，不纳入功能提交且不丢弃。
+
+## Phase 9.4 验收断链修复补充
+
+- 图片候选权限与缓存权限已经拆分：`allow_image_candidates` 允许获取少量图片数据并生成
+  机构端候选，`allow_image_cache` 仅控制人工确认后的公开缓存；禁止缓存不再清空候选。
+- 图片发现覆盖 OpenGraph、JSON-LD、常见懒加载属性、srcset、picture/source 和 video
+  poster，保持站点无关；未审核图片仍不能公开。
+- 来源页提供只发现 URL、无副作用影子预览、创建 `WAITING_APPROVAL` 材料三种人工入口，
+  均不能绕过预算、白名单、robots、SSRF、限速、审核和发布门禁。
+- 平台运营数据已从工作台摘要扩展为独立 `/operations` 页面，继续仅使用数据库聚合。
+
+## 最终提交
+
+- bdc8501 feat(采集): 建立运营配置与任务数据基础
+- 354ba37 feat(阅读): 增加上一篇下一篇与左右滑动切换
+- Phase 9.3-A 连续阅读排序、手势边界与自动化验收提交待本次收尾生成。

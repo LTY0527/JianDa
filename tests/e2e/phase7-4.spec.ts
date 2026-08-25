@@ -38,7 +38,7 @@ async function installSpeechMock(context: import("@playwright/test").BrowserCont
 }
 
 test.describe("Phase 7.4 H5 navigation and speech", () => {
-  test("returns a cited retrieval answer through the H5 proxy", async ({ page }) => {
+  test("returns a cited reviewed-source answer through the H5 proxy", async ({ page }) => {
     await page.goto(`${h5Url}/assistant`);
     await page.getByLabel("输入您想了解的问题").fill("最近有哪些健康提醒？");
     const responsePromise = page.waitForResponse((response) =>
@@ -48,8 +48,14 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
     await page.getByRole("button", { name: "发送问题" }).click();
     const response = await responsePromise;
     expect(response.status()).toBe(200);
-    expect((await response.json()).data.mode).toBe("retrieval");
-    await expect(page.getByText("当前使用已审核内容检索回答")).toBeVisible();
+    const mode = (await response.json()).data.mode;
+    expect(["retrieval", "ai"]).toContain(mode);
+    await expect(
+      page.getByText(
+        mode === "ai" ? "已审核内容 + AI 整理" : "原文检索",
+        { exact: true },
+      ),
+    ).toBeVisible();
     await expect(page.getByRole("heading", { name: "回答依据" })).toBeVisible();
     await expect(page.locator(".assistant-citation").first()).toBeVisible();
   });
@@ -69,19 +75,21 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
     await page.getByRole("button", { name: "发送问题" }).click();
     await expect(page.getByText("助手服务繁忙，请稍后重新发送。")).toBeVisible();
     await page.getByRole("button", { name: "重新发送" }).click();
-    await expect(page.getByText("当前使用已审核内容检索回答")).toBeVisible();
+    await expect(
+      page.getByText(/^(原文检索|已审核内容 \+ AI 整理)$/),
+    ).toBeVisible();
   });
 
   test("uses five primary destinations and keeps news as a safe secondary page", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(h5Url);
     const navigation = page.getByRole("navigation", { name: "主要导航" });
-    for (const label of ["首页", "听一听", "简达助手", "办事", "我的"]) {
+    for (const label of ["首页", "邻里", "简达助手", "服务", "我的"]) {
       await expect(navigation.getByRole("link", { name: label, exact: true })).toBeVisible();
     }
     await expect(navigation.getByRole("link", { name: "资讯", exact: true })).toHaveCount(0);
-    await navigation.getByRole("link", { name: "听一听", exact: true }).click();
-    await expect(page).toHaveURL(`${h5Url}/listen`);
+    await navigation.getByRole("link", { name: "邻里", exact: true }).click();
+    await expect(page).toHaveURL(`${h5Url}/neighborhood`);
     await expect(page.getByRole("button", { name: "返回" })).toHaveCount(0);
     await page.goto(`${h5Url}/news`);
     await expect(page.getByRole("button", { name: "返回" })).toBeVisible();
@@ -108,6 +116,37 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
 
   test("continues a long reading in chunks and advances the listen queue", async ({ context, page }) => {
     await installSpeechMock(context);
+    await context.route("**/api/public/items", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({
+          code: 0,
+          data: [
+            {
+              id: 701,
+              slug: "listen-queue-a",
+              title: "连续收听测试甲",
+              summary: "第一条收听内容。",
+              source_name: "测试来源",
+              category: "健康",
+              content_kind: "HEALTH_EDUCATION",
+              published_at: "2026-07-29T10:00:00",
+            },
+            {
+              id: 702,
+              slug: "listen-queue-b",
+              title: "连续收听测试乙",
+              summary: "第二条收听内容。",
+              source_name: "测试来源",
+              category: "健康",
+              content_kind: "HEALTH_EDUCATION",
+              published_at: "2026-07-29T09:00:00",
+            },
+          ],
+        }),
+      }),
+    );
     await page.goto(`${h5Url}/listen`);
     await page.getByRole("button", { name: "一键播放" }).click();
     const firstTitle = await page.locator(".listen-now h2").textContent();

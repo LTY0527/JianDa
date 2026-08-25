@@ -4,12 +4,12 @@ import { useRoute, useRouter } from "vue-router";
 import {
   LayoutDashboard,
   Files,
-  FileCheck2,
-  CloudDownload,
   ScrollText,
   ChevronDown,
   HeartHandshake,
-  ShieldCheck,
+  RadioTower,
+  Activity,
+  BadgeCheck,
 } from "lucide-vue-next";
 import { currentUser } from "../auth";
 const route = useRoute();
@@ -17,16 +17,23 @@ const router = useRouter();
 const user = currentUser();
 const menus = computed(() => [
   { path: "/", label: "工作台", icon: LayoutDashboard },
-  { path: "/documents", label: "材料管理", icon: Files },
-  { path: "/published", label: "已发布内容", icon: FileCheck2 },
+  { path: "/documents", label: "内容中心", icon: Files },
   ...(user?.role === "PLATFORM_ADMIN"
     ? [
-        { path: "/public-sources", label: "权威来源管理", icon: ShieldCheck },
-        { path: "/public-import", label: "公开信息导入", icon: CloudDownload },
+        { path: "/public-sources", label: "采集与来源", icon: RadioTower },
+        { path: "/operations", label: "数据概览", icon: Activity },
+        { path: "/commercial", label: "商业运营", icon: BadgeCheck },
       ]
     : []),
-  { path: "/logs", label: "操作日志", icon: ScrollText },
+  { path: "/logs", label: "系统记录", icon: ScrollText },
 ]);
+function isActive(path: string) {
+  if (path === "/") return route.path === "/";
+  if (path === "/documents") {
+    return route.path.startsWith("/documents") || route.path === "/published" || route.path === "/public-import";
+  }
+  return route.path === path;
+}
 function logout() {
   localStorage.removeItem("jianda_token");
   localStorage.removeItem("jianda_user_info");
@@ -47,9 +54,7 @@ function logout() {
           :key="m.path"
           :to="m.path"
           :class="{
-            active:
-              route.path === m.path ||
-              (m.path === '/documents' && route.path.startsWith('/documents')),
+            active: isActive(m.path),
           }"
           ><component :is="m.icon" :size="19" /><span>{{
             m.label

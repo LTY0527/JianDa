@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.List;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -14,18 +15,24 @@ import org.springframework.transaction.annotation.Transactional;
 public class DemoDataInitializer implements ApplicationRunner {
     private final JdbcTemplate jdbc;
     private final PasswordEncoder passwordEncoder;
+    private final boolean demoContentEnabled;
 
-    public DemoDataInitializer(JdbcTemplate jdbc, PasswordEncoder passwordEncoder) {
+    public DemoDataInitializer(JdbcTemplate jdbc, PasswordEncoder passwordEncoder,
+            @Value("${jianda.demo-content-enabled:true}") boolean demoContentEnabled) {
         this.jdbc = jdbc;
         this.passwordEncoder = passwordEncoder;
+        this.demoContentEnabled = demoContentEnabled;
     }
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
         if (jdbc.queryForObject("SELECT COUNT(*) FROM organization", Integer.class) > 0) {
-            seedPublicSources();
-            seedPublishedCatalog();
+            if (demoContentEnabled) {
+                seedPublicSources();
+                seedPublishedCatalog();
+                seedResidentCommunity();
+            }
             return;
         }
         jdbc.update("INSERT INTO organization(name,code,type) VALUES (?,?,?)", "简达平台运营中心", "PLATFORM", "PLATFORM");
@@ -38,9 +45,38 @@ public class DemoDataInitializer implements ApplicationRunner {
                 "org_admin", password, "李敏", "ORG_ADMIN");
         jdbc.update("INSERT INTO staff_user(organization_id,username,password_hash,display_name,role) VALUES (2,?,?,?,?)",
                 "reviewer", password, "王芳", "REVIEWER");
-        seedPublishedGuide();
-        seedPublicSources();
-        seedPublishedCatalog();
+        if (demoContentEnabled) {
+            seedPublishedGuide();
+            seedPublicSources();
+            seedPublishedCatalog();
+            seedResidentCommunity();
+        }
+    }
+
+    private void seedResidentCommunity() {
+        String password = passwordEncoder.encode("Resident@123");
+        for (String[] resident : List.of(
+                new String[]{"demo_chen", "陈阿姨"}, new String[]{"demo_li", "李叔叔"},
+                new String[]{"demo_wang", "王老师"}, new String[]{"demo_zhou", "周师傅"},
+                new String[]{"demo_zhang", "张奶奶"})) {
+            Integer exists = jdbc.queryForObject("SELECT COUNT(*) FROM resident_user WHERE username=?", Integer.class, resident[0]);
+            if (exists != null && exists == 0) {
+                jdbc.update("INSERT INTO resident_user(username,password_hash,nickname,district,street_or_town,region_code,is_demo) "
+                                + "VALUES (?,?,?,?,?,?,TRUE)", resident[0], password, resident[1], "宝山区", "大场镇", "310113102");
+            }
+        }
+        Integer posts = jdbc.queryForObject("SELECT COUNT(*) FROM community_post WHERE is_demo=TRUE", Integer.class);
+        if (posts != null && posts == 0) {
+            seedDemoPost("demo_chen", "互助", "想请教大家，社区智能手机课堂在哪里查看报名通知？");
+            seedDemoPost("demo_li", "活动", "今天在简达看到了大场镇的活动通知，提醒大家先核对官方时间再出门。");
+            seedDemoPost("demo_wang", "最新", "邻里交流请不要发布身份证、银行卡和具体门牌等个人信息。");
+        }
+    }
+
+    private void seedDemoPost(String username, String category, String content) {
+        Long userId = jdbc.queryForObject("SELECT id FROM resident_user WHERE username=?", Long.class, username);
+        jdbc.update("INSERT INTO community_post(resident_user_id,category,content,region_code,district,street_or_town,is_demo) "
+                        + "VALUES (?,?,?,'310113102','宝山区','大场镇',TRUE)", userId, category, content);
     }
 
     private void seedPublicSources() {

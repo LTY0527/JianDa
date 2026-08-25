@@ -1,19 +1,355 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
 import { clearLocalLibrary, favoriteItems, historyItems, listenHistoryItems } from "../library";
-import { UserRound, Heart, Clock3, Headphones, Bell, Settings, SlidersHorizontal, Info, CircleHelp, ShieldCheck, ChevronRight, Trash2 } from "lucide-vue-next";
+import { residentLogout, residentMe, type ResidentProfile } from "../api";
+import { UserRound, Heart, Clock3, Headphones, Bell, Settings, Info, CircleHelp, ShieldCheck, ChevronRight, Trash2, LogOut, BadgeCheck } from "lucide-vue-next";
+const router = useRouter();
 const favoriteCount = ref(0); const historyCount = ref(0); const listenCount = ref(0);
-function load(){ favoriteCount.value=favoriteItems().length; historyCount.value=historyItems().length; listenCount.value=listenHistoryItems().length; }
-function clear(){ if(window.confirm("确认清除本机收藏、浏览和收听历史吗？阅读设置将保留。")){ clearLocalLibrary(); load(); } }
-onMounted(()=>{load();window.addEventListener("jianda-library-change",load)}); onUnmounted(()=>window.removeEventListener("jianda-library-change",load));
+const profile = ref<ResidentProfile|null>(null);
+function loadLibrary(){ favoriteCount.value=favoriteItems().length; historyCount.value=historyItems().length; listenCount.value=listenHistoryItems().length; }
+function clear(){ if(window.confirm("确认清除本机收藏、浏览和收听历史吗？阅读设置将保留。")){ clearLocalLibrary(); loadLibrary(); } }
+async function restoreProfile(){ if(!localStorage.getItem("jianda_resident_token")) return; try{ profile.value=await residentMe(); }catch{ localStorage.removeItem("jianda_resident_token"); localStorage.removeItem("jianda_resident_profile"); } }
+async function logout(){ await residentLogout(); profile.value=null; await router.replace("/resident/login"); }
+onMounted(()=>{loadLibrary();restoreProfile();window.addEventListener("jianda-library-change",loadLibrary)}); onUnmounted(()=>window.removeEventListener("jianda-library-change",loadLibrary));
 const links = [
-  ["/favorites", Heart, "我的收藏", "仍在公开的资讯与办事", () => `${favoriteCount.value} 条`],
-  ["/history", Clock3, "历史浏览", "最近打开过的内容", () => `${historyCount.value} 条`],
-  ["/listen?tab=recent", Headphones, "最近收听", "继续播放在本机听过的内容", () => `${listenCount.value} 条`],
-  ["/settings", Settings, "阅读与语音设置", "字号、对比度和朗读速度", () => ""],
-  ["/settings", SlidersHorizontal, "内容偏好", "关注频道与首页最近浏览", () => ""],
+  ["/membership", BadgeCheck, "简达安心会员", "增值权益，核心公共服务永久免费", "开通", () => ""], ["/reminders", Bell, "我的提醒", "报名截止、活动与办理时间", "查看", () => ""], ["/favorites", Heart, "我的收藏", "仍在公开的资讯与办事", "查看", () => `${favoriteCount.value} 条`],
+  ["/history", Clock3, "历史浏览", "最近打开过的内容", "查看", () => `${historyCount.value} 条`], ["/listen?tab=recent", Headphones, "最近收听", "继续播放在本机听过的内容", "查看", () => `${listenCount.value} 条`],
+  ["/neighborhood", UserRound, "我的帖子与评论", "参与当前地区邻里互动", "查看", () => ""], ["/settings", Settings, "阅读与语音设置", "字号、对比度和朗读速度", "设置", () => ""],
+  ["/orders", Info, "我的订单", "已预约合作服务与订单状态", "查看", () => ""],
 ] as const;
 </script>
-<template><div class="h5-page"><H5Header /><main class="h5-main profile-page"><section class="guest-card"><span><UserRound /></span><div><h1>游客使用</h1><p>收藏、历史和偏好仅保存在当前设备，登录与注册后续开放。</p></div></section><section class="profile-links"><RouterLink v-for="link in links" :key="link[2]" :to="link[0]"><component :is="link[1]" /><span><b>{{ link[2] }}</b><small>{{ link[3] }}</small></span><em>{{ link[4]() }}</em><ChevronRight /></RouterLink></section><section class="profile-links secondary"><div><Bell /><span><b>办事提醒</b><small>提醒能力将在后续版本开放</small></span><em>未开启</em></div><div><CircleHelp /><span><b>帮助与反馈</b><small>查看使用说明和反馈渠道</small></span></div><div><ShieldCheck /><span><b>隐私说明</b><small>本机数据不会用于公开展示</small></span></div><div><Info /><span><b>关于简达</b><small>人工审核的适老化公共服务平台</small></span></div></section><button class="clear-local" type="button" @click="clear"><Trash2 />清除本机收藏和历史</button></main><BottomNav /></div></template>
+
+<template>
+  <div class="h5-page profile-page-new">
+    <H5Header/>
+    <main class="h5-main profile-page">
+      <RouterLink to="/membership" class="member-banner">
+        <span class="member-badge"><BadgeCheck/></span>
+        <div>
+          <b>简达安心会员</b>
+          <small>专属提醒 · 阅读偏好同步 · 合作服务权益；核心公共服务永久免费</small>
+        </div>
+        <ChevronRight/>
+      </RouterLink>
+      <section v-if="profile" class="profile-hero">
+        <div class="profile-avatar"><UserRound/></div>
+        <div class="profile-info">
+          <h1>{{ profile.nickname }}</h1>
+          <p>{{ profile.district }} · {{ profile.streetOrTown }}</p>
+          <small>账号 {{ profile.username }} · 地区 {{ profile.regionCode }}</small>
+        </div>
+        <button class="logout-btn" @click="logout"><LogOut/><span>退出</span></button>
+      </section>
+      <section v-else class="profile-hero profile-hero--guest">
+        <div class="profile-avatar"><UserRound/></div>
+        <div class="profile-info">
+          <h1>游客浏览</h1>
+          <p>资讯、办事和本机收藏无需登录</p>
+          <small>居民账号用于邻里互动、预约合作服务</small>
+        </div>
+        <nav class="profile-entry">
+          <RouterLink to="/resident/login">登录</RouterLink>
+          <RouterLink to="/resident/register">注册</RouterLink>
+        </nav>
+      </section>
+      <section class="profile-stats">
+        <div><b>{{ favoriteCount }}</b><small>收藏</small></div>
+        <div><b>{{ historyCount }}</b><small>浏览</small></div>
+        <div><b>{{ listenCount }}</b><small>收听</small></div>
+        <div><b>{{ profile ? 3 : 0 }}</b><small>提醒</small></div>
+      </section>
+      <section class="profile-links">
+        <RouterLink v-for="link in links" :key="link[2]" :to="link[0]">
+          <span class="li-icon"><component :is="link[1]"/></span>
+          <span class="li-main"><b>{{ link[2] }}</b><small>{{ link[3] }}</small></span>
+          <span class="li-trail">
+            <em v-if="link[5]">{{ link[5]() }}</em>
+            <u>{{ link[4] }}</u>
+            <ChevronRight/>
+          </span>
+        </RouterLink>
+      </section>
+      <section class="profile-foot">
+        <RouterLink to="/settings" class="profile-foot__card"><CircleHelp/><span><b>帮助与反馈</b></span></RouterLink>
+        <RouterLink to="/settings" class="profile-foot__card"><ShieldCheck/><span><b>隐私说明</b></span></RouterLink>
+        <RouterLink to="/settings" class="profile-foot__card"><Info/><span><b>关于简达 v9.9.4</b></span></RouterLink>
+      </section>
+      <button class="clear-local" type="button" @click="clear">
+        <Trash2/>清除本机收藏和历史
+      </button>
+    </main>
+    <BottomNav/>
+  </div>
+</template>
+
+<style scoped>
+.profile-page-new {
+  padding-bottom: 80px;
+}
+.profile-page-new .member-banner {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 20px 22px;
+  margin: 18px 0 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #0E5A55 0%, #1A6F69 60%, #D58B32 160%);
+  color: #fff;
+  text-decoration: none;
+  box-shadow: 0 10px 28px rgba(14, 90, 85, .18);
+}
+.member-badge {
+  width: 50px;
+  height: 50px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .15);
+}
+.member-badge svg { width: 26px; }
+.member-banner b {
+  font-size: 19px;
+  display: block;
+  margin-bottom: 4px;
+}
+.member-banner small {
+  color: #DCE8E5;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.member-banner svg:last-child { width: 20px; }
+
+.profile-page-new .profile-hero {
+  display: grid;
+  grid-template-columns: 68px 1fr auto;
+  gap: 16px;
+  align-items: center;
+  padding: 24px 22px;
+  background: #fff;
+  border: 1px solid #E7ECE9;
+  border-radius: 14px;
+}
+.profile-avatar {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: #E7F1EE;
+  display: grid;
+  place-items: center;
+  color: #0E5A55;
+}
+.profile-avatar svg { width: 36px; }
+.profile-info h1 {
+  margin: 0;
+  font-size: 24px;
+  color: #172326;
+  font-weight: 800;
+}
+.profile-info p {
+  margin: 6px 0 4px;
+  color: #172326;
+  font-size: 15px;
+  font-weight: 600;
+}
+.profile-info small {
+  color: #667378;
+  font-size: 13px;
+}
+.logout-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-height: 52px;
+  padding: 6px 14px;
+  border: 1px solid #E7F1EE;
+  background: #F7F4EE;
+  color: #B84A42;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 12px;
+}
+.logout-btn svg { width: 18px; }
+
+.profile-hero--guest { grid-template-columns: 68px 1fr; }
+.profile-entry {
+  grid-column: 2;
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+.profile-entry a {
+  min-height: 46px;
+  padding: 0 16px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  font-weight: 700;
+  text-decoration: none;
+}
+.profile-entry a:first-child { background: #0E5A55; color: #fff; }
+.profile-entry a:last-child {
+  border: 1px solid #CFDAD6;
+  color: #0E5A55;
+}
+
+.profile-page-new .profile-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 14px 0;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #E7ECE9;
+  border-radius: 14px;
+}
+.profile-stats > div {
+  text-align: center;
+  padding: 4px 2px;
+}
+.profile-stats b {
+  display: block;
+  font-size: 22px;
+  color: #172326;
+  font-weight: 800;
+}
+.profile-stats small {
+  color: #667378;
+  font-size: 13px;
+  margin-top: 4px;
+  display: block;
+}
+
+.profile-page-new .profile-links {
+  background: #fff;
+  border: 1px solid #E7ECE9;
+  border-radius: 14px;
+  overflow: hidden;
+  margin: 14px 0;
+}
+.profile-links a {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 18px 20px;
+  border-bottom: 1px solid #F0F3F1;
+  text-decoration: none;
+}
+.profile-links a:last-child { border-bottom: 0; }
+.li-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: #F7F4EE;
+  color: #0E5A55;
+}
+.li-icon svg { width: 22px; }
+.li-main b {
+  display: block;
+  font-size: 17px;
+  color: #172326;
+  font-weight: 700;
+}
+.li-main small {
+  display: block;
+  margin-top: 4px;
+  color: #667378;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.li-trail {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #667378;
+}
+.li-trail em {
+  color: #0E5A55;
+  font-style: normal;
+  font-weight: 700;
+  font-size: 13px;
+}
+.li-trail u {
+  text-decoration: none;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: #F7F4EE;
+  color: #0E5A55;
+  font-weight: 700;
+  font-size: 12px;
+}
+.li-trail svg {
+  width: 18px;
+  color: #97A39F;
+}
+
+.profile-page-new .profile-foot {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 14px 0;
+}
+.profile-foot__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 8px;
+  background: #fff;
+  border: 1px solid #E7ECE9;
+  border-radius: 12px;
+  color: #667378;
+  font-size: 12px;
+  text-decoration: none;
+}
+.profile-foot__card svg {
+  width: 22px;
+  color: #0E5A55;
+}
+.profile-foot__card b {
+  color: #172326;
+  font-weight: 700;
+}
+
+.profile-page-new .clear-local {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: #fff;
+  border: 1px solid #E7ECE9;
+  border-radius: 12px;
+  color: #B84A42;
+  font-weight: 700;
+  margin: 10px 0 18px;
+  font-size: 14px;
+}
+.clear-local svg { width: 18px; }
+
+@media (max-width: 768px) {
+  .profile-page-new { padding-inline: 16px; }
+  .member-banner { margin: 0 0 14px; padding: 18px; }
+  .profile-page-new .profile-hero {
+    border-radius: 0;
+    margin-inline: -16px;
+    border-left: 0;
+    border-right: 0;
+  }
+  .profile-page-new .profile-stats { padding: 14px; }
+  .profile-stats b { font-size: 19px; }
+  .profile-links a { padding: 16px; }
+  .profile-page-new .profile-foot {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+</style>

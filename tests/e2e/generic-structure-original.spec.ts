@@ -106,6 +106,16 @@ const materialFive = {
   },
 };
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/public/items/105/view", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: '{"code":0,"message":"成功","data":null}',
+    }),
+  );
+});
+
 for (const width of [375, 768]) {
   test(`generic public-service structures render without overflow at ${width}px`, async ({
     page,
@@ -120,6 +130,12 @@ for (const width of [375, 768]) {
       route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({ code: 0, data: materialFive }),
+      }),
+    );
+    await page.route("**/api/public/items/guide-generic-105/neighbors**", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ code: 0, data: { previous: null, next: null } }),
       }),
     );
     await page.setViewportSize({ width, height: 900 });
@@ -173,16 +189,21 @@ test("public original PDF route uses same-origin API and preserves safe back nav
       body: Buffer.from("%PDF-1.4\n% test"),
     }),
   );
+  await page.route("**/api/public/items/guide-generic-105/neighbors**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ code: 0, data: { previous: null, next: null } }),
+    }),
+  );
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(
     `${h5Url}/original-file/guide-generic-105?from=guide`,
   );
   await expect(page.getByText("查看原PDF")).toBeVisible();
-  await expect(page.locator(".original-file-page iframe")).toHaveAttribute(
-    "src",
-    "/api/public/items/guide-generic-105/original-file",
-  );
+  await expect(page.locator(".original-file-page iframe")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "PDF 在线阅读器" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "重新加载" })).toBeVisible();
   await page.getByRole("button", { name: "返回" }).click();
   await expect(page).toHaveURL(`${h5Url}/guide/guide-generic-105`);
   expect(consoleErrors).toEqual([]);

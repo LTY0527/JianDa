@@ -8,7 +8,7 @@ import {
   type ProcessingJob,
 } from "../api/documents";
 import { apiMessage } from "../api/http";
-import { publicSourceApi } from "../api/publicSources";
+import { publicSourceApi, type ImageCandidate } from "../api/publicSources";
 import {
   Save,
   CheckCircle2,
@@ -17,6 +17,13 @@ import {
   RefreshCw,
   TriangleAlert,
 } from "lucide-vue-next";
+import PdfReader from "@jianda/shared-ui/PdfReader.vue";
+import ImageReader from "@jianda/shared-ui/ImageReader.vue";
+import {
+  authorityLevelLabel,
+  coverTypeLabel,
+  formatDisplayDateTime,
+} from "../utils/display";
 
 const route = useRoute();
 const router = useRouter();
@@ -26,6 +33,7 @@ const fields = ref<any[]>([]);
 const active = ref(0);
 const values = ref<string[]>([]);
 const confirmed = ref<number[]>([]);
+const showAllFields = ref(false);
 const error = ref("");
 const submitting = ref(false);
 const loading = ref(true);
@@ -33,18 +41,31 @@ const retrying = ref(false);
 const jobs = ref<ProcessingJob[]>([]);
 const allowLeave = ref(false);
 const sourceMode = ref<"file" | "text">("text");
-const originalUrl = ref("");
-const originalError = ref("");
-const originalLoading = ref(false);
+const originalUrl = computed(() => documentApi.originalFileUrl(documentId));
+const originalDownloadUrl = computed(() => documentApi.originalFileUrl(documentId, true));
+const originalHeaders = computed(() => documentApi.originalFileHeaders());
 const serviceSchedule = ref<any>({ service_windows: [], closure_rules: [] });
 const conditionalMaterials = ref<any[]>([]);
 const structuredFees = ref<any[]>([]);
 const resultDelivery = ref<any[]>([]);
 const summaryItems = ref<string[]>([]);
 const plainText = ref("");
+const reviewModules = ref<Array<{
+  type: string;
+  title: string;
+  items: Array<Record<string, any>>;
+}>>([]);
+const confirmedModules = ref<string[]>([]);
 const coverReviewed = ref(false);
 const coverFailed = ref(false);
 const resourceWarnings = ref<string[]>([]);
+const customCoverPreview = ref("");
+const coverPosition = ref(50);
+const coverUploading = ref(false);
+const imageCandidates = ref<ImageCandidate[]>([]);
+const candidateSourceName = ref("");
+const candidateUsageBasis = ref("");
+const candidateRejectionReason = ref("");
 const isImage = computed(() => document.value?.mime_type?.startsWith("image/"));
 const isWebArticle = computed(() => document.value?.source_type === "WEB_ARTICLE");
 const officialPageAvailable = computed(
@@ -67,24 +88,28 @@ const defaultCoverUrl = computed(() => {
   return new URL(`/images/defaults/${name}.svg`, base).toString();
 });
 const reviewCoverUrl = computed(() =>
-  !coverFailed.value && document.value?.cover_image_url
+  customCoverPreview.value || (!coverFailed.value && document.value?.cover_image_url
     ? document.value.cover_image_url
-    : defaultCoverUrl.value,
+    : defaultCoverUrl.value),
 );
-const articleImages = computed(() => {
-  if (!document.value?.original_html) return [];
-  const parsed = new DOMParser().parseFromString(
-    document.value.original_html,
-    "text/html",
-  );
-  return [...parsed.querySelectorAll("article img, main img")].map((image) => ({
-    src: image.getAttribute("src") || "",
-    alt: image.getAttribute("alt") || "网页正文图片",
-  })).filter((image) => /^https?:\/\//.test(image.src));
-});
-const canFinish = computed(() => fields.value.length > 0 || (isWebArticle.value && summaryItems.value.length > 0));
+const canFinish = computed(
+  () =>
+    fields.value.length > 0 ||
+    reviewModules.value.length > 0 ||
+    (isWebArticle.value && summaryItems.value.length > 0),
+);
+const modulesConfirmed = computed(
+  () =>
+    reviewModules.value.length === 0 ||
+    reviewModules.value.every((module) =>
+      confirmedModules.value.includes(module.type),
+    ),
+);
 const canSubmitReview = computed(
-  () => canFinish.value && document.value?.processing_status === "WAITING_REVIEW",
+  () =>
+    canFinish.value &&
+    modulesConfirmed.value &&
+    document.value?.processing_status === "WAITING_REVIEW",
 );
 const reviewActionLabel = computed(() => {
   if (document.value?.processing_status === "PUBLISHED") return "内容已发布";
@@ -92,6 +117,12 @@ const reviewActionLabel = computed(() => {
   return submitting.value ? "正在提交…" : "完成字段审核";
 });
 const isDirty = computed(() => values.value.some((value, index) => value !== fields.value[index]?.value));
+const focusedFieldEntries = computed(() => fields.value
+  .map((field, index) => ({ field, index }))
+  .filter(({ index }) => showAllFields.value || !confirmed.value.includes(index)));
+const needsConfirmationCount = computed(() => fields.value.filter((_, index) =>
+  !confirmed.value.includes(index),
+).length);
 onBeforeRouteLeave(() => {
   if (allowLeave.value || !isDirty.value) return true;
   return window.confirm("审核内容尚未保存，确定离开吗？");
@@ -157,6 +188,10 @@ async function load() {
     confirmed.value = fields.value
       .map((field, index) => (field.reviewStatus === "CONFIRMED" ? index : -1))
       .filter((index) => index >= 0);
+    const firstFocused = fields.value.findIndex((_, index) =>
+      !confirmed.value.includes(index),
+    );
+    active.value = firstFocused >= 0 ? firstFocused : 0;
     const generated = generatedResponse.status === "fulfilled"
       ? generatedResponse.value.data.data : [];
     if (generatedResponse.status === "rejected") {
@@ -173,7 +208,24 @@ async function load() {
     resultDelivery.value = parsed("RESULT_DELIVERY", []);
     summaryItems.value = parsed("SUMMARY", []);
     plainText.value = generated.find((item) => item.content_type === "PLAIN_TEXT")?.plain_text || "";
+    reviewModules.value = [
+      ["STANDARD_SECTIONS", "标准规范结构"],
+      ["POLICY_SECTIONS", "政策要点"],
+      ["HEALTH_GUIDANCE", "健康指导"],
+      ["DOCUMENT_OUTLINE", "文档目录"],
+      ["SECTION_SUMMARIES", "章节摘要"],
+    ].flatMap(([type, title]) => {
+      const value = parsed(type, []);
+      const items = Array.isArray(value)
+        ? value.filter((item) => item && typeof item === "object")
+        : [];
+      return items.length ? [{ type, title, items }] : [];
+    });
     coverReviewed.value = Boolean(document.value.image_reviewed);
+    if (isWebArticle.value) {
+      const candidateResponse = await publicSourceApi.imageCandidates(documentId);
+      imageCandidates.value = candidateResponse.data.data;
+    }
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -181,24 +233,9 @@ async function load() {
   }
 }
 
-async function showOriginal() {
+function showOriginal() {
   sourceMode.value = "file";
-  if (originalUrl.value || originalLoading.value) return;
-  originalLoading.value = true;
-  originalError.value = "";
-  try {
-    const response = await documentApi.originalFile(documentId);
-    originalUrl.value = URL.createObjectURL(response.data);
-  } catch (cause) {
-    originalError.value = apiMessage(cause);
-  } finally {
-    originalLoading.value = false;
-  }
 }
-
-onBeforeUnmount(() => {
-  if (originalUrl.value) URL.revokeObjectURL(originalUrl.value);
-});
 
 async function retry() {
   retrying.value = true;
@@ -214,6 +251,9 @@ async function retry() {
 }
 
 onMounted(load);
+onBeforeUnmount(() => {
+  if (customCoverPreview.value) URL.revokeObjectURL(customCoverPreview.value);
+});
 
 async function confirm(index: number) {
   try {
@@ -227,6 +267,28 @@ async function confirm(index: number) {
     if (!confirmed.value.includes(index)) confirmed.value.push(index);
   } catch (cause) {
     error.value = apiMessage(cause);
+  }
+}
+
+async function rejectField(index: number) {
+  const field = fields.value[index];
+  if (!field || !window.confirm(`确认排除“${field.label}”吗？该字段不会进入公开内容。`)) return;
+  try {
+    await documentApi.rejectField(documentId, field.id);
+    fields.value.splice(index, 1);
+    values.value.splice(index, 1);
+    confirmed.value = confirmed.value
+      .filter((value) => value !== index)
+      .map((value) => value > index ? value - 1 : value);
+    active.value = Math.max(0, Math.min(active.value, fields.value.length - 1));
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
+function confirmModule(type: string) {
+  if (!confirmedModules.value.includes(type)) {
+    confirmedModules.value.push(type);
   }
 }
 
@@ -285,11 +347,65 @@ async function useCategoryDefaultCover() {
       document.value.cover_image_url = "";
       document.value.cover_image_type = "CATEGORY_DEFAULT";
     }
+    customCoverPreview.value = "";
     coverReviewed.value = true;
   } catch (cause) {
     error.value = apiMessage(cause);
   }
 }
+
+async function uploadCustomCover(event: Event) {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  coverUploading.value = true;
+  error.value = "";
+  try {
+    await documentApi.uploadCover(documentId, file);
+    if (customCoverPreview.value) URL.revokeObjectURL(customCoverPreview.value);
+    customCoverPreview.value = URL.createObjectURL(file);
+    if (document.value) {
+      document.value.cover_image_type = "EDITOR_UPLOAD";
+      document.value.image_source_name = "机构编辑上传";
+      document.value.image_reviewed = true;
+    }
+    coverReviewed.value = true;
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    coverUploading.value = false;
+    input.value = "";
+  }
+}
+
+async function approveCandidate(candidate: ImageCandidate) {
+  error.value = "";
+  try {
+    await publicSourceApi.approveImageCandidate(candidate.id, candidateSourceName.value, candidateUsageBasis.value);
+    if (document.value) {
+      document.value.cover_image_url = candidate.candidate_url;
+      document.value.cover_image_type = candidate.discovery_method === "ARTICLE_IMAGE" ? "ARTICLE_IMAGE" : "ORIGINAL_COVER";
+      document.value.image_source_name = candidateSourceName.value;
+      document.value.image_license_note = candidateUsageBasis.value;
+      document.value.image_reviewed = true;
+    }
+    coverReviewed.value = true;
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
+async function rejectCandidate(candidate: ImageCandidate) {
+  error.value = "";
+  try {
+    await publicSourceApi.rejectImageCandidate(candidate.id, candidateRejectionReason.value);
+    await load();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  }
+}
+
 </script>
 
 <template>
@@ -334,23 +450,37 @@ async function useCategoryDefaultCover() {
     <p v-for="warning in resourceWarnings" :key="warning" class="inline-error">
       {{ warning }}
     </p>
+    <p v-if="isWebArticle && (document?.version_no || 1) > 1" class="version-review-note">
+      当前审核对象：V{{ document?.version_no }}。已发布的 V{{ (document?.version_no || 1) - 1 }} 继续保持公开，只有本版本完成人工审核并发布后才会替换。
+    </p>
+    <section v-if="fields.length" class="review-focus-summary">
+      <div><TriangleAlert v-if="needsConfirmationCount" /><CheckCircle2 v-else /><span><b>{{ needsConfirmationCount ? `发现 ${needsConfirmationCount} 项需要确认` : "关键字段已全部确认" }}</b><small>优先显示未确认、低置信度和疑似重复字段；已确认的低风险字段默认收起。</small></span></div>
+      <button class="btn secondary" type="button" @click="showAllFields = !showAllFields">{{ showAllFields ? "只看需要确认" : `查看全部 ${fields.length} 项` }}</button>
+    </section>
 
     <section v-if="isWebArticle" class="panel web-source-review">
       <div class="web-source-review__cover">
-        <img :src="reviewCoverUrl" :alt="document?.image_alt_text || document?.title || '网页文章分类默认图'" referrerpolicy="no-referrer" @error="coverFailed = true" />
+        <img :src="reviewCoverUrl" :alt="document?.image_alt_text || document?.title || '网页文章分类默认图'" :style="{ objectPosition: `${coverPosition}% center` }" referrerpolicy="no-referrer" @error="coverFailed = true" />
+        <label class="cover-crop-control">裁剪预览位置
+          <input v-model.number="coverPosition" type="range" min="0" max="100" />
+        </label>
       </div>
       <div>
         <h2>网页来源与封面审核</h2>
-        <dl><div><dt>权威来源</dt><dd>{{ document?.source_name }} · {{ document?.source_authority_level }}级</dd></div><div><dt>原始发布时间</dt><dd>{{ String(document?.original_published_at || "待人工确认").slice(0, 19) }}</dd></div><div><dt>封面类型</dt><dd>{{ document?.cover_image_type }}</dd></div><div><dt>图片来源</dt><dd>{{ document?.image_source_name || "简达本地分类默认图" }}</dd></div><div><dt>是否缓存</dt><dd>{{ document?.image_cached ? "是" : "否" }}</dd></div></dl>
+        <dl><div><dt>权威来源</dt><dd>{{ document?.source_name }} · {{ authorityLevelLabel(document?.source_authority_level) }}</dd></div><div><dt>原始发布时间</dt><dd>{{ formatDisplayDateTime(document?.original_published_at) }}</dd></div><div><dt>封面类型</dt><dd>{{ coverTypeLabel(document?.cover_image_type) }}</dd></div><div><dt>图片来源</dt><dd>{{ document?.image_source_name || "简达本地分类默认图" }}</dd></div><div><dt>是否缓存</dt><dd>{{ document?.image_cached ? "是" : "否" }}</dd></div></dl>
+        <details class="technical-info"><summary>技术信息</summary><p>内容类型：{{ document?.content_kind }}；封面类型：{{ document?.cover_image_type }}；来源等级：{{ document?.source_authority_level }}</p></details>
         <p>{{ document?.image_license_note }}</p>
-        <div class="web-source-review__actions"><a v-if="officialPageAvailable && document?.canonical_url" class="btn secondary" :href="document.canonical_url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="17"/>查看官方原文</a><span v-else class="source-unavailable"><TriangleAlert :size="16"/>原网页暂时不可访问，不影响内部审核</span><button v-if="document?.cover_image_url" class="btn secondary" :disabled="coverReviewed" @click="confirmCover">{{coverReviewed?"封面已确认":"确认使用当前封面"}}</button><button class="btn secondary" @click="useCategoryDefaultCover">使用分类默认图</button></div>
+        <div class="web-source-review__actions"><a v-if="officialPageAvailable && document?.canonical_url" class="btn secondary" :href="document.canonical_url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="17"/>查看官方原文</a><span v-else class="source-unavailable"><TriangleAlert :size="16"/>原网页暂时不可访问，不影响内部审核</span><button v-if="document?.cover_image_url" class="btn secondary" :disabled="coverReviewed" @click="confirmCover">{{coverReviewed?"封面已确认":"确认使用当前封面"}}</button><label class="btn secondary cover-upload-button">{{coverUploading?"上传中…":"上传自定义封面"}}<input type="file" accept="image/png,image/jpeg,image/webp" :disabled="coverUploading" @change="uploadCustomCover"/></label><button class="btn secondary" @click="useCategoryDefaultCover">使用分类默认图 / 删除封面</button></div>
       </div>
     </section>
-    <section v-if="isWebArticle && articleImages.length" class="panel web-article-images">
-      <h2>正文图片</h2>
-      <p>按网页正文中的原有顺序展示，仅供内部来源核对。</p>
-      <div><figure v-for="image in articleImages" :key="image.src"><img :src="image.src" :alt="image.alt" referrerpolicy="no-referrer"/><figcaption>{{ image.alt }}</figcaption></figure></div>
+    <section v-if="isWebArticle && imageCandidates.length" class="panel web-article-images">
+      <h2>图片候选人工审核</h2>
+      <p>候选仅供内部核对，未经来源和许可确认不会成为公开封面。</p>
+      <div class="form-row"><label class="field">图片来源<input v-model="candidateSourceName" placeholder="例如：新华网原网页" /></label><label class="field">许可说明<input v-model="candidateUsageBasis" placeholder="填写授权、公开使用依据或人工核对说明" /></label></div>
+      <label class="field">拒绝原因<input v-model="candidateRejectionReason" placeholder="例如：版权不明确、尺寸不适合或与正文无关" /></label>
+      <div><figure v-for="candidate in imageCandidates" :key="candidate.id"><img :src="candidate.candidate_url" :alt="candidate.alt_text || '网页图片候选'" referrerpolicy="no-referrer"/><figcaption><b>图片 URL</b><a :href="candidate.candidate_url" target="_blank" rel="noopener noreferrer">{{candidate.candidate_url}}</a><br/><b>来源页</b><a :href="candidate.source_page_url" target="_blank" rel="noopener noreferrer">{{candidate.source_page_url}}</a><br/>发现方式：{{candidate.discovery_method}} · 相关性 {{candidate.relevance_score ?? 0}}/100 · {{candidate.width}}×{{candidate.height}} · {{candidate.mime_type || '图片'}}<br/>替代文本：{{candidate.alt_text || '无替代文本'}}<br/><span v-if="candidate.context_text">正文上下文：{{candidate.context_text}}</span><br v-if="candidate.context_text"/>状态：{{candidate.review_status}} / {{candidate.rights_status}}</figcaption><div class="form-actions"><button v-if="candidate.review_status === 'PENDING'" class="btn primary" type="button" :disabled="!candidateSourceName.trim() || !candidateUsageBasis.trim()" @click="approveCandidate(candidate)">确认可用</button><button v-if="candidate.review_status === 'PENDING'" class="btn secondary" type="button" @click="rejectCandidate(candidate)">拒绝</button></div></figure></div>
     </section>
+    <section v-if="isWebArticle && !imageCandidates.length" class="panel"><h2>图片候选</h2><p>没有通过安全、尺寸和比例过滤的第三方图片，将使用分类默认图。</p></section>
 
     <section
       v-if="emptyReviewResult"
@@ -388,10 +518,21 @@ async function useCategoryDefaultCover() {
           </button>
         </div>
         <div v-if="sourceMode === 'file'" class="original-file-pane">
-          <p v-if="originalLoading">正在读取原文件…</p>
-          <p v-else-if="originalError" class="form-error">{{ originalError }}</p>
-          <img v-else-if="originalUrl && isImage" :src="originalUrl" :alt="document?.original_filename || '材料原图'" />
-          <iframe v-else-if="originalUrl" :src="originalUrl" title="原PDF预览"></iframe>
+          <ImageReader
+            v-if="isImage"
+            :src="originalUrl"
+            :download-url="originalDownloadUrl"
+            :headers="originalHeaders"
+            :filename="document?.original_filename || '材料原图'"
+            :alt="document?.title || '材料原图'"
+          />
+          <PdfReader
+            v-else
+            :src="originalUrl"
+            :download-url="originalDownloadUrl"
+            :headers="originalHeaders"
+            :filename="document?.original_filename || '材料原文.pdf'"
+          />
         </div>
         <article v-else class="paper">
           <h2>{{ document?.title }}</h2>
@@ -420,6 +561,33 @@ async function useCategoryDefaultCover() {
           <h3>适老化正文</h3>
           <p class="web-ai-review__plain">{{ plainText }}</p>
         </section>
+        <section
+          v-for="module in reviewModules"
+          :key="module.type"
+          class="structured-review type-specific-review"
+        >
+          <h3>{{ module.title }}</h3>
+          <article v-for="(item, index) in module.items" :key="index">
+            <b>{{ item.label || item.title || `第 ${index + 1} 项` }}</b>
+            <p>{{ item.value || item.summary || item.description }}</p>
+            <div v-if="item.source_quote" class="trace">
+              <span>原文依据 · 第 {{ item.page_no || 1 }} 页</span>
+              <p>“{{ item.source_quote }}”</p>
+            </div>
+          </article>
+          <button
+            type="button"
+            class="confirm-btn"
+            :disabled="confirmedModules.includes(module.type)"
+            @click="confirmModule(module.type)"
+          >
+            <CheckCircle2 :size="17" />{{
+              confirmedModules.includes(module.type)
+                ? "此模块已确认"
+                : "确认此模块"
+            }}
+          </button>
+        </section>
         <section v-if="serviceSchedule.service_windows?.length || conditionalMaterials.length || structuredFees.length || resultDelivery.length" class="structured-review">
           <h3>通用结构化结果</h3>
           <div v-if="serviceSchedule.service_windows?.length">
@@ -440,33 +608,36 @@ async function useCategoryDefaultCover() {
         </section>
         <div class="review-fields">
           <article
-            v-for="(field, index) in fields"
-            :key="field.id"
+            v-for="entry in focusedFieldEntries"
+            :key="entry.field.id"
             :class="{
-              active: active === index,
-              confirmed: confirmed.includes(index),
+              active: active === entry.index,
+              confirmed: confirmed.includes(entry.index),
             }"
-            @click="active = index"
+            @click="active = entry.index"
           >
             <header>
-              <b>{{ field.label }}</b>
-              <span v-if="field.duplicateSuspected" class="duplicate-warning"
+              <b>{{ entry.field.label }}</b>
+              <span v-if="entry.field.duplicateSuspected" class="duplicate-warning"
                 ><TriangleAlert />疑似重复字段</span
               >
-              <span v-if="confirmed.includes(index)"
+              <span v-if="confirmed.includes(entry.index)"
                 ><CheckCircle2 />已确认</span
               >
-              <span v-else :class="{ risk: field.confidence < 0.93 }">{{
-                field.confidence < 0.93 ? "请重点核对" : "待确认"
+              <span v-else :class="{ risk: entry.field.confidence < 0.93 }">{{
+                entry.field.confidence < 0.93 ? "请重点核对" : "待确认"
               }}</span>
             </header>
-            <textarea v-model="values[index]" rows="2"></textarea>
+            <textarea v-model="values[entry.index]" rows="2"></textarea>
             <div class="trace">
-              <span>原文依据 · 第 {{ field.page }} 页</span>
-              <p>“{{ field.quote }}”</p>
+              <span>原文依据 · 第 {{ entry.field.page }} 页</span>
+              <p>“{{ entry.field.quote }}”</p>
             </div>
-            <button class="confirm-btn" @click.stop="confirm(index)">
+            <button class="confirm-btn" @click.stop="confirm(entry.index)">
               <CheckCircle2 :size="17" />确认此字段
+            </button>
+            <button class="btn secondary" type="button" @click.stop="rejectField(entry.index)">
+              排除无关字段
             </button>
           </article>
         </div>

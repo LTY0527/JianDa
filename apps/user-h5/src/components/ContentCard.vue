@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import { ShieldCheck, ChevronRight, ExternalLink, Heart, MapPin, Volume2 } from "lucide-vue-next";
 import { setFavorite } from "../api";
-import { cleanDisplayTitle, contentKind, isFavorite, isRead } from "../content";
+import { normalizeTitle, truncateSummary, contentKind, isFavorite, isRead } from "../content";
 import { saveFavorite } from "../library";
 import { articleCover, categoryDefaultCover } from "../utils/coverImage";
 const props = withDefaults(defineProps<{ item: any; kind?: "guide" | "news"; actions?: boolean }>(), { actions: false });
@@ -18,7 +18,9 @@ async function toggleFavorite() {
 }
 function fallbackCover(event: Event) {
   const image = event.currentTarget as HTMLImageElement;
-  const fallback = categoryDefaultCover(props.item);
+  const attempt = Number(image.dataset.fallbackAttempt || "0") + 1;
+  image.dataset.fallbackAttempt = String(attempt);
+  const fallback = categoryDefaultCover(props.item, attempt);
   if (!image.src.endsWith(fallback)) image.src = fallback;
 }
 function listen() {
@@ -36,8 +38,8 @@ function listen() {
     </RouterLink>
     <RouterLink class="content-row__body" :to="`/${kind}/${item.slug}`">
       <span class="category-text">{{ item.category }} · {{ kind === "news" ? "权威资讯" : "办事指南" }} <template v-if="item.is_local">· <MapPin/>本地</template></span>
-      <h3>{{ cleanDisplayTitle(item.title) }}</h3>
-      <p>{{ item.summary }}</p>
+      <h3>{{ normalizeTitle(item.title) }}</h3>
+      <p>{{ truncateSummary(item.summary) }}</p>
       <footer><ShieldCheck />{{ item.source || item.source_name }}<span>· {{ String(item.date || item.published_at).slice(0, 10) }}</span><span>· {{ item.reading_minutes || 1 }}分钟</span><span v-if="read">· 已读</span></footer>
     </RouterLink>
     <div v-if="actions" class="content-row__actions">
