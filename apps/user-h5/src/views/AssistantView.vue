@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, RouterLink } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
 import { AssistantApiError, askAssistant, fetchAssistantStatus, fetchAssistantSuggestions, fetchDetail, type AssistantCitation, type AssistantCommunityPost, type AssistantFactCard, type AssistantRuntimeStatus } from "../api";

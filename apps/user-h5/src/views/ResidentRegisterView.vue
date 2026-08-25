@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Phone, UserRound, LockCheck, UserCircle2, MapPin } from "lucide-vue-next";
-import { residentRegister, residentRegistrationCapabilities, defaultRegion } from "../api";
+import { Phone, UserRound, Lock, UserCircle2, MapPin } from "lucide-vue-next";
+import { residentRegister, residentRegistrationCapabilities } from "../api";
+import { dachangRegion } from "../region";
 
 const route = useRoute();
 const router = useRouter();
@@ -12,7 +13,7 @@ const username = ref("");
 const nickname = ref("");
 const password = ref("");
 const confirmPassword = ref("");
-const regionCode = ref(defaultRegion?.code || "310101019");
+const regionCode = ref(dachangRegion.region_code || "310101019");
 const error = ref("");
 const busy = ref(false);
 
@@ -107,7 +108,7 @@ async function submit() {
 
           <label class="login-field">
             <span class="login-field__label">
-              <LockCheck :size="16" />
+              <Lock :size="16" />
               <span>密码（必填）</span>
             </span>
             <input
@@ -122,7 +123,7 @@ async function submit() {
 
           <label class="login-field">
             <span class="login-field__label">
-              <LockCheck :size="16" />
+              <Lock :size="16" />
               <span>确认密码（必填）</span>
             </span>
             <input
