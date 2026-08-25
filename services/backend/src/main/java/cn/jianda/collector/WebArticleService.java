@@ -83,8 +83,7 @@ public class WebArticleService {
         try {
             result = new LinkedHashMap<>(aiClient.previewWebArticle(
                     url,
-                    webImageCandidatesEnabled
-                            && Boolean.TRUE.equals(registry.get("allow_image_candidates")),
+                    webImageCandidatesEnabled,
                     true
             ));
         } catch (RuntimeException exception) {
@@ -119,6 +118,7 @@ public class WebArticleService {
             result.put("image_height", null);
             result.put("image_hash", "");
             result.put("image_validated", false);
+            result.put("images", List.of());
         }
         result.put("image_cached", false);
         result.put("image_source_name", result.get("source_name"));
@@ -329,7 +329,7 @@ public class WebArticleService {
         Map<String, Object> preview;
         try {
             preview = new LinkedHashMap<>(aiClient.previewWebArticle(
-                    url, Boolean.TRUE.equals(registry.get("allow_image_candidates")), true));
+                    url, webImageCandidatesEnabled, true));
         } catch (RuntimeException exception) {
             throw new BusinessException(502, safeMessage(exception, "网页暂时无法访问或解析"));
         }
@@ -466,7 +466,11 @@ public class WebArticleService {
         if (generatedDocumentId == null) throw new IllegalStateException("未取得网页文章编号");
         long documentId = generatedDocumentId.longValue();
         jdbc.update("UPDATE source_document SET version_root_id=id,new_content_hash=content_hash WHERE id=?", documentId);
-        imageCandidateService.persist(documentId, canonical, preview.get("images"));
+        try {
+            boolean persistImages = Boolean.TRUE.equals(preview.get("allow_image_candidates"));
+            if (persistImages) imageCandidateService.persist(documentId, canonical, preview.get("images"));
+        } catch (RuntimeException ignored) {
+        }
         jdbc.update("INSERT INTO document_segment(document_id,page_no,segment_no,text,start_offset,end_offset) VALUES (?,1,1,?,0,?)",
                 documentId, body, body.length());
         Long crawlJobId = null;

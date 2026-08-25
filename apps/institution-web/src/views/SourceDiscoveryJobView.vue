@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowRight, Check, Circle, FileUp, Link, LoaderCircle, RefreshCw } from "lucide-vue-next";
+import { ArrowRight, Check, Circle, FileUp, Link, LoaderCircle, RefreshCw, TriangleAlert, WandSparkles } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import { apiMessage } from "../api/http";
 import {
@@ -11,6 +11,7 @@ import {
   type CrawlJob,
   type WebSourceRegistry,
 } from "../api/publicSources";
+import { documentApi } from "../api/documents";
 
 const route = useRoute();
 const router = useRouter();
@@ -25,6 +26,8 @@ const error = ref("");
 const notice = ref("");
 const importedDocuments = ref<number[]>([]);
 const importJob = ref<BatchImportJob | null>(null);
+const busyProcessing = ref<number | null>(null);
+const batchProcessingStatus = ref<Record<number, { status: "pending" | "queued" | "processing" | "done" | "failed"; message: string }>>({});
 let discoveryTimer: ReturnType<typeof setTimeout> | undefined;
 let importTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -129,6 +132,63 @@ async function pollImportJob(activeJobId: number) {
   }
 }
 
+async function startProcessing(documentId: number) {
+  if (busyProcessing.value !== null) return;
+  busyProcessing.value = documentId;
+  error.value = "";
+  try {
+    notice.value = `正在提交材料 #${documentId} 至 AI 处理队列…`;
+    const response = await documentApi.process(documentId);
+    const { jobId: createdJobId, alreadyRunning } = response.data.data;
+    if (alreadyRunning) {
+      notice.value = `材料 #${documentId} 已有处理任务在运行，已跳转到处理中心。`;
+    } else {
+      notice.value = `材料 #${documentId} 已进入处理队列，正在跳转处理中心…`;
+    }
+    await router.push({
+      path: `/documents/${documentId}/process`,
+      query: { jobId: String(createdJobId) },
+    });
+  } catch (cause) {
+    error.value = apiMessage(cause);
+    notice.value = "提交 AI 处理失败，请稍后重试。";
+  } finally {
+    busyProcessing.value = null;
+  }
+}
+
+async function startBatchProcessing(documentIds: number[]) {
+  if (busyProcessing.value !== null) return;
+  busyProcessing.value = -1;
+  error.value = "";
+  const queue = [...documentIds];
+  const statusMap: typeof batchProcessingStatus.value = {};
+  queue.forEach((id) => {
+    statusMap[id] = { status: "pending", message: "待处理" };
+  });
+  batchProcessingStatus.value = statusMap;
+  for (const id of queue) {
+    statusMap[id] = { status: "processing", message: "正在提交…" };
+    batchProcessingStatus.value = { ...statusMap };
+    try {
+      const response = await documentApi.process(id);
+      const { alreadyRunning } = response.data.data;
+      if (alreadyRunning) {
+        statusMap[id] = { status: "processing", message: "已在处理中" };
+      } else {
+        statusMap[id] = { status: "queued", message: "已入队" };
+      }
+    } catch (cause) {
+      statusMap[id] = { status: "failed", message: apiMessage(cause) };
+    }
+    batchProcessingStatus.value = { ...statusMap };
+  }
+  const successCount = Object.values(statusMap).filter((s) => s.status === "queued" || s.status === "processing").length;
+  const failedCount = Object.values(statusMap).filter((s) => s.status === "failed").length;
+  notice.value = `批量提交完成：${successCount} 篇已入队${failedCount > 0 ? `，${failedCount} 篇失败` : ""}。可前往材料列表查看各篇处理进度。`;
+  busyProcessing.value = null;
+}
+
 async function retry() {
   if (!source.value) return;
   const method = source.value.discovery_mode === "MANUAL" ? "SECTION" : source.value.discovery_mode;
@@ -217,8 +277,40 @@ onUnmounted(() => {
 
     <section v-if="notice" class="panel collect-next-step" role="status">
       <Check /><div><h2>已加入内容中心</h2><p>{{ notice }}</p></div>
+      <div class="batch-status-list" v-if="Object.keys(batchProcessingStatus).length > 0">
+        <div v-for="(item, id) in batchProcessingStatus" :key="id" :class="['batch-status-row', `batch-status--${item.status}`]">
+          <b>#{{ id }}</b>
+          <span>{{ item.message }}</span>
+          <LoaderCircle v-if="item.status === 'processing'" class="spin" :size="16" />
+          <Check v-else-if="item.status === 'queued' || item.status === 'done'" :size="16" />
+          <TriangleAlert v-else-if="item.status === 'failed'" :size="16" />
+        </div>
+      </div>
       <div class="discovery-actions">
-        <RouterLink v-if="importedDocuments.length === 1" class="btn primary" :to="`/documents/${importedDocuments[0]}/process`">立即处理<ArrowRight /></RouterLink>
+        <button
+          v-if="importedDocuments.length === 1"
+          class="btn primary"
+          type="button"
+          :disabled="busyProcessing !== null"
+          @click="startProcessing(importedDocuments[0])"
+        >
+          <WandSparkles v-if="busyProcessing !== importedDocuments[0]" :size="17" />
+          <LoaderCircle v-else class="spin" :size="17" />
+          {{ busyProcessing === importedDocuments[0] ? "正在提交 AI…" : "立即处理" }}
+          <ArrowRight v-if="busyProcessing !== importedDocuments[0]" :size="17" />
+        </button>
+        <button
+          v-if="importedDocuments.length > 1"
+          class="btn primary"
+          type="button"
+          :disabled="busyProcessing !== null"
+          @click="startBatchProcessing(importedDocuments)"
+        >
+          <WandSparkles v-if="busyProcessing !== -1" :size="17" />
+          <LoaderCircle v-else class="spin" :size="17" />
+          {{ busyProcessing === -1 ? `正在批量提交（${importedDocuments.length}）…` : `批量开始 AI 处理（${importedDocuments.length}）` }}
+          <ArrowRight v-if="busyProcessing !== -1" :size="17" />
+        </button>
         <RouterLink class="btn secondary" to="/documents">继续查看</RouterLink>
         <RouterLink class="text-action" to="/public-sources">返回来源</RouterLink>
       </div>
@@ -229,5 +321,6 @@ onUnmounted(() => {
 <style scoped>
 .discovery-page{max-width:1180px;margin:0 auto}.discovery-loading{display:flex;align-items:center;gap:10px;padding:36px}.discovery-progress,.discovery-failed,.discovery-summary,.discovery-results,.collect-next-step{padding:26px;margin-bottom:18px}.discovery-progress header,.discovery-summary>div,.collect-next-step{display:flex;align-items:flex-start;gap:14px}.discovery-progress h2,.discovery-summary h2,.discovery-failed h2,.collect-next-step h2{margin:0 0 6px}.discovery-progress p,.discovery-summary p,.collect-next-step p{margin:0;color:var(--color-muted)}.discovery-progress ol{display:grid;grid-template-columns:repeat(5,1fr);gap:0;margin:30px 0 4px;padding:0;list-style:none}.discovery-progress li{position:relative;display:grid;justify-items:center;gap:8px;color:var(--color-muted);text-align:center;font-size:13px}.discovery-progress li:not(:last-child)::after{content:"";position:absolute;top:12px;left:62%;width:76%;height:2px;background:var(--color-border)}.discovery-progress li.done,.discovery-progress li.active{color:var(--color-primary);font-weight:700}.discovery-progress li.done::after{background:var(--color-primary)}.discovery-progress svg{width:25px;height:25px;padding:3px;background:#fff;z-index:1}.discovery-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px}.success-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:#e1f2ed;color:var(--color-primary)}.discovery-results>header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding-bottom:16px;border-bottom:1px solid var(--color-border)}.discovery-results h2,.discovery-results h3{margin:0}.discovery-results header p{margin:5px 0 0;color:var(--color-muted)}.candidate-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:16px;align-items:center;padding:18px 0;border-bottom:1px solid var(--color-border)}.candidate-row p,.candidate-row small{display:block;margin:5px 0 0;color:var(--color-muted)}.candidate-row small{overflow-wrap:anywhere}.candidate-new,.candidate-existing{padding:4px 8px;border-radius:5px;font-size:12px}.candidate-new{background:#e7f3ef;color:var(--color-primary)}.candidate-existing{background:#f0f2f1;color:var(--color-muted)}.discovery-results footer{display:flex;justify-content:flex-end;padding-top:18px}.collect-next-step{align-items:center}.collect-next-step>.discovery-actions{margin:0 0 0 auto}.collect-next-step>svg{color:var(--color-primary)}
 .candidate-relevance{padding:4px 8px;border-radius:5px;font-size:12px;font-weight:700}.relevance-high{background:#e1f2ed;color:#12634f}.relevance-medium{background:#fff1cc;color:#765400}.relevance-low{background:#f1f2f2;color:#68706d}.candidate-reason{font-size:13px}
+.batch-status-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin:14px 0;width:100%}.batch-status-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:12px;background:#f6f8f7;border:1px solid var(--color-border);font-size:13px}.batch-status-row b{color:#172326;font-weight:700}.batch-status-row span{flex:1;color:var(--color-muted)}.batch-status-row svg{flex:0 0 auto}.batch-status--pending{background:#f8f9f9}.batch-status--processing{background:#fff9ee;border-color:#ead8a1}.batch-status--queued,.batch-status--done{background:#f4faf7;border-color:#c8e3d7}.batch-status--failed{background:#fdf3f0;border-color:#f1c8bf}
 @media(max-width:760px){.discovery-progress ol{grid-template-columns:1fr;gap:14px}.discovery-progress li{grid-template-columns:30px 1fr;justify-items:start;text-align:left}.discovery-progress li::after{display:none}.candidate-row{grid-template-columns:auto minmax(0,1fr)}.candidate-row>span,.candidate-row>button{grid-column:2;justify-self:start}.discovery-results>header,.collect-next-step{align-items:flex-start;flex-direction:column}.collect-next-step>.discovery-actions{margin-left:0}}
 </style>
