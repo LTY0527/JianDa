@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import axios from "axios";
 import { Phone, UserRound, Lock, UserCircle2, MapPin } from "lucide-vue-next";
 import { residentRegister, residentRegistrationCapabilities } from "../api";
+import { completeLogin } from "../composables/useResidentAuth";
 import { dachangRegion } from "../region";
 
 const route = useRoute();
@@ -52,13 +54,36 @@ async function submit() {
   }
   busy.value = true;
   try {
-    await residentRegister(username.value.trim(), password.value, nickname.value.trim(), regionCode.value, phone.value.trim());
+    const profile = await residentRegister(
+      username.value.trim(),
+      password.value,
+      nickname.value.trim(),
+      regionCode.value,
+      phone.value.trim(),
+    );
+    completeLogin(profile);
     const redirect = typeof route.query.redirect === "string" && route.query.redirect.startsWith("/")
       ? route.query.redirect
       : "/";
-    await router.replace(redirect);
+    try {
+      await router.replace(redirect);
+    } catch (navErr: any) {
+      // eslint-disable-next-line no-console
+      console.error("[ResidentRegister] router.replace failed:", navErr);
+      if (String(window.location.pathname) !== redirect) {
+        window.location.replace(redirect);
+      }
+    }
   } catch (e: any) {
-    error.value = e?.response?.data?.message || "注册失败，请稍后再试";
+    if (axios.isAxiosError(e) && (!e.response || e.code === "ECONNABORTED")) {
+      error.value = "网络连接失败，请稍后重试。";
+    } else if (axios.isAxiosError(e) && (e.response?.status === 400 || e.response?.status === 409)) {
+      error.value = e.response?.data?.message || "注册失败，用户名或手机号可能已被占用。";
+    } else {
+      error.value = e?.response?.data?.message || "注册失败，请稍后再试";
+    }
+    // eslint-disable-next-line no-console
+    console.warn("[ResidentRegister] submit error:", e?.message || e);
   } finally {
     busy.value = false;
   }

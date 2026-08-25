@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import axios from "axios";
 import { Phone, UserRound, ShieldCheck } from "lucide-vue-next";
 import { residentLogin, residentRegistrationCapabilities } from "../api";
+import { completeLogin } from "../composables/useResidentAuth";
 const route = useRoute();
 const router = useRouter();
 
@@ -28,13 +30,30 @@ async function submit() {
   error.value = "";
   try {
     const loginId = mode.value === "phone" ? phone.value.trim() : username.value.trim();
-    await residentLogin(loginId, password.value);
+    const profile = await residentLogin(loginId, password.value);
+    completeLogin(profile);
     const redirect = typeof route.query.redirect === "string" && route.query.redirect.startsWith("/")
       ? route.query.redirect
       : "/";
-    await router.replace(redirect);
+    try {
+      await router.replace(redirect);
+    } catch (navErr: any) {
+      // eslint-disable-next-line no-console
+      console.error("[ResidentLogin] router.replace failed:", navErr);
+      if (String(window.location.pathname) !== redirect) {
+        window.location.replace(redirect);
+      }
+    }
   } catch (e: any) {
-    error.value = e?.response?.data?.message || "账号或密码不正确，请重新输入。";
+    if (axios.isAxiosError(e) && (!e.response || e.code === "ECONNABORTED")) {
+      error.value = "网络连接失败，请稍后重试。";
+    } else if (axios.isAxiosError(e) && (e.response?.status === 401 || e.response?.status === 403)) {
+      error.value = e.response?.data?.message || "账号或密码不正确。";
+    } else {
+      error.value = e?.response?.data?.message || "账号或密码不正确，请重新输入。";
+    }
+    // eslint-disable-next-line no-console
+    console.warn("[ResidentLogin] submit error:", e?.message || e);
   } finally {
     busy.value = false;
   }
