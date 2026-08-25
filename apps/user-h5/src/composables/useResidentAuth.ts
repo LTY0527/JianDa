@@ -4,8 +4,18 @@ import { residentMe, residentLogout as apiLogout } from "../api";
 
 export type ResidentAuthStatus = "unknown" | "authenticated" | "guest";
 
+export interface ResidentProfileShape {
+  id: number;
+  username: string;
+  nickname: string;
+  district: string;
+  streetOrTown: string;
+  regionCode: string;
+  demo: boolean;
+}
+
 const status = ref<ResidentAuthStatus>("unknown");
-const profile = ref<{ id: number; username: string; nickname: string; district: string; streetOrTown: string; regionCode: string; demo: boolean } | null>(null);
+const profile = ref<ResidentProfileShape | null>(null);
 let bootstrapPromise: Promise<void> | null = null;
 let routerRef: Router | null = null;
 
@@ -16,7 +26,7 @@ function clearSession() {
   status.value = "guest";
 }
 
-function setAuthenticated(p: typeof profile.value) {
+function setAuthenticated(p: ResidentProfileShape | null) {
   profile.value = p;
   status.value = "authenticated";
   if (p) {
@@ -26,6 +36,20 @@ function setAuthenticated(p: typeof profile.value) {
       /* ignore */
     }
   }
+}
+
+export function invalidateAuthCache() {
+  bootstrapPromise = null;
+}
+
+export function completeLogin(p: ResidentProfileShape) {
+  setAuthenticated(p);
+  bootstrapPromise = Promise.resolve();
+}
+
+export async function refreshAfterLogin(): Promise<void> {
+  invalidateAuthCache();
+  await bootstrap(true);
 }
 
 export async function bootstrap(force = false): Promise<void> {
@@ -44,6 +68,7 @@ export async function bootstrap(force = false): Promise<void> {
       const statusCode = e?.response?.status;
       if (statusCode === 401 || statusCode === 403) {
         clearSession();
+        invalidateAuthCache();
       } else {
         const cached = localStorage.getItem("jianda_resident_profile");
         if (cached) {
@@ -56,6 +81,7 @@ export async function bootstrap(force = false): Promise<void> {
           }
         }
         clearSession();
+        invalidateAuthCache();
       }
     }
   })();
@@ -64,6 +90,7 @@ export async function bootstrap(force = false): Promise<void> {
 
 export function onUnauthorized() {
   clearSession();
+  invalidateAuthCache();
   if (routerRef) {
     const current = routerRef.currentRoute.value;
     const redirect = current.fullPath;
@@ -93,7 +120,16 @@ export async function logout(router: Router) {
     /* ignore */
   } finally {
     clearSession();
-    await router.replace("/resident/login");
+    invalidateAuthCache();
+    try {
+      await router.replace("/resident/login");
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[useResidentAuth] logout navigation error:", e);
+      if (window.location.pathname !== "/resident/login") {
+        window.location.replace("/resident/login");
+      }
+    }
   }
 }
 
@@ -110,5 +146,8 @@ export function useResidentAuth() {
     logout,
     onUnauthorized,
     setRouter,
+    completeLogin,
+    refreshAfterLogin,
+    invalidateAuthCache,
   };
 }
