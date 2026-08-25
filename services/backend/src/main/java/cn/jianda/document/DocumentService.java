@@ -84,9 +84,7 @@ public class DocumentService {
                 + "d.processing_status status,d.page_count,d.created_at,d.updated_at,o.name organization_name,"
                 + "COALESCE((SELECT MAX(progress) FROM processing_job j WHERE j.document_id=d.id),0) progress,"
                 + "(SELECT j.stage FROM processing_job j WHERE j.document_id=d.id ORDER BY j.id DESC LIMIT 1) stage,"
-                + "(SELECT COUNT(1) FROM processing_job q WHERE q.status IN ('QUEUED','RUNNING') AND q.id<="
-                + "  COALESCE((SELECT j.id FROM processing_job j WHERE j.document_id=d.id AND j.status IN ('QUEUED','RUNNING') ORDER BY j.id DESC LIMIT 1),0)"
-                + ") queue_position "
+                + "NULL queue_position "
                 + "FROM source_document d JOIN organization o ON o.id=d.organization_id ";
         if (user.isPlatformAdmin()) {
             return jdbc.queryForList(sql + "ORDER BY d.updated_at DESC");
@@ -1110,10 +1108,16 @@ public class DocumentService {
                     queuePosition = toInt(stat.get("pos"));
                     activeCount = toInt(stat.get("active_count"));
                     Object avgMs = stat.get("avg_ms");
-                    if (avgMs instanceof Number n && n.doubleValue() > 0) {
-                        long remainingMs = Math.max(0, Math.round(n.doubleValue() * (1.0 - (toDouble(job.get("progress")) / 100.0)));
-                        if (queuePosition > 0) remainingMs += Math.round(n.doubleValue()) * queuePosition;
-                        estimatedMs = String.valueOf(remainingMs);
+                    if (avgMs instanceof Number) {
+                        Number n = (Number) avgMs;
+                        if (n.doubleValue() > 0) {
+                            double prog = toDouble(job.get("progress")) / 100.0;
+                            long remainingMs = Math.max(0L, Math.round(n.doubleValue() * (1.0 - prog)));
+                            if (queuePosition > 0) remainingMs += Math.round(n.doubleValue()) * queuePosition;
+                            estimatedMs = String.valueOf(remainingMs);
+                        } else {
+                            estimatedMs = null;
+                        }
                     } else {
                         estimatedMs = null;
                     }
