@@ -1,5 +1,6 @@
 import axios from "axios";
 import { getOrCreateAnonymousUserId } from "./utils/visitorId";
+import { onUnauthorized } from "./composables/useResidentAuth";
 
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
@@ -8,6 +9,21 @@ const client = axios.create({
 const anonymousUser = getOrCreateAnonymousUserId();
 client.defaults.headers.common["X-Anonymous-User"] = anonymousUser;
 client.defaults.headers.common["X-Visitor-Id"] = anonymousUser;
+
+client.interceptors.response.use(
+  (resp) => resp,
+  (error) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      const url = String(error.config?.url || "");
+      if (url.includes("/resident/") || url.includes("/reminders") || (url.includes("/items/") && url.endsWith("/reminder"))) {
+        onUnauthorized();
+      }
+    }
+    return Promise.reject(error);
+  },
+);
+
+const residentHeaders = () => ({ "X-Resident-Token": localStorage.getItem("jianda_resident_token") || "" });
 
 export interface PublicItem {
   id: number;
@@ -183,6 +199,7 @@ export async function setFavorite(
   await client.request({
     url: `/public/items/${id}/favorite`,
     method: favorite ? "POST" : "DELETE",
+    headers: residentHeaders(),
   });
 }
 
@@ -282,23 +299,23 @@ export async function createReminder(
   reminderType: ResidentReminder["reminder_type"],
   remindAt: string,
 ): Promise<void> {
-  await client.post(`/public/items/${id}/reminder`, { reminderType, remindAt });
+  await client.post(`/public/items/${id}/reminder`, { reminderType, remindAt }, { headers: residentHeaders() });
 }
 
 export async function fetchReminders(): Promise<ResidentReminder[]> {
-  const response = await client.get("/public/reminders");
+  const response = await client.get("/public/reminders", { headers: residentHeaders() });
   return response.data.data;
 }
 
 export async function deleteReminder(id: number): Promise<void> {
-  await client.delete(`/public/reminders/${id}`);
+  await client.delete(`/public/reminders/${id}`, { headers: residentHeaders() });
 }
 
 export async function recordUsageEvent(
   id: number,
   eventType: "CONTENT_LISTEN" | "SERVICE_PHONE_CLICK" | "SERVICE_ADDRESS_COPY",
 ): Promise<void> {
-  await client.post(`/public/items/${id}/event/${eventType}`);
+  await client.post(`/public/items/${id}/event/${eventType}`, null, { headers: residentHeaders() });
 }
 
 export interface ResidentProfile {
@@ -314,7 +331,6 @@ export interface CommunityPost {
   is_demo: boolean; created_at: string; nickname: string; user_is_demo: boolean;
   like_count: number; comment_count: number; media: CommunityMedia[];
 }
-const residentHeaders = () => ({ "X-Resident-Token": localStorage.getItem("jianda_resident_token") || "" });
 export async function residentLogin(username: string, password: string): Promise<ResidentProfile> {
   const response = await client.post("/public/resident/login", { username, password });
   localStorage.setItem("jianda_resident_token", response.data.data.token);

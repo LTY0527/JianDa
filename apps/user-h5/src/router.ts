@@ -1,14 +1,10 @@
 import { createRouter, createWebHistory } from "vue-router";
+import { bootstrap, setRouter, useResidentAuth } from "./composables/useResidentAuth";
 
 const PUBLIC_PATHS = new Set([
   "/resident/login",
   "/resident/register",
 ]);
-
-function isLoggedIn(): boolean {
-  const token = localStorage.getItem("jianda_resident_token");
-  return !!token;
-}
 
 const router = createRouter({
   history: createWebHistory(),
@@ -45,16 +41,19 @@ const router = createRouter({
   ],
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
+  setRouter(router);
+  await bootstrap();
+  const { status: authStatus } = useResidentAuth();
   const requiresAuth = to.meta.requiresAuth !== false;
-  if (requiresAuth && !isLoggedIn()) {
+  if (requiresAuth && authStatus.value !== "authenticated") {
     const redirect = to.fullPath;
     return {
       path: "/resident/login",
       query: redirect && redirect !== "/" ? { redirect } : {},
     };
   }
-  if (to.meta.publicPage && isLoggedIn() && to.path === "/resident/login") {
+  if (to.meta.publicPage && authStatus.value === "authenticated" && to.path === "/resident/login") {
     const redirect = typeof to.query.redirect === "string" && to.query.redirect.startsWith("/")
       ? to.query.redirect
       : "/";
