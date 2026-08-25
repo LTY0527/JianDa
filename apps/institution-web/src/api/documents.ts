@@ -263,4 +263,18 @@ export const documentApi = {
     ),
   withdraw: (id: number) =>
     http.post<ApiResponse<void>>(`/documents/${id}/withdraw`),
+  updatePublicationChannel: (
+    id: number,
+    publishChannel:
+      | "HEALTH"
+      | "ELDERLY"
+      | "MEALS"
+      | "SERVICES"
+      | "FRAUD"
+      | "ACTIVITY"
+      | "COMMUNITY",
+  ) =>
+    http.put<ApiResponse<void>>(`/documents/${id}/publication-channel`, {
+      publishChannel,
+    }),
 };
