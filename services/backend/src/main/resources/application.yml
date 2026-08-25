@@ -51,8 +51,8 @@ jianda:
     daily-ai-max-tokens: ${CRAWL_DAILY_AI_MAX_TOKENS:50000}
     ai-max-input-characters: ${CRAWL_AI_MAX_INPUT_CHARACTERS:50000}
     ai-max-articles-per-task: ${CRAWL_AI_MAX_ARTICLES_PER_TASK:5}
-    ai-consumer-batch-size: ${CRAWL_AI_CONSUMER_BATCH_SIZE:2}
-    ai-consumer-delay-ms: ${CRAWL_AI_CONSUMER_DELAY_MS:60000}
+    ai-consumer-batch-size: ${CRAWL_AI_CONSUMER_BATCH_SIZE:4}
+    ai-consumer-delay-ms: ${CRAWL_AI_CONSUMER_DELAY_MS:10000}
     web-image-candidates-enabled: ${WEB_IMAGE_CANDIDATES_ENABLED:true}
     historical-cover-backfill-enabled: ${HISTORICAL_COVER_BACKFILL_ENABLED:true}
   cors:

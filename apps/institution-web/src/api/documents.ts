@@ -134,6 +134,9 @@ export interface ProcessingSnapshot {
   stage: string;
   progress: number;
   elapsed: number;
+  estimatedMs?: string;
+  queuePosition?: number;
+  activeProcessing?: number;
   heartbeat?: string;
   jobId?: number;
   jobStatus?: string;

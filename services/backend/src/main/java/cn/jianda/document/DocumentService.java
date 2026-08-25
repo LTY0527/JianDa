@@ -1085,11 +1085,44 @@ public class DocumentService {
                         + "+ (SELECT COUNT(*) FROM generated_content WHERE document_id=?)",
                 Integer.class, id, id);
         Map<String, Object> result = new LinkedHashMap<>();
+        int queuePosition = 0;
+        int activeCount = 0;
+        String estimatedMs = null;
+        Object docJobId = job.get("id");
+        if (docJobId != null) {
+            try {
+                String queueSql = "SELECT "
+                        + "(SELECT COUNT(*) FROM processing_job q "
+                        + " WHERE q.id<? AND q.status IN ('PROCESSING','WAITING_BUDGET','WAITING_APPROVAL')) AS pos,"
+                        + "(SELECT COUNT(*) FROM processing_job q WHERE q.status='PROCESSING') AS active_count,"
+                        + "AVG(CASE WHEN j.finished_at IS NOT NULL AND j.started_at IS NOT NULL THEN TIMESTAMPDIFF(MICROSECOND,j.started_at,j.finished_at)/1000 ELSE NULL END) AS avg_ms "
+                        + "FROM processing_job j WHERE j.status IN ('SUCCEEDED','PROCESSING','WAITING_BUDGET','WAITING_APPROVAL') "
+                        + "AND j.job_type='FULL_PIPELINE' AND j.started_at > TIMESTAMPADD(HOUR,-72,CURRENT_TIMESTAMP)";
+                List<Map<String, Object>> stats = jdbc.queryForList(queueSql, docJobId);
+                if (!stats.isEmpty()) {
+                    Map<String, Object> stat = stats.get(0);
+                    queuePosition = toInt(stat.get("pos"));
+                    activeCount = toInt(stat.get("active_count"));
+                    Object avgMs = stat.get("avg_ms");
+                    if (avgMs instanceof Number n && n.doubleValue() > 0) {
+                        long remainingMs = Math.max(0, Math.round(n.doubleValue() * (1.0 - (toDouble(job.get("progress")) / 100.0)));
+                        if (queuePosition > 0) remainingMs += Math.round(n.doubleValue()) * queuePosition;
+                        estimatedMs = String.valueOf(remainingMs);
+                    } else {
+                        estimatedMs = null;
+                    }
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
         result.put("documentId", id);
         result.put("status", document.get("processing_status"));
         result.put("stage", job.getOrDefault("stage", "PREPARING"));
         result.put("progress", job.getOrDefault("progress", 0));
         result.put("elapsed", elapsedSeconds(job));
+        result.put("estimatedMs", estimatedMs);
+        result.put("queuePosition", queuePosition);
+        result.put("activeProcessing", activeCount);
         result.put("heartbeat", job.get("updated_at"));
         result.put("jobId", job.get("id"));
         result.put("jobStatus", job.get("status"));
@@ -1103,6 +1136,16 @@ public class DocumentService {
         result.put("reasonCode", job.get("reason_code"));
         result.put("retryCount", job.getOrDefault("retry_count", 0));
         return result;
+    }
+
+    private static int toInt(Object value) {
+        if (value instanceof Number n) return Math.max(0, n.intValue());
+        return 0;
+    }
+
+    private static double toDouble(Object value) {
+        if (value instanceof Number n) return n.doubleValue();
+        return 0.0;
     }
 
     private static long elapsedSeconds(Map<String, Object> job) {

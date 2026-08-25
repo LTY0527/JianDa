@@ -16,6 +16,13 @@ import {
   ArrowRight,
   RefreshCw,
   TriangleAlert,
+  Clock4,
+  Workflow,
+  Timer,
+  Sparkles,
+  Gauge,
+  ShieldCheck,
+  Network,
 } from "lucide-vue-next";
 import { authorityLevelLabel, contentKindLabel } from "../utils/display";
 const route = useRoute();
@@ -34,6 +41,9 @@ const refreshing = ref(false);
 const retrying = ref(false);
 const lastUpdatedAt = ref<Date | null>(null);
 const elapsedSeconds = ref(0);
+const snapshotQueuePosition = ref(0);
+const snapshotActiveProcessing = ref(0);
+const snapshotEstimatedMs = ref<string | null>(null);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 const latestJob = computed(
@@ -132,6 +142,35 @@ const stageText: Record<string, string> = {
   SUCCEEDED: "处理完成",
   FAILED: "处理失败",
 };
+
+const railStages: Array<{ key: string; label: string; hint: string }> = [
+  { key: "SOURCE", label: "材料采集", hint: "" },
+  { key: "EXTRACT", label: "正文提取", hint: "" },
+  { key: "ANALYZE", label: "AI 分析与改写", hint: "" },
+  { key: "REVIEW", label: "等待审核", hint: "" },
+];
+
+const estimatedSeconds = computed<number | null>(() => {
+  if (snapshotEstimatedMs.value == null) return null;
+  const ms = Number(snapshotEstimatedMs.value);
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return Math.round(ms / 1000);
+});
+
+const etaText = computed(() => {
+  const secs = estimatedSeconds.value;
+  if (secs == null) return "估算中…";
+  if (secs < 60) return `约 ${secs} 秒`;
+  if (secs < 3600) {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return s < 10 ? `约 ${m} 分钟` : `约 ${m} 分 ${s} 秒`;
+  }
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return `约 ${h} 小时 ${m} 分`;
+});
+
 const failed = computed(() => document.value?.processing_status === "FAILED");
 const emptyReviewResult = computed(
   () =>
@@ -180,6 +219,29 @@ function moduleItems(contentJson?: string, plainText?: string): string[] {
       .filter(Boolean);
   } catch {
     return plainText ? [plainText] : [];
+  }
+}
+
+function railStageStatus(stageKey: string): "done" | "active" | "pending" | "failed" {
+  if (failed.value && (stageKey === "ANALYZE" || stageKey === "REVIEW")) {
+    if (stageKey === "REVIEW") return hasReviewContent.value ? "active" : "failed";
+    if (stageKey === "ANALYZE") return hasReviewContent.value ? "done" : "failed";
+  }
+  if (hasReviewContent.value && completed.value) return "done";
+  switch (stageKey) {
+    case "SOURCE":
+      return "done";
+    case "EXTRACT":
+      return textLength.value > 0 || segmentCount.value > 0 ? "done" : "active";
+    case "ANALYZE":
+      if (hasReviewContent.value) return "done";
+      if (failed.value || emptyReviewResult.value) return "failed";
+      return "active";
+    case "REVIEW":
+      if (completed.value) return "done";
+      return hasReviewContent.value ? "active" : "pending";
+    default:
+      return "pending";
   }
 }
 
@@ -262,6 +324,9 @@ async function loadSnapshot() {
     };
     jobs.value = [compactJob, ...jobs.value.filter((item) => item.id !== compactJob.id)];
     elapsedSeconds.value = snapshot.elapsed;
+    snapshotQueuePosition.value = Number(snapshot.queuePosition || 0);
+    snapshotActiveProcessing.value = Number(snapshot.activeProcessing || 0);
+    snapshotEstimatedMs.value = snapshot.estimatedMs ?? null;
     lastUpdatedAt.value = new Date();
     reachedTerminal = terminalStatuses.has(snapshot.status)
       || terminalStatuses.has(snapshot.jobStatus || "")
@@ -288,7 +353,7 @@ function startPolling() {
   pollTimer = setInterval(() => {
     if (!terminal.value) void loadSnapshot();
     else stopPolling();
-  }, 2000);
+  }, 1500);
 }
 
 function updateElapsed() {
@@ -333,33 +398,124 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <div>
+  <div class="processing-page">
     <PageHeader
-      title="AI 处理结果"
-      description="查看结构化字段、通俗版摘要和办理步骤。"
-      :breadcrumbs="['材料管理', '处理结果']"
+      title="材料处理中心"
+      description="实时查看材料采集、正文提取、AI 分析与审核准备进展。"
+      :breadcrumbs="['材料管理', '处理中心']"
       :status="failed ? '处理失败' : completed ? '处理完成' : '处理中'"
-      ><RouterLink
+    >
+      <RouterLink
         v-if="completed"
         class="btn primary"
         :to="`/documents/${documentId}/review`"
-        >进入原文对照审核<ArrowRight :size="17" /></RouterLink
-    ></PageHeader>
-    <p v-if="latestJob" class="info-note process-stage-note">
-      {{ stageText[latestJob.stage || ""] || "正在处理" }}
-      <span>· 进度 {{ latestJob.progress || 0 }}%</span>
-      <span>· 已处理 {{ elapsedSeconds }} 秒</span>
-      <span v-if="lastUpdatedAt">· 最近更新 {{ lastUpdatedAt.toLocaleTimeString("zh-CN", { hour12: false }) }}</span>
-      <span v-if="latestJob.cache_hit">· 已复用相同文件的验证结果</span>
-      <span v-if="latestJob.total_tokens">· {{ latestJob.total_tokens }} Token</span>
-      <span v-if="latestJob.provider_request_id">· 请求编号 {{ latestJob.provider_request_id }}</span>
-    </p>
+      >进入原文对照审核<ArrowRight :size="17" /></RouterLink>
+    </PageHeader>
+
+    <section class="process-summary-card">
+      <div class="process-summary-card__title">
+        <h1>{{ document?.title || `文档 #${documentId}` }}</h1>
+        <span v-if="latestJob?.status === 'WAITING_BUDGET'" class="pill pill--warning">等待预算恢复</span>
+        <span v-else-if="failed" class="pill pill--danger">处理失败</span>
+        <span v-else-if="completed" class="pill pill--success">可审核</span>
+        <span v-else class="pill pill--primary">处理中</span>
+      </div>
+
+      <div class="process-metrics">
+        <div class="process-metric">
+          <Workflow :size="18" />
+          <div>
+            <small>当前阶段</small>
+            <b>{{ stageText[latestJob.stage || ""] || "正在处理" }}</b>
+          </div>
+        </div>
+        <div class="process-metric">
+          <Gauge :size="18" />
+          <div>
+            <small>处理进度</small>
+            <b>{{ latestJob.progress || 0 }}%</b>
+          </div>
+        </div>
+        <div class="process-metric">
+          <Timer :size="18" />
+          <div>
+            <small>已耗时</small>
+            <b>{{ elapsedSeconds }} 秒</b>
+          </div>
+        </div>
+        <div class="process-metric">
+          <Clock4 :size="18" />
+          <div>
+            <small>预计剩余</small>
+            <b>{{ etaText }}</b>
+          </div>
+        </div>
+        <div class="process-metric">
+          <Network :size="18" />
+          <div>
+            <small>队列位置</small>
+            <b>{{ snapshotQueuePosition > 0 ? `前方 ${snapshotQueuePosition} 项` : "运行中" }}</b>
+          </div>
+        </div>
+        <div class="process-metric">
+          <Sparkles :size="18" />
+          <div>
+            <small>并行处理</small>
+            <b>{{ snapshotActiveProcessing || 0 }} 项</b>
+          </div>
+        </div>
+      </div>
+
+      <div class="process-progress">
+        <div class="process-progress__bar"><i :style="{ width: `${Math.min(100, latestJob.progress || 0)}%` }" /></div>
+        <div class="process-progress__meta">
+          <span v-if="lastUpdatedAt">最近更新：{{ lastUpdatedAt.toLocaleTimeString("zh-CN", { hour12: false }) }}</span>
+          <span v-if="latestJob.cache_hit">· 已复用相同文件的验证结果</span>
+          <span v-if="latestJob.total_tokens">· {{ latestJob.total_tokens }} Token</span>
+          <span v-if="latestJob.provider_request_id">· 请求编号 {{ latestJob.provider_request_id }}</span>
+        </div>
+      </div>
+    </section>
+
     <div class="process-actions">
       <RouterLink class="btn secondary" to="/documents">返回材料列表，后台继续处理</RouterLink>
       <button class="btn secondary" :disabled="refreshing" @click="load(true)">
         <RefreshCw :size="17" />{{ refreshing ? "正在刷新…" : "重新加载状态" }}
       </button>
     </div>
+
+    <section class="process-rail">
+      <template v-for="(stage, idx) in railStages" :key="stage.key">
+        <div :class="['rail-node', `rail-node--${railStageStatus(stage.key)}`]">
+          <div class="rail-node__indicator">
+            <CircleCheck v-if="railStageStatus(stage.key) === 'done'" />
+            <TriangleAlert v-else-if="railStageStatus(stage.key) === 'failed'" />
+            <LoaderCircle v-else />
+          </div>
+          <div class="rail-node__body">
+            <b>{{ stage.label }}</b>
+            <small>
+              <template v-if="stage.key === 'SOURCE'">{{ isWebArticle ? "官方网页正文快照已保存" : "原始文件已保存" }}</template>
+              <template v-else-if="stage.key === 'EXTRACT'">{{
+                isWebArticle
+                  ? `${textLength} 个字符 · ${segmentCount} 个段落 · ${imageCount} 张图片`
+                  : `${document?.page_count || 0} 页 · ${segmentCount} 段 · ${extractionMethodText}`
+              }}</template>
+              <template v-else-if="stage.key === 'ANALYZE'">{{
+                hasReviewContent
+                  ? `${contentKindLabel(document?.content_kind)} · ${fields.length} 字段 · ${generated.length} 模块`
+                  : failed || emptyReviewResult
+                    ? "未生成可审核字段"
+                    : "AI 正在识别事实并生成通俗版"
+              }}</template>
+              <template v-else-if="stage.key === 'REVIEW'">{{ completed ? "可进入原文对照审核" : "尚未进入审核" }}</template>
+            </small>
+          </div>
+        </div>
+        <i v-if="idx < railStages.length - 1" :class="['rail-connector', `rail-connector--${railStageStatus(stage.key)}`]" />
+      </template>
+    </section>
+
     <p v-if="deterministicFallback" class="inline-warning rewrite-fallback-note">
       <TriangleAlert :size="18" />
       <span><b>已生成基础易读版本</b><br />AI 自然化表达暂未成功，可稍后重新优化；当前内容可继续人工审核。</span>
@@ -367,45 +523,7 @@ onUnmounted(() => {
     <p v-if="route.query.imported === 'web'" class="inline-success">
       网页文章已导入为文档 {{ documentId }}，预览阶段未创建其他材料。
     </p>
-    <section class="process-rail">
-      <div class="done">
-        <CircleCheck /><span><b>{{ isWebArticle ? "网页抓取" : "材料上传" }}</b><small>{{ isWebArticle ? "官方网页正文快照已保存" : "原始文件已保存" }}</small></span>
-      </div>
-      <i></i>
-      <div class="done">
-        <CircleCheck /><span
-          ><b>正文提取</b
-          ><small
-            >{{ isWebArticle
-              ? `${textLength} 个字符，${segmentCount} 个段落，${imageCount} 张正文图片`
-              : `共 ${document?.page_count || 0} 页，${segmentCount} 个段落 · ${extractionMethodText}` }}</small
-          ></span
-        >
-      </div>
-      <i></i>
-      <div :class="{ done: hasReviewContent, failed }">
-        <CircleCheck v-if="hasReviewContent" />
-        <TriangleAlert v-else-if="failed || emptyReviewResult" />
-        <LoaderCircle v-else /><span
-          ><b>{{ isWebArticle ? "内容类型识别与 AI 适老化处理" : "AI 分析" }}</b
-          ><small>{{
-            hasReviewContent
-              ? `${contentKindLabel(document?.content_kind)} · 已生成 ${fields.length} 个可追溯字段和 ${generated.length} 个内容模块`
-              : failed || emptyReviewResult
-                ? "未生成可审核字段"
-                : "正在等待分析结果"
-          }}</small></span
-        >
-      </div>
-      <i></i>
-      <div :class="{ done: completed, active: !completed && !failed }">
-        <CircleCheck v-if="completed" />
-        <LoaderCircle v-else /><span
-          ><b>等待审核</b
-          ><small>{{ completed ? "处理完成，可进入原文对照审核" : "尚未进入审核" }}</small></span
-        >
-      </div>
-    </section>
+
     <section v-if="isWebArticle && document" class="panel web-process-facts">
       <div><small>来源等级</small><b>{{ authorityLevelLabel(document.source_authority_level) }}</b></div>
       <div><small>内容类型</small><b>{{ contentKindLabel(document.content_kind) }}</b></div>
@@ -413,7 +531,10 @@ onUnmounted(() => {
       <div><small>段落数量</small><b>{{ segmentCount }}</b></div>
       <div><small>正文图片</small><b>{{ imageCount }}</b></div>
       <div><small>处理耗时</small><b>{{ latestJob?.total_ms ? `${(latestJob.total_ms / 1000).toFixed(1)} 秒` : "—" }}</b></div>
+      <div><small>模型</small><b>{{ latestJob?.model_id || "默认" }}</b></div>
+      <div><small>Provider</small><b>{{ latestJob?.provider_id || "默认" }}</b></div>
     </section>
+
     <section
       v-if="!loading && (failed || emptyReviewResult || error)"
       class="panel process-failure"
@@ -426,13 +547,13 @@ onUnmounted(() => {
           <span v-if="rewriteRecoverable">
             已保留 {{ fields.length }} 个可追溯事实字段，不会再次调用事实提取。
           </span>
-          <span v-if="latestJob?.provider_request_id">请求编号：{{ latestJob.provider_request_id }}</span>
-          <span v-if="latestJob?.reason_code">原因代码：{{ latestJob.reason_code }}</span>
-          <span v-if="latestJob?.provider_id">Provider：{{ latestJob.provider_id }}</span>
-          <span v-if="latestJob?.model_id">模型：{{ latestJob.model_id }}</span>
-          <span v-if="latestJob?.response_fingerprint">响应指纹：{{ latestJob.response_fingerprint }}</span>
-          <span>已跨过真实模型调用边界：{{ latestJob?.crossed_provider_boundary ? "是" : "否" }}</span>
-          <span>重试次数：{{ latestJob?.retry_count || 0 }}</span>
+          <span v-if="latestJob.provider_request_id">请求编号：{{ latestJob.provider_request_id }}</span>
+          <span v-if="latestJob.reason_code">原因代码：{{ latestJob.reason_code }}</span>
+          <span v-if="latestJob.provider_id">Provider：{{ latestJob.provider_id }}</span>
+          <span v-if="latestJob.model_id">模型：{{ latestJob.model_id }}</span>
+          <span v-if="latestJob.response_fingerprint">响应指纹：{{ latestJob.response_fingerprint }}</span>
+          <span>已跨过真实模型调用边界：{{ latestJob.crossed_provider_boundary ? "是" : "否" }}</span>
+          <span>重试次数：{{ latestJob.retry_count || 0 }}</span>
         </p>
         <div>
           <RouterLink class="btn secondary" to="/documents"
@@ -448,6 +569,7 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
+
     <section v-if="structuredModules.length" class="panel structured-modules">
       <div class="panel-title">
         <div>
@@ -462,6 +584,7 @@ onUnmounted(() => {
         </ul>
       </article>
     </section>
+
     <div v-if="hasReviewContent" class="result-grid">
       <section class="panel">
         <div class="panel-title">
@@ -469,6 +592,7 @@ onUnmounted(() => {
             <h2>结构化字段</h2>
             <p>共识别 {{ fields.length }} 项关键内容</p>
           </div>
+          <ShieldCheck :size="22" />
         </div>
         <div class="field-results">
           <article v-for="f in fields" :key="f.id">
@@ -519,25 +643,174 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.processing-page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px 24px 64px;
+  color: #172326;
+}
+.process-summary-card {
+  background: linear-gradient(135deg, #0E5A55 0%, #146F68 100%);
+  color: #fff;
+  border-radius: 18px;
+  padding: 28px 30px;
+  box-shadow: 0 20px 50px rgba(14, 90, 85, .22);
+  margin-top: 18px;
+}
+.process-summary-card__title {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.process-summary-card__title h1 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: .02em;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.pill--primary { background: rgba(247, 244, 238, .18); }
+.pill--success { background: rgba(190, 240, 212, .2); }
+.pill--warning { background: rgba(246, 211, 143, .22); }
+.pill--danger  { background: rgba(250, 223, 216, .22); }
+
+.process-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+.process-metric {
+  background: rgba(255, 255, 255, .12);
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+.process-metric svg { width: 20px; height: 20px; color: #D7E7E3; flex: 0 0 auto; }
+.process-metric div { min-width: 0; }
+.process-metric small { display: block; font-size: 12px; color: #C7D7D3; }
+.process-metric b { display: block; font-size: 17px; margin-top: 2px; overflow-wrap: anywhere; }
+
+.process-progress { margin-top: 22px; }
+.process-progress__bar {
+  width: 100%;
+  height: 12px;
+  background: rgba(255, 255, 255, .18);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.process-progress__bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #F7F4EE, #EAD8A1);
+  transition: width .35s ease;
+}
+.process-progress__meta {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #D3E3DF;
+  font-size: 13px;
+}
 .process-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin: 14px 0;
+  margin: 22px 0 28px;
 }
-.structured-modules {
-  margin-bottom: 16px;
+.process-rail {
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+  padding: 20px 0;
+  overflow-x: auto;
 }
-.structured-modules article + article {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--color-border);
+.rail-node {
+  flex: 1 1 0;
+  min-width: 180px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #E7ECE9;
 }
-.structured-modules h3 {
-  margin: 0 0 8px;
+.rail-node__indicator {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: #0E5A55;
 }
-.structured-modules ul {
-  margin: 0;
-  padding-left: 1.25rem;
+.rail-node__body b { display: block; font-size: 16px; }
+.rail-node__body small { display: block; margin-top: 4px; color: #667378; font-size: 13px; line-height: 1.6; }
+.rail-node--done { background: #F4FAF7; }
+.rail-node--done .rail-node__indicator { background: #0E5A55; }
+.rail-node--failed { background: #FDF3F0; border-color: #F1C8BF; }
+.rail-node--failed .rail-node__indicator { background: #B84A42; }
+.rail-node--active { background: #FFF9EE; border-color: #EAD8A1; }
+.rail-node--active .rail-node__indicator { background: #D58B32; animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+.rail-connector {
+  flex: 0 0 34px;
+  align-self: center;
+  height: 2px;
+  background: #D9E2DF;
+  margin: 0 6px;
+  position: relative;
+}
+.rail-connector--done { background: linear-gradient(90deg, #0E5A55, #53B09E); }
+.rail-connector--active { background: linear-gradient(90deg, #D58B32, #F1DDA0); }
+.rail-connector--failed { background: #F1C8BF; }
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.web-process-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.web-process-facts div {
+  background: #F7F9F8;
+  border: 1px solid #E7ECE9;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.web-process-facts small { color: #667378; font-size: 12px; }
+.web-process-facts b { font-size: 16px; }
+@media(max-width: 960px){
+  .process-metrics { grid-template-columns: repeat(3, 1fr); }
+  .web-process-facts { grid-template-columns: repeat(2, 1fr); }
+}
+@media(max-width: 680px){
+  .processing-page { padding: 18px 16px 48px; }
+  .process-summary-card { padding: 22px 18px; border-radius: 14px; }
+  .process-summary-card__title h1 { font-size: 22px; }
+  .process-metrics { grid-template-columns: repeat(2, 1fr); }
+  .process-metric b { font-size: 15px; }
+  .rail-node { min-width: 160px; }
 }
 </style>
