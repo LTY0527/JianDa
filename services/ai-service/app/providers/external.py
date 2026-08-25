@@ -350,42 +350,107 @@ class ExternalLlmProvider(LlmProvider):
                 ),
             },
         ]
-        completion = self._completion(
-            self.client or self._shared_client(),
-            messages,
-            "assistant_rag",
-            max_tokens=min(self.settings.max_tokens, 1200),
-        )
-        answer = str(completion.payload.get("answer") or "").strip()
-        actions_raw = completion.payload.get("actions")
-        indexes_raw = completion.payload.get("used_citation_indexes")
-        actions = (
-            [str(item).strip() for item in actions_raw if str(item).strip()]
-            if isinstance(actions_raw, list)
-            else []
-        )
-        indexes = (
-            [int(item) for item in indexes_raw if isinstance(item, int)]
-            if isinstance(indexes_raw, list)
-            else []
-        )
         allowed = {item.index for item in request.evidence}
-        indexes = list(dict.fromkeys(index for index in indexes if index in allowed))
-        cited_in_text = {
-            int(value) for value in re.findall(r"\[(\d+)]", answer)
-        }
+        completions: list[CompletionResult] = []
+        answer = ""
+        actions: list[str] = []
+        declared_indexes: list[int] = []
+        cited_in_text: set[int] = set()
+        completion: CompletionResult | None = None
+        client = self.client or self._shared_client()
+        for attempt in range(2):
+            attempt_messages = list(messages)
+            if attempt:
+                attempt_messages.append({
+                    "role": "user",
+                    "content": (
+                        "上次输出缺少可验证的引用。请重新回答同一问题。"
+                        "answer中的每个事实性短句末尾必须包含给定证据编号，"
+                        "例如[1]；used_citation_indexes必须列出正文实际使用的编号。"
+                        "只输出一个合法JSON对象。"
+                    ),
+                })
+            completion = self._completion(
+                client,
+                attempt_messages,
+                "assistant_rag",
+                max_tokens=min(self.settings.max_tokens, 1200),
+            )
+            completions.append(completion)
+            answer = str(completion.payload.get("answer") or "").strip()
+            actions_raw = completion.payload.get("actions")
+            indexes_raw = completion.payload.get("used_citation_indexes")
+            actions = (
+                [str(item).strip() for item in actions_raw if str(item).strip()]
+                if isinstance(actions_raw, list)
+                else []
+            )
+            declared_indexes = (
+                [int(item) for item in indexes_raw if isinstance(item, int)]
+                if isinstance(indexes_raw, list)
+                else []
+            )
+            cited_in_text = {
+                int(value) for value in re.findall(r"\[(\d+)]", answer)
+            }
+            valid = (
+                bool(answer)
+                and bool(cited_in_text)
+                and cited_in_text.issubset(allowed)
+            )
+            if valid:
+                break
+            LOGGER.warning(
+                "provider=external model=%s stage=assistant_rag "
+                "citation_validation_failed=true answer_present=%s "
+                "cited_count=%d declared_count=%d allowed_count=%d "
+                "has_out_of_range_citation=%s repair_attempt=%d request_id=%s",
+                self.settings.model,
+                bool(answer),
+                len(cited_in_text),
+                len(declared_indexes),
+                len(allowed),
+                not cited_in_text.issubset(allowed),
+                attempt,
+                completion.request_id,
+            )
         if (
-            not answer
-            or not indexes
+            completion is None
+            or not answer
             or not cited_in_text
             or not cited_in_text.issubset(allowed)
-            or not cited_in_text.issubset(set(indexes))
         ):
             raise ExternalProviderError(
                 "助手回答缺少有效引用",
                 error_code="ASSISTANT_CITATION_INVALID",
                 stage="assistant_rag",
-                request_id=completion.request_id,
+                request_id=completion.request_id if completion else None,
+                model=self.settings.model,
+                prompt_tokens=sum(item.prompt_tokens for item in completions),
+                completion_tokens=sum(
+                    item.completion_tokens for item in completions
+                ),
+                total_tokens=sum(item.total_tokens for item in completions),
+                elapsed_ms=sum(item.elapsed_ms for item in completions),
+            )
+        # The inline citations are the auditable source of truth. Some models
+        # produce a correct cited answer but omit or partially fill the
+        # companion JSON array. Recover only indexes that are visibly cited in
+        # the answer and belong to the supplied evidence; never invent an
+        # index from the declaration alone.
+        declared = {
+            index for index in declared_indexes if index in allowed
+        }
+        indexes = sorted(cited_in_text)
+        if declared != cited_in_text:
+            LOGGER.info(
+                "provider=external model=%s stage=assistant_rag "
+                "citation_indexes_repaired=true cited_count=%d declared_count=%d "
+                "request_id=%s",
+                self.settings.model,
+                len(cited_in_text),
+                len(declared),
+                completion.request_id,
             )
         return AssistantAnswerResponse(
             answer=answer,
@@ -393,10 +458,10 @@ class ExternalLlmProvider(LlmProvider):
             used_citation_indexes=indexes,
             model=self.settings.model,
             request_id=completion.request_id,
-            prompt_tokens=completion.prompt_tokens,
-            completion_tokens=completion.completion_tokens,
-            total_tokens=completion.total_tokens,
-            elapsed_ms=completion.elapsed_ms,
+            prompt_tokens=sum(item.prompt_tokens for item in completions),
+            completion_tokens=sum(item.completion_tokens for item in completions),
+            total_tokens=sum(item.total_tokens for item in completions),
+            elapsed_ms=sum(item.elapsed_ms for item in completions),
         )
 
     def answer_general_assistant(

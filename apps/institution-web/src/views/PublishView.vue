@@ -9,7 +9,8 @@ import {
 } from "../api/documents";
 import { apiMessage } from "../api/http";
 import { buildH5GuideUrl } from "../utils/h5-url";
-import { CheckCircle2, Send, ShieldCheck, Smartphone, Type } from "lucide-vue-next";
+import { CheckCircle2, Send, ShieldCheck, Smartphone, Type, HeartPulse, HandHeart,
+  Utensils, ClipboardList, ShieldAlert, CalendarDays, UsersRound } from "lucide-vue-next";
 
 const documentId = Number(useRoute().params.id);
 const document = ref<DocumentDetail | null>(null);
@@ -32,7 +33,20 @@ const form = reactive({
   sourceUrl: "",
   publishedAt: new Date().toISOString().slice(0, 10),
   allowPublicOriginal: false,
+  publishChannel: "COMMUNITY" as "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY",
+  promoteToRecommend: false,
+  importanceLevel: "NORMAL" as "NORMAL" | "IMPORTANT" | "URGENT",
 });
+const channelOptions = [
+  { value: "HEALTH", label: "健康", icon: HeartPulse },
+  { value: "ELDERLY", label: "养老", icon: HandHeart },
+  { value: "MEALS", label: "助餐", icon: Utensils },
+  { value: "SERVICES", label: "办事", icon: ClipboardList },
+  { value: "FRAUD", label: "防诈", icon: ShieldAlert },
+  { value: "ACTIVITY", label: "活动", icon: CalendarDays },
+  { value: "COMMUNITY", label: "社区", icon: UsersRound },
+] as const;
+const selectedChannelLabel = computed(() => channelOptions.find((item) => item.value === form.publishChannel)?.label || "社区");
 const isDirty = computed(() => Boolean(initialForm.value) && JSON.stringify(form) !== initialForm.value);
 const imageReviewBlocked = computed(
   () =>
@@ -92,6 +106,7 @@ onMounted(async () => {
     form.publishedAt = String(
       document.value.source_published_at || new Date().toISOString(),
     ).slice(0, 10);
+    form.publishChannel = document.value.publish_channel || document.value.suggested_publish_channel || "COMMUNITY";
     fieldCount.value = fieldsResponse.data.data.length;
     previewFields.value = fieldsResponse.data.data
       .filter((field) => field.field_value?.trim())
@@ -122,6 +137,9 @@ async function publish() {
       sourceName: form.sourceName,
       sourceUrl: form.sourceUrl,
       allowPublicOriginal: form.allowPublicOriginal,
+      publishChannel: form.publishChannel,
+      promoteToRecommend: form.promoteToRecommend,
+      importanceLevel: form.importanceLevel,
     });
     publishedSlug.value = response.data.data.slug;
     allowLeave.value = true;
@@ -199,6 +217,19 @@ async function publish() {
       <label class="field"
         >摘要<textarea v-model="form.summary" rows="3" readonly></textarea>
       </label>
+      <fieldset class="publish-channel-field">
+        <legend>发布到栏目</legend>
+        <div class="publish-channel-options">
+          <button v-for="item in channelOptions" :key="item.value" type="button" :class="{ active: form.publishChannel === item.value }" @click="form.publishChannel = item.value">
+            <component :is="item.icon" />{{ item.label }}
+          </button>
+        </div>
+        <small v-if="document?.channel_reason">系统建议：{{ document.channel_reason }}<template v-if="document.channel_confidence">（{{ Math.round(document.channel_confidence * 100) }}%）</template></small>
+      </fieldset>
+      <div class="publish-priority-row">
+        <label class="check"><input v-model="form.promoteToRecommend" type="checkbox" />提升到推荐流</label>
+        <label class="field">重要程度<select v-model="form.importanceLevel"><option value="NORMAL">普通</option><option value="IMPORTANT">重要</option><option value="URGENT">紧急</option></select></label>
+      </div>
       <div class="form-row">
         <label class="field"
           >来源名称<input v-model="form.sourceName" required
@@ -234,6 +265,7 @@ async function publish() {
     <aside class="publish-preview" aria-label="用户端发布预览">
       <header><div><Smartphone /><span><b>用户端预览</b><small>发布前确认老人实际看到的内容</small></span></div><div class="preview-size-switch"><button type="button" :class="{ active: previewFont === 20 }" @click="previewFont = 20">普通字号</button><button type="button" :class="{ active: previewFont === 24 }" @click="previewFont = 24"><Type />大字模式</button></div></header>
       <article class="phone-preview" :style="{ fontSize: `${previewFont}px` }">
+        <small class="phone-preview__destination">将展示在：首页 &gt; {{ selectedChannelLabel }}</small>
         <span class="phone-preview__category">{{ form.category }}</span>
         <h2>{{ form.title || "待填写标题" }}</h2>
         <p>{{ form.summary || "暂无摘要，请返回审核页确认适老化内容。" }}</p>

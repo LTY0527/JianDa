@@ -32,5 +32,7 @@ public interface AiClient {
 
     Map<String, Object> assistantStatus();
 
+    Map<String, Object> runtimeCapabilities();
+
     record ImageAsset(byte[] bytes, String contentType, Integer width, Integer height) {}
 }

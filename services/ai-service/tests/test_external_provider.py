@@ -289,7 +289,17 @@ def test_assistant_rag_rejects_answer_without_valid_citation():
                         "used_citation_indexes": [],
                     }
                 ),
-            )
+            ),
+            response(
+                200,
+                json_completion(
+                    {
+                        "answer": "仍然没有引用。",
+                        "actions": [],
+                        "used_citation_indexes": [],
+                    }
+                ),
+            ),
         ]
     ) as server:
         provider = ExternalLlmProvider(settings(server.url, retries=0))
@@ -317,6 +327,119 @@ def test_assistant_rag_rejects_answer_without_valid_citation():
         )
         assert "JSON" in prompt
         assert "请到现场窗口咨询" in prompt
+        assert len(server.requests) == 2
+
+
+def test_assistant_rag_retries_once_when_inline_citation_is_missing():
+    first = json_completion({
+        "answer": "肝炎防治应重视早发现。",
+        "actions": [],
+        "used_citation_indexes": [],
+    })
+    first["usage"] = {
+        "prompt_tokens": 100,
+        "completion_tokens": 20,
+        "total_tokens": 120,
+    }
+    second = json_completion({
+        "answer": "肝炎防治应重视早发现。[1]",
+        "actions": ["及时查看权威健康材料。"],
+        "used_citation_indexes": [1],
+    })
+    second["usage"] = {
+        "prompt_tokens": 130,
+        "completion_tokens": 30,
+        "total_tokens": 160,
+    }
+    with QueueServer([response(200, first), response(200, second)]) as server:
+        provider = ExternalLlmProvider(settings(server.url, retries=0))
+        result = provider.answer_assistant(
+            AssistantAnswerRequest(
+                question="肝炎早防早治有哪些健康提醒？",
+                evidence=[AssistantEvidence(
+                    index=1,
+                    title="肝炎防治提示",
+                    slug="hepatitis-prevention",
+                    source_name="卫生部门",
+                    quote="肝炎防治应重视早发现。",
+                )],
+            )
+        )
+
+    assert len(server.requests) == 2
+    assert "上次输出缺少可验证的引用" in (
+        server.requests[1]["json"]["messages"][-1]["content"]
+    )
+    assert result.used_citation_indexes == [1]
+    assert result.prompt_tokens == 230
+    assert result.completion_tokens == 50
+    assert result.total_tokens == 280
+
+
+def test_assistant_rag_recovers_indexes_from_valid_inline_citations():
+    payload = {
+        "answer": "肝炎防治应重视早发现和规范就医。[2]",
+        "actions": ["查看平台中的权威健康材料。"],
+        "used_citation_indexes": [],
+    }
+    with QueueServer([response(200, json_completion(payload))]) as server:
+        provider = ExternalLlmProvider(settings(server.url, retries=0))
+        result = provider.answer_assistant(
+            AssistantAnswerRequest(
+                question="肝炎早防早治有哪些健康提醒？",
+                evidence=[
+                    AssistantEvidence(
+                        index=1,
+                        title="健康提示甲",
+                        slug="health-a",
+                        source_name="卫生部门",
+                        quote="保持健康生活方式。",
+                    ),
+                    AssistantEvidence(
+                        index=2,
+                        title="肝炎防治提示",
+                        slug="hepatitis-prevention",
+                        source_name="卫生部门",
+                        quote="肝炎防治应重视早发现和规范就医。",
+                    ),
+                ],
+            )
+        )
+
+    assert result.used_citation_indexes == [2]
+
+
+def test_assistant_rag_uses_only_indexes_actually_cited_in_answer():
+    payload = {
+        "answer": "请按照官方材料中的时间办理。[1]",
+        "actions": [],
+        "used_citation_indexes": [1, 2],
+    }
+    with QueueServer([response(200, json_completion(payload))]) as server:
+        provider = ExternalLlmProvider(settings(server.url, retries=0))
+        result = provider.answer_assistant(
+            AssistantAnswerRequest(
+                question="什么时候办理？",
+                evidence=[
+                    AssistantEvidence(
+                        index=1,
+                        title="办理时间",
+                        slug="service-time",
+                        source_name="政务中心",
+                        quote="请在工作日办理。",
+                    ),
+                    AssistantEvidence(
+                        index=2,
+                        title="办理地点",
+                        slug="service-place",
+                        source_name="政务中心",
+                        quote="请到服务大厅办理。",
+                    ),
+                ],
+            )
+        )
+
+    assert result.used_citation_indexes == [1]
 
 
 def test_general_assistant_is_separate_from_grounded_rag_and_returns_metrics():

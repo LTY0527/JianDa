@@ -178,6 +178,20 @@ export interface RuntimeCapabilities {
   crawlSchedulerEnabled: boolean;
   dailyArticleLimit: number;
   dailyTokenLimit: number;
+  amap: RuntimeCapability;
+  webSearch: RuntimeCapability & { provider: string };
+  payment: { available: boolean; provider: string; message: string; testEnvironment?: boolean };
+  aiService: {
+    service: RuntimeCapability;
+    llm: RuntimeCapability & { provider?: string; model?: string };
+    ocr: RuntimeCapability & { engine?: string; required_languages?: string[]; available_languages?: string[] };
+    webCollector: RuntimeCapability;
+  };
+}
+
+export interface RuntimeCapability {
+  status: "ready" | "degraded" | "disabled" | "unreachable";
+  message?: string;
 }
 
 export interface SourceRegistryPayload {

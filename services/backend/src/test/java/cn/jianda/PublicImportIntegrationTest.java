@@ -637,6 +637,12 @@ class PublicImportIntegrationTest {
                         .content("{\"title\":\"反诈提醒测试\",\"category\":\"反诈\",\"sourceName\":\"国家反诈中心\",\"sourceUrl\":\"https://www.mps.gov.cn/test\"}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String slug = objectMapper.readTree(published).path("data").path("slug").asText();
+        mvc.perform(put("/api/documents/{id}/publication-channel", documentId)
+                        .header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"publishChannel\":\"COMMUNITY\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/public/items/{slug}", slug)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.publish_channel").value("COMMUNITY"));
         mvc.perform(get("/api/public/items/{slug}", slug)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.generated.RISK_WARNING[0]").value("正规退款不会要求向安全账户转账。"));
         mvc.perform(post("/api/documents/{id}/withdraw", documentId).header("Authorization", auth))

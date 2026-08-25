@@ -18,6 +18,7 @@ import {
   type SourceRegistryPayload,
   type WebArticlePreview,
   type WebSourceRegistry,
+  type BatchImportJob,
 } from "../api/publicSources";
 import {
   formatDisplayDateTime,
@@ -30,7 +31,22 @@ const registries = ref<WebSourceRegistry[]>([]);
 const jobs = ref<CrawlJob[]>([]);
 const aiQueue = ref<AiQueueItem[]>([]);
 const runtime = ref<RuntimeCapabilities | null>(null);
-const selectedJob = ref<CrawlJob | null>(null);
+const capabilityItems = computed(() => {
+  if (!runtime.value) return [];
+  const payment = runtime.value.payment;
+  return [
+    { name: "高德地图", status: runtime.value.amap.status, detail: runtime.value.amap.message || "地图配置" },
+    { name: "DeepSeek", status: runtime.value.aiService.llm.status, detail: `${runtime.value.aiService.llm.provider || runtime.value.llmProvider} ${runtime.value.aiService.llm.model || runtime.value.externalModel}`.trim() },
+    { name: "联网搜索", status: runtime.value.webSearch.status, detail: runtime.value.webSearch.message || runtime.value.webSearch.provider },
+    { name: "网页采集", status: runtime.value.aiService.webCollector.status, detail: "安全预览与正文解析" },
+    { name: "OCR", status: runtime.value.aiService.ocr.status, detail: runtime.value.aiService.ocr.engine || "文字识别" },
+    { name: "支付测试", status: payment.available ? "ready" : "disabled", detail: payment.message },
+  ];
+});
+function capabilityLabel(status: string) {
+  return ({ ready: "可用", degraded: "待配置", disabled: "未启用", unreachable: "无法连接" } as Record<string, string>)[status] || status;
+}
+const selectedJob = ref<(CrawlJob & { result?: BatchImportJob["result"] }) | null>(null);
 const taskStatus = ref("");
 const taskSourceId = ref<number | undefined>();
 const retrying = ref<number | null>(null);
@@ -271,7 +287,9 @@ async function stopJob(job: CrawlJob) {
 
 async function openJob(job: CrawlJob) {
   try {
-    selectedJob.value = (await publicSourceApi.crawlJob(job.id)).data.data;
+    selectedJob.value = job.processing_stage === "BATCH_IMPORT"
+      ? (await publicSourceApi.registryImportJob(job.id)).data.data
+      : (await publicSourceApi.crawlJob(job.id)).data.data;
   } catch (cause) {
     error.value = apiMessage(cause);
   }
@@ -627,6 +645,16 @@ onUnmounted(() => {
       <div v-else-if="!registries.length" class="empty-state"><b>还没有自动采集来源</b><p>新增并核验官方来源后，可在这里查看检查状态。</p></div>
     </section>
 
+    <section class="runtime-strip" aria-label="运行能力诊断">
+      <header><div><b>运行能力</b><span>只显示可用状态，不展示密钥和敏感配置</span></div><button type="button" class="text-action" @click="load"><RefreshCw />重新检测</button></header>
+      <div v-if="capabilityItems.length" class="runtime-grid">
+        <article v-for="item in capabilityItems" :key="item.name" :class="`runtime-${item.status}`">
+          <span>{{ item.name }}</span><b>{{ capabilityLabel(item.status) }}</b><small>{{ item.detail }}</small>
+        </article>
+      </div>
+      <div v-else class="empty-state compact">正在检查运行能力…</div>
+    </section>
+
     <button class="advanced-toggle" type="button" :aria-expanded="showAdvanced" @click="showAdvanced = !showAdvanced"><Settings2 />{{ showAdvanced ? "收起高级管理" : "高级管理" }}<span>来源核验、扫描范围、AI 预算和任务记录</span></button>
 
     <div v-if="showAdvanced" class="collection-advanced">
@@ -976,6 +1004,10 @@ onUnmounted(() => {
       <div v-if="selectedJob" class="source-create">
         <div class="panel-title"><div><h2>任务 #{{selectedJob.id}} 详情</h2><p>{{selectedJob.source_name}} · {{statusLabel(selectedJob.status)}}</p></div><button class="btn secondary" @click="selectedJob=null">关闭</button></div>
         <div class="form-actions"><button v-if="selectedJob.errors?.some(item => item.retryable && !item.resolved_at)" class="btn primary" :disabled="retrying !== null" @click="retryFailures(selectedJob)">整批重试可重试项</button></div>
+        <div v-if="selectedJob.result?.imported?.length" class="safe-note">
+          本次已加入 {{ selectedJob.result.importedCount }} 篇材料。
+          <RouterLink :to="{ path: '/documents', query: { importJobId: selectedJob.id } }">查看本次导入</RouterLink>
+        </div>
         <table class="data-table"><thead><tr><th>URL / 阶段</th><th>错误</th><th>重试状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in selectedJob.errors || []" :key="item.id"><td>{{item.failed_url || '无地址'}}<small>{{item.processing_stage}} · {{item.error_code}}</small></td><td>{{item.error_summary}}</td><td>{{item.retryable ? `可重试 ${item.retry_count}/3` : '不可重试'}}<small>{{item.next_retry_at ? formatDisplayDateTime(item.next_retry_at) : ''}}</small></td><td><button v-if="item.retryable && !item.resolved_at && item.retry_count < 3" class="text-action" :disabled="retrying !== null" @click="retryError(item.id)">单条重试</button><span v-else>无需操作</span></td></tr></tbody></table>
         <div v-if="!selectedJob.errors?.length" class="empty-state">此任务没有单条错误记录。</div>
       </div>
@@ -1168,7 +1200,22 @@ onUnmounted(() => {
   justify-content: space-between;
 }
 
+.runtime-strip { margin: 16px 0; padding: 18px; border: 1px solid #d8e2df; background: #fff; }
+.runtime-strip header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 14px; }
+.runtime-strip header div { display: flex; gap: 10px; align-items: baseline; }
+.runtime-strip header span { color: #687789; font-size: 13px; }
+.runtime-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.runtime-grid article { min-width: 0; padding: 12px; border-left: 3px solid #9aa8a5; background: #f7f9f8; }
+.runtime-grid article > * { display: block; overflow-wrap: anywhere; }
+.runtime-grid article span, .runtime-grid article small { color: #687789; font-size: 12px; }
+.runtime-grid article b { margin: 4px 0; color: #254840; }
+.runtime-grid .runtime-ready { border-left-color: #2d7d5f; background: #f2f8f5; }
+.runtime-grid .runtime-degraded { border-left-color: #c78322; background: #fff8ec; }
+.runtime-grid .runtime-unreachable { border-left-color: #b44949; background: #fff3f3; }
+
 @media (max-width: 720px) {
+  .runtime-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .runtime-strip header, .runtime-strip header div { align-items: flex-start; flex-direction: column; }
   .source-operation-state { flex-direction: column; }
   .source-operation-actions { width: 100%; flex-wrap: wrap; }
   .source-overview { grid-template-columns: 1fr; }

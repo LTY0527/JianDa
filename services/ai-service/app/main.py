@@ -1,5 +1,7 @@
 import os
 import logging
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Response
 
 from app.extraction import (
     ALLOWED_SUFFIXES,
+    OCR_LANGUAGE,
     OcrUnavailableError,
     extract_file,
     render_pdf_first_page,
@@ -29,6 +32,7 @@ from app.models import (
     WebArticlePreview,
     WebArticleRequest,
 )
+from app.channel_classifier import suggest_publish_channel
 from app.providers import ExternalLlmProvider, LlmProvider, MockProvider
 from app.providers.external import ExternalProviderError
 from app.article_discovery import DiscoveryFailure, DiscoverySource, discover_articles
@@ -57,6 +61,44 @@ def get_provider() -> LlmProvider:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "provider": os.getenv("LLM_PROVIDER", "mock")}
+
+
+@app.get("/internal/runtime-capabilities")
+def runtime_capabilities() -> dict[str, object]:
+    tesseract = shutil.which("tesseract")
+    ocr_languages: list[str] = []
+    if tesseract:
+        try:
+            completed = subprocess.run(
+                [tesseract, "--list-langs"], capture_output=True, text=True,
+                timeout=3, check=False,
+            )
+            ocr_languages = [
+                line.strip() for line in completed.stdout.splitlines()[1:] if line.strip()
+            ]
+        except (OSError, subprocess.SubprocessError):
+            ocr_languages = []
+    required_languages = [item for item in OCR_LANGUAGE.split("+") if item]
+    ocr_ready = bool(tesseract) and all(
+        language in ocr_languages for language in required_languages
+    )
+    provider = os.getenv("LLM_PROVIDER", "mock").lower()
+    llm_ready = provider == "mock" or bool(os.getenv("EXTERNAL_LLM_API_KEY", "").strip())
+    return {
+        "service": {"status": "ready"},
+        "llm": {
+            "status": "ready" if llm_ready else "degraded",
+            "provider": provider,
+            "model": os.getenv("EXTERNAL_LLM_MODEL", "") if provider == "external" else "mock",
+        },
+        "ocr": {
+            "status": "ready" if ocr_ready else "degraded",
+            "engine": "tesseract" if tesseract else "unavailable",
+            "required_languages": required_languages,
+            "available_languages": ocr_languages,
+        },
+        "webCollector": {"status": "ready"},
+    }
 
 
 @app.post("/internal/extract-text", response_model=ExtractTextResult)
@@ -151,7 +193,7 @@ async def metadata_preview(
 @app.post("/internal/analyze", response_model=AnalyzeResult)
 def analyze(request: TextRequest) -> AnalyzeResult:
     try:
-        return get_provider().analyze(request)
+        return _with_channel_suggestion(get_provider().analyze(request), request)
     except ExternalProviderError as exc:
         raise HTTPException(status_code=503, detail=exc.safe_detail()) from exc
     except (RuntimeError, NotImplementedError) as exc:
@@ -175,9 +217,24 @@ def rewrite(request: RewriteOnlyRequest) -> AnalyzeResult:
         checkpoint = request.fact_checkpoint.get("facts", request.fact_checkpoint)
         if not isinstance(checkpoint, dict):
             raise ExternalProviderError("事实检查点格式错误")
-        return provider.rewrite_from_checkpoint(request, checkpoint)
+        return _with_channel_suggestion(
+            provider.rewrite_from_checkpoint(request, checkpoint), request
+        )
     except ExternalProviderError as exc:
         raise HTTPException(status_code=503, detail=exc.safe_detail()) from exc
+
+
+def _with_channel_suggestion(
+    result: AnalyzeResult, request: TextRequest
+) -> AnalyzeResult:
+    suggestion = suggest_publish_channel(request)
+    return result.model_copy(
+        update={
+            "suggested_publish_channel": suggestion.channel,
+            "channel_confidence": suggestion.confidence,
+            "channel_reason": suggestion.reason,
+        }
+    )
 
 
 @app.post("/internal/simplify")

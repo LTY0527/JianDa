@@ -38,6 +38,7 @@ public class HttpAiClient implements AiClient {
     private final URI assistantAnswerUri;
     private final URI assistantGeneralAnswerUri;
     private final URI assistantStatusUri;
+    private final URI runtimeCapabilitiesUri;
 
     public HttpAiClient(ObjectMapper objectMapper, @Value("${jianda.ai-service-url}") String baseUrl) {
         this.objectMapper = objectMapper;
@@ -57,6 +58,7 @@ public class HttpAiClient implements AiClient {
         this.assistantAnswerUri = URI.create(baseUrl + "/internal/assistant/answer");
         this.assistantGeneralAnswerUri = URI.create(baseUrl + "/internal/assistant/general-answer");
         this.assistantStatusUri = URI.create(baseUrl + "/internal/assistant/status");
+        this.runtimeCapabilitiesUri = URI.create(baseUrl + "/internal/runtime-capabilities");
     }
 
     @Override
@@ -201,6 +203,11 @@ public class HttpAiClient implements AiClient {
         return sendGet(assistantStatusUri, "assistant status", 5_000);
     }
 
+    @Override
+    public Map<String, Object> runtimeCapabilities() {
+        return sendGet(runtimeCapabilitiesUri, "AI runtime capabilities", 5_000);
+    }
+
     private Map<String, Object> sendGet(URI uri, String operation, int readTimeout) {
         return readResponse(send(HttpRequest.newBuilder(uri)
                 .timeout(Duration.ofMillis(readTimeout)).GET().build()), operation);
@@ -290,10 +297,10 @@ public class HttpAiClient implements AiClient {
     private Map<String, Object> readResponse(HttpResponse<byte[]> response, String operation) {
         int status = response.statusCode();
         byte[] fullBody = response.body() == null ? new byte[0] : response.body();
-        byte[] responseBytes = fullBody.length <= 65_536
-                ? fullBody : java.util.Arrays.copyOf(fullBody, 65_536);
-        String responseBody = new String(responseBytes, StandardCharsets.UTF_8);
         if (status < 200 || status >= 300) {
+            byte[] responseBytes = fullBody.length <= 65_536
+                    ? fullBody : java.util.Arrays.copyOf(fullBody, 65_536);
+            String responseBody = new String(responseBytes, StandardCharsets.UTF_8);
             Map<String, Object> detail = new LinkedHashMap<>();
             try {
                 Map<String, Object> error = objectMapper.readValue(responseBody, new TypeReference<Map<String, Object>>() {});
@@ -315,9 +322,12 @@ public class HttpAiClient implements AiClient {
             }
             throw new AiServiceException(status, detail);
         }
+        if (fullBody.length == 0 || fullBody.length > 5 * 1024 * 1024) {
+            throw new IllegalStateException(operation + " returned an invalid response size");
+        }
         try {
-            return objectMapper.readValue(responseBody, new TypeReference<Map<String, Object>>() {});
-        } catch (JsonProcessingException exception) {
+            return objectMapper.readValue(fullBody, new TypeReference<Map<String, Object>>() {});
+        } catch (IOException exception) {
             throw new IllegalStateException(operation + " returned invalid JSON", exception);
         }
     }

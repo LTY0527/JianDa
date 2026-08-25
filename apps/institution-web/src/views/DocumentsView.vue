@@ -8,6 +8,7 @@ import { Search, Plus, Upload, Globe2, FileImage, FileText, PenLine, X, RefreshC
 import { formatDisplayDate, formatDisplayDateTime, statusLabel } from "../utils/display";
 import { isPlatformAdmin } from "../auth";
 import { useRoute } from "vue-router";
+import { publicSourceApi } from "../api/publicSources";
 const route = useRoute();
 const query = ref("");
 const status = ref("ALL");
@@ -15,6 +16,8 @@ const showAddContent = ref(false);
 const loading = ref(true);
 const error = ref("");
 const documents = ref<DocumentRow[]>([]);
+const importDocumentIds = ref<number[] | null>(null);
+const importJobId = computed(() => Number(route.query.importJobId) || 0);
 const refreshing = ref(false);
 const lastUpdatedAt = ref<Date | null>(null);
 const savedState = sessionStorage.getItem("jianda_documents_state");
@@ -31,6 +34,7 @@ onUnmounted(() => sessionStorage.setItem("jianda_documents_state", JSON.stringif
 const filtered = computed(() =>
   documents.value.filter(
     (d) =>
+      (importDocumentIds.value === null || importDocumentIds.value.includes(d.id)) &&
       (!query.value || d.title.includes(query.value)) &&
       (status.value === "ALL" || statusGroups[status.value]?.includes(d.status)),
   ),
@@ -89,6 +93,15 @@ async function refreshDocuments(initial = false) {
   }
 }
 onMounted(async () => {
+  if (importJobId.value) {
+    try {
+      const job = (await publicSourceApi.registryImportJob(importJobId.value)).data.data;
+      importDocumentIds.value = (job.result?.imported || []).map((item) => item.documentId);
+    } catch (cause) {
+      error.value = apiMessage(cause);
+      importDocumentIds.value = [];
+    }
+  }
   await refreshDocuments(true);
   try {
     requestAnimationFrame(() => window.scrollTo(0, Number(savedState ? JSON.parse(savedState).scroll : 0)));
@@ -105,6 +118,10 @@ onMounted(async () => {
       ></PageHeader
     >
     <p v-if="lastUpdatedAt" class="content-updated" role="status">{{ refreshing ? "正在同步最新状态" : `最近更新 ${lastUpdatedAt.toLocaleTimeString('zh-CN', { hour12: false })}` }}</p>
+    <p v-if="importJobId" class="content-updated import-filter" role="status">
+      正在显示导入任务 #{{ importJobId }} 的 {{ importDocumentIds?.length || 0 }} 篇新材料。
+      <RouterLink to="/documents">查看全部内容</RouterLink>
+    </p>
     <section class="panel">
       <nav class="content-tabs" aria-label="内容状态">
         <button

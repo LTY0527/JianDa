@@ -125,7 +125,7 @@ public class SourceRegistryController {
     @PostMapping("/{id}/shadow")
     public ApiResponse<Map<String, Object>> shadow(
             @PathVariable long id, @Valid @RequestBody ControlledUrlRequest request) {
-        Map<String, Object> preview = webArticleService.preview(request.url());
+        Map<String, Object> preview = webArticleService.previewRegistered(request.url(), id);
         service.assertPreviewBelongsTo(id, preview);
         return ApiResponse.ok(preview);
     }
@@ -133,9 +133,9 @@ public class SourceRegistryController {
     @PostMapping("/{id}/collect")
     public ApiResponse<Map<String, Object>> collect(
             @PathVariable long id, @Valid @RequestBody ControlledUrlRequest request) {
-        Map<String, Object> preview = webArticleService.preview(request.url());
+        Map<String, Object> preview = webArticleService.previewRegistered(request.url(), id);
         service.assertPreviewBelongsTo(id, preview);
-        return ApiResponse.ok(webArticleService.importArticle(request.url(), UserContext.current()));
+        return ApiResponse.ok(webArticleService.importArticle(request.url(), id, UserContext.current()));
     }
 
     @PostMapping("/{id}/collect-batch")

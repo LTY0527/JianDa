@@ -23,7 +23,7 @@ public class BatchArticleImportJobService {
 
     public BatchArticleImportJobService(CrawlTaskService tasks, SourceRegistryService registries,
             WebArticleService articles, ObjectMapper objectMapper,
-            @Qualifier("documentProcessingExecutor") Executor executor) {
+            @Qualifier("crawlImportExecutor") Executor executor) {
         this.tasks = tasks;
         this.registries = registries;
         this.articles = articles;
@@ -71,9 +71,9 @@ public class BatchArticleImportJobService {
                 tasks.updateImportProgress(jobId, owner, urls.size(), index, added, duplicates,
                         failures.size(), "正在抓取第 " + (index + 1) + "/" + urls.size() + " 篇");
                 try {
-                    Map<String, Object> preview = articles.preview(url);
+                    Map<String, Object> preview = articles.previewRegistered(url, sourceId);
                     registries.assertPreviewBelongsTo(sourceId, preview);
-                    Map<String, Object> result = articles.importArticle(url, user);
+                    Map<String, Object> result = articles.importArticle(url, sourceId, user);
                     imported.add(result);
                     added++;
                 } catch (BusinessException exception) {

@@ -79,13 +79,11 @@ function isLocal(item: PublicItem) {
 }
 function channelMatches(item: PublicItem, channel: ChannelKey) {
   if (channel === "recommend") return true;
-  if (channel === "health") return includesText(item, /健康|卫生|医疗|体检|疫苗|医院/);
-  if (channel === "elderly") return includesText(item, /养老|助老|长者|老年|银龄/);
-  if (channel === "meals") return includesText(item, /助餐|食堂|用餐|餐饮/);
-  if (channel === "services") return contentKind(item) === "guide" || includesText(item, /办事|办理|材料|服务|换领/);
-  if (channel === "fraud") return includesText(item, /反诈|诈骗|银行卡|验证码|风险/);
-  if (channel === "activity") return includesText(item, /活动|报名|开放日|讲座|辅导|场次/);
-  return includesText(item, /社区|大场|街道|邻里|便民/);
+  const expected: Record<Exclude<ChannelKey, "recommend">, PublicItem["publish_channel"]> = {
+    health: "HEALTH", elderly: "ELDERLY", meals: "MEALS", services: "SERVICES",
+    fraud: "FRAUD", activity: "ACTIVITY", community: "COMMUNITY",
+  };
+  return item.publish_channel === expected[channel];
 }
 function rank(item: PublicItem) {
   const deadlineBoost = item.deadline_at ? 18 : 0;

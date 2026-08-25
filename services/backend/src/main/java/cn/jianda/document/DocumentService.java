@@ -54,6 +54,8 @@ public class DocumentService {
             "SERVICE_GUIDE", "ACTIVITY_NOTICE", "POLICY_DOCUMENT",
             "STANDARD_SPECIFICATION", "HEALTH_EDUCATION", "ANTI_FRAUD",
             "ELDERLY_SERVICE", "NEWS_ARTICLE", "GENERAL_PUBLIC_SERVICE");
+    private static final Set<String> PUBLISH_CHANNELS = Set.of(
+            "HEALTH", "ELDERLY", "MEALS", "SERVICES", "FRAUD", "ACTIVITY", "COMMUNITY");
     private static final Pattern CHINESE_DATE = Pattern.compile("(\\d{4})年(\\d{1,2})月(\\d{1,2})日");
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
@@ -319,6 +321,7 @@ public class DocumentService {
             if (!hasReviewableContent(result)) {
                 throw new AiResultValidationException();
             }
+            saveChannelSuggestion(id, result);
             List<PreparedField> fields = prepareFields(id, result);
             long persistenceStarted = System.nanoTime();
             jdbc.update("UPDATE processing_job SET stage='SAVING_RESULT',progress=85 WHERE id=?", jobId);
@@ -379,6 +382,7 @@ public class DocumentService {
             aiQueueService.settle(reservation, returnedActualTokens, true,
                     nullableString(metrics.get("provider")), nullableString(metrics.get("model")));
             jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,reason_code=?,"
+                            + "error_message=NULL,last_failed_stage=NULL,"
                             + "schema_version=?,cache_hit=?,text_extract_ms=?,fact_extract_ms=?,trace_validation_ms=?,"
                             + "accessible_rewrite_ms=?,persistence_ms=?,total_ms=?,prompt_tokens=?,completion_tokens=?,"
                             + "total_tokens=?,source_char_count=?,accessible_char_count=?,summary_compression_ratio=?,"
@@ -466,6 +470,7 @@ public class DocumentService {
                     String retryCheckpointJson = serializeCheckpointForRetry(
                             id, checkpoint, diagnosticModel, diagnosticRequestId, diagnosticFingerprint);
                     jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,reason_code=?,"
+                                    + "error_message=NULL,last_failed_stage=NULL,"
                                     + "schema_version=?,provider_id=?,model_id=?,provider_request_id=?,response_fingerprint=?,"
                                     + "crossed_provider_boundary=?,prompt_tokens=?,completion_tokens=?,total_tokens=?,"
                                     + "persistence_ms=?,total_ms=?,fact_checkpoint_json=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -601,6 +606,31 @@ public class DocumentService {
         metrics.put("markdown_residue_count", 0);
         result.put("metrics", metrics);
         return result;
+    }
+
+    private void saveChannelSuggestion(long documentId, Map<String, Object> result) {
+        String channel = nullableString(result.get("suggested_publish_channel")).trim().toUpperCase();
+        if (!PUBLISH_CHANNELS.contains(channel)) {
+            LOGGER.warn("Ignoring invalid publish channel suggestion '{}' for document {}", channel, documentId);
+            return;
+        }
+        double confidence = 0.0;
+        Object rawConfidence = result.get("channel_confidence");
+        if (rawConfidence instanceof Number number) {
+            confidence = number.doubleValue();
+        } else if (rawConfidence != null) {
+            try {
+                confidence = Double.parseDouble(String.valueOf(rawConfidence));
+            } catch (NumberFormatException ignored) {
+                // Invalid confidence is safely normalized below.
+            }
+        }
+        confidence = Math.max(0.0, Math.min(1.0, confidence));
+        String reason = nullableString(result.get("channel_reason")).trim();
+        if (reason.isBlank()) reason = "AI 根据当前材料内容给出建议，发布前请人工确认";
+        if (reason.length() > 500) reason = reason.substring(0, 500);
+        jdbc.update("UPDATE source_document SET suggested_publish_channel=?,channel_confidence=?,channel_reason=? WHERE id=?",
+                channel, confidence, reason, documentId);
     }
 
     private Long insertProcessingJob(long documentId, String traceId) {
@@ -889,7 +919,8 @@ public class DocumentService {
             returnedActualTokens = (int) metric(metrics, "total_tokens");
             aiQueueService.settle(reservation, returnedActualTokens, true,
                     nullableString(metrics.get("provider")), nullableString(metrics.get("model")));
-            jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,reason_code=?,accessible_rewrite_ms=?,"
+            jdbc.update("UPDATE processing_job SET status='SUCCEEDED',stage='SUCCEEDED',progress=100,reason_code=?,"
+                            + "error_message=NULL,last_failed_stage=NULL,accessible_rewrite_ms=?,"
                             + "prompt_tokens=?,completion_tokens=?,total_tokens=?,provider_id=?,model_id=?,provider_request_id=?,"
                             + "response_fingerprint=?,crossed_provider_boundary=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
                     "DETERMINISTIC_FALLBACK".equals(result.get("rewrite_mode"))
@@ -1026,10 +1057,14 @@ public class DocumentService {
                 "SELECT processing_status,updated_at FROM source_document WHERE id=?", id);
         List<Map<String, Object>> rows = jdbc.queryForList(
                 "SELECT id,status,stage,progress,error_message,started_at,finished_at,updated_at,total_ms,"
+                        + "CASE WHEN updated_at < TIMESTAMPADD(SECOND,-600,CURRENT_TIMESTAMP) "
+                        + "THEN 1 ELSE 0 END AS heartbeat_stale,"
                         + "provider_id,model_id,reason_code,retry_count FROM processing_job "
                         + "WHERE document_id=? ORDER BY id DESC LIMIT 1", id);
         Map<String, Object> job = rows.isEmpty() ? Map.of() : rows.get(0);
-        if ("PROCESSING".equals(job.get("status")) && stale(job.get("updated_at"), 10 * 60)) {
+        if ("PROCESSING".equals(job.get("status"))
+                && job.get("heartbeat_stale") instanceof Number staleFlag
+                && staleFlag.intValue() == 1) {
             Object jobId = job.get("id");
             jdbc.update("UPDATE processing_job SET status='FAILED_RETRYABLE',stage='HEARTBEAT_STALE',"
                             + "last_failed_stage=COALESCE(stage,'UNKNOWN'),error_message='任务心跳超时，可安全重试',"
@@ -1039,6 +1074,8 @@ public class DocumentService {
                     + "WHERE id=? AND processing_status='PROCESSING'", id);
             rows = jdbc.queryForList(
                     "SELECT id,status,stage,progress,error_message,started_at,finished_at,updated_at,total_ms,"
+                            + "CASE WHEN updated_at < TIMESTAMPADD(SECOND,-600,CURRENT_TIMESTAMP) "
+                            + "THEN 1 ELSE 0 END AS heartbeat_stale,"
                             + "provider_id,model_id,reason_code,retry_count FROM processing_job WHERE id=?", jobId);
             job = rows.get(0);
             document.put("processing_status", "FAILED");
@@ -1066,11 +1103,6 @@ public class DocumentService {
         result.put("reasonCode", job.get("reason_code"));
         result.put("retryCount", job.getOrDefault("retry_count", 0));
         return result;
-    }
-
-    private static boolean stale(Object value, int seconds) {
-        if (!(value instanceof java.util.Date date)) return false;
-        return System.currentTimeMillis() - date.getTime() > seconds * 1000L;
     }
 
     private static long elapsedSeconds(Map<String, Object> job) {
@@ -1314,7 +1346,8 @@ public class DocumentService {
 
     @Transactional
     public Map<String, Object> publish(long id, String title, String category, String sourceName,
-                                       String sourceUrl, boolean allowPublicOriginal, AuthUser user) {
+                                       String sourceUrl, boolean allowPublicOriginal, String publishChannel,
+                                       boolean promoteToRecommend, String importanceLevel, AuthUser user) {
         Map<String, Object> document = detail(id, user);
         int reviews = jdbc.queryForObject("SELECT COUNT(*) FROM review_record WHERE document_id=? AND action='APPROVE'", Integer.class, id);
         if (reviews == 0) throw new BusinessException(400, "发布前必须完成审核");
@@ -1334,11 +1367,21 @@ public class DocumentService {
         int readingMinutes = Math.max(1, (int) Math.ceil(raw.length() / 500.0));
         boolean local = !nullableString(document.get("region_code")).isBlank()
                 || nullableString(document.get("source_domain")).endsWith("shanghai.gov.cn");
-        int importance = switch (contentKind) {
-            case "ANTI_FRAUD", "SERVICE_NOTICE" -> 90;
-            case "HEALTH_EDUCATION", "POLICY_NEWS" -> 80;
-            case "COMMUNITY_SERVICE" -> 70;
-            default -> 50;
+        String channel = publishChannel == null ? "" : publishChannel.trim().toUpperCase();
+        if (channel.isBlank()) {
+            channel = suggestedChannel(category, contentKind, title);
+        }
+        if (!List.of("HEALTH", "ELDERLY", "MEALS", "SERVICES", "FRAUD", "ACTIVITY", "COMMUNITY").contains(channel)) {
+            throw new BusinessException(400, "请选择有效的发布栏目");
+        }
+        String level = importanceLevel == null ? "NORMAL" : importanceLevel.trim().toUpperCase();
+        if (!List.of("NORMAL", "IMPORTANT", "URGENT").contains(level)) {
+            throw new BusinessException(400, "请选择有效的重要程度");
+        }
+        int importance = switch (level) {
+            case "URGENT" -> 100;
+            case "IMPORTANT" -> 85;
+            default -> 60;
         };
         Timestamp effectiveFrom = lifecycleDate(id, "START_DATE", false);
         Timestamp deadlineAt = lifecycleDate(id, "END_DATE", true);
@@ -1347,19 +1390,20 @@ public class DocumentService {
         jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,source_name,"
                         + "source_url,content_kind,cover_image_url,is_local,reading_minutes,importance,province,city,"
                         + "district,street_or_town,community,region_code,local_scope,effective_from,deadline_at,expires_at,"
-                        + "last_verified_at,verification_status) "
-                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        + "last_verified_at,verification_status,publish_channel,promote_to_recommend,importance_level,pinned) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 id, slug, title, summary, category, user.id(), sourceName, sourceUrl,
                 contentKind.isBlank() ? null : contentKind, cover.isBlank() ? null : cover,
                 local, readingMinutes, importance, document.get("province"), document.get("city"),
                 document.get("district"), document.get("street_or_town"), document.get("community"),
                 document.get("region_code"), document.getOrDefault("local_scope", "UNSPECIFIED"),
-                effectiveFrom, deadlineAt, expiresAt, Timestamp.valueOf(LocalDateTime.now()), "VERIFIED");
+                effectiveFrom, deadlineAt, expiresAt, Timestamp.valueOf(LocalDateTime.now()), "VERIFIED",
+                channel, promoteToRecommend, level, promoteToRecommend);
         if (document.get("previous_version_id") instanceof Number previous) {
             jdbc.update("UPDATE published_item SET status='WITHDRAWN' WHERE document_id=?", previous.longValue());
         }
-        jdbc.update("UPDATE source_document SET processing_status='PUBLISHED',allow_public_original=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                allowPublicOriginal, id);
+        jdbc.update("UPDATE source_document SET processing_status='PUBLISHED',allow_public_original=?,publish_channel=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                allowPublicOriginal, channel, id);
         jdbc.update("UPDATE generated_content SET status='PUBLISHED' WHERE document_id=?", id);
         log(user, "PUBLISH_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
         return Map.of("id", id, "slug", slug, "title", title, "originalTitle", document.get("title"));
@@ -1371,6 +1415,26 @@ public class DocumentService {
         jdbc.update("UPDATE published_item SET status='WITHDRAWN' WHERE document_id=?", id);
         jdbc.update("UPDATE source_document SET processing_status='WITHDRAWN',updated_at=CURRENT_TIMESTAMP WHERE id=?", id);
         log(user, "WITHDRAW_DOCUMENT", "SOURCE_DOCUMENT", id, "SUCCESS");
+    }
+
+    @Transactional
+    public void updatePublicationChannel(long id, String publishChannel, AuthUser user) {
+        assertAccess(id, user);
+        String channel = nullableString(publishChannel).trim().toUpperCase(java.util.Locale.ROOT);
+        if (!PUBLISH_CHANNELS.contains(channel)) {
+            throw new BusinessException(400, "请选择有效的发布栏目");
+        }
+        Integer published = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM published_item WHERE document_id=? AND status='PUBLISHED'",
+                Integer.class, id);
+        if (published == null || published == 0) {
+            throw new BusinessException(400, "仅已发布内容可以调整栏目");
+        }
+        jdbc.update("UPDATE published_item SET publish_channel=? WHERE document_id=? AND status='PUBLISHED'",
+                channel, id);
+        jdbc.update("UPDATE source_document SET publish_channel=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                channel, id);
+        log(user, "UPDATE_PUBLICATION_CHANNEL", "SOURCE_DOCUMENT", id, "SUCCESS");
     }
 
     private void saveGenerated(long id, String type, String title, Object json, Object plainText) {
@@ -1426,6 +1490,17 @@ public class DocumentService {
     private static String truncate(String value) {
         if (value == null) return "未知错误";
         return value.length() > 900 ? value.substring(0, 900) : value;
+    }
+
+    private static String suggestedChannel(String category, String contentKind, String title) {
+        String text = String.join(" ", nullableString(category), nullableString(contentKind), nullableString(title));
+        if (text.matches(".*(健康|卫生|医疗|体检|疫苗|HEALTH).*")) return "HEALTH";
+        if (text.matches(".*(养老|助老|长者|老年|银龄|ELDERLY).*")) return "ELDERLY";
+        if (text.matches(".*(助餐|食堂|用餐|餐饮|MEALS).*")) return "MEALS";
+        if (text.matches(".*(反诈|诈骗|FRAUD).*")) return "FRAUD";
+        if (text.matches(".*(活动|报名|讲座|ACTIVITY).*")) return "ACTIVITY";
+        if (text.matches(".*(办事|办理|材料|SERVICE_NOTICE|SERVICES).*")) return "SERVICES";
+        return "COMMUNITY";
     }
 
     private static String shorten(String value, int maxLength) {

@@ -25,4 +25,21 @@ public class DocumentProcessingExecutorConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean(name = "crawlImportExecutor")
+    public Executor crawlImportExecutor(
+            @Value("${jianda.crawl.import-async-enabled:true}") boolean asyncEnabled) {
+        if (!asyncEnabled) {
+            return new SyncTaskExecutor();
+        }
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(64);
+        executor.setThreadNamePrefix("crawl-import-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
 }

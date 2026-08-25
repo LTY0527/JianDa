@@ -30,6 +30,9 @@ export interface PublicItem {
   reading_minutes?: number;
   pinned?: boolean;
   importance?: number;
+  publish_channel?: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+  promote_to_recommend?: boolean;
+  importance_level?: "NORMAL" | "IMPORTANT" | "URGENT";
   province?: string;
   city?: string;
   district?: string;
@@ -47,12 +50,13 @@ export interface PublicItem {
 
 export interface AssistantCitation {
   title: string;
-  slug: string;
-  kind: "news" | "guide";
+  slug?: string;
+  kind: "news" | "guide" | "external";
   category: string;
   sourceName: string;
   publishedAt: string;
   quote: string;
+  url?: string;
 }
 
 export interface AssistantReply {
@@ -62,7 +66,7 @@ export interface AssistantReply {
   communityPosts?: AssistantCommunityPost[];
   citations: AssistantCitation[];
   disclaimer: string;
-  mode: "status" | "retrieval" | "ai" | "general_ai" | "community_post";
+  mode: "status" | "retrieval" | "ai" | "web_ai" | "general_ai" | "community_post";
   assistantStatus?: AssistantRuntimeStatus;
 }
 
@@ -72,6 +76,11 @@ export interface AssistantStatus {
   status: AssistantRuntimeStatus;
   retrieval: "ready";
   external: AssistantRuntimeStatus;
+  webSearch?: {
+    provider: string;
+    status: "ready" | "degraded" | "disabled";
+    message: string;
+  };
 }
 
 export interface AssistantCommunityPost {
@@ -238,24 +247,29 @@ export interface MembershipPlan {
   id: number; plan_code: string; name: string; billing_period: string; duration_days: number;
   price_cents: number; original_price_cents?: number; benefits: string[]; demo_price: boolean;
 }
-export interface DemoPaymentSession {
-  sessionId: string; status: "DEMO_PENDING"; method: "ALIPAY" | "WECHAT";
-  amountCents: number; planName: string; qrPayload: string; expiresAt: string; demo: true;
+export type PaymentMethod = "ALIPAY" | "WECHAT";
+export interface PaymentSession {
+  sessionId: string; status: "PENDING" | "SUCCESS" | "FAILED" | "CANCELLED" | "EXPIRED";
+  provider: string; method: PaymentMethod; amountCents: number; planName: string;
+  qrPayload: string; expiresAt: string; paidAt?: string; testEnvironment?: boolean;
 }
 export async function fetchMembershipPlans(): Promise<MembershipPlan[]> {
   return (await client.get("/public/membership/plans")).data.data;
 }
-export async function fetchMembershipCapabilities(): Promise<{ demoMode: boolean; realPaymentAvailable: boolean; message: string }> {
+export async function fetchMembershipCapabilities(): Promise<{ available: boolean; provider: string; testEnvironment: boolean; realPaymentAvailable: boolean; message: string }> {
   return (await client.get("/public/membership/capabilities")).data.data;
 }
 export async function fetchMembershipMe(): Promise<Record<string, unknown>> {
   return (await client.get("/public/membership/me", { headers: residentHeaders() })).data.data;
 }
-export async function createDemoMembershipPayment(planId: number, method: "ALIPAY" | "WECHAT"): Promise<DemoPaymentSession> {
-  return (await client.post("/public/membership/demo-payments", { planId, method }, { headers: residentHeaders() })).data.data;
+export async function createPaymentSession(planId: number, method: PaymentMethod): Promise<PaymentSession> {
+  return (await client.post("/public/membership/payments", { planId, method }, { headers: residentHeaders() })).data.data;
 }
-export async function confirmDemoMembershipPayment(sessionId: string): Promise<{ paymentStatus: string; membershipStatus: string; expiresAt: string }> {
-  return (await client.post(`/public/membership/demo-payments/${sessionId}/confirm`, null, { headers: residentHeaders() })).data.data;
+export async function getPaymentStatus(sessionId: string): Promise<PaymentSession> {
+  return (await client.get(`/public/membership/payments/${sessionId}`, { headers: residentHeaders() })).data.data;
+}
+export async function cancelPayment(sessionId: string): Promise<PaymentSession> {
+  return (await client.post(`/public/membership/payments/${sessionId}/cancel`, null, { headers: residentHeaders() })).data.data;
 }
 
 export async function createReminder(
@@ -374,7 +388,7 @@ export async function askAssistant(
       typeof data.answer !== "string" ||
       !Array.isArray(data.citations) ||
       typeof data.disclaimer !== "string" ||
-      !["status", "retrieval", "ai", "general_ai", "community_post"].includes(data.mode)
+      !["status", "retrieval", "ai", "web_ai", "general_ai", "community_post"].includes(data.mode)
     ) {
       throw new AssistantApiError("format");
     }

@@ -68,7 +68,14 @@ public class WebArticleService {
     public Map<String, Object> preview(String rawUrl) {
         String url = normalizeUrl(rawUrl);
         Map<String, Object> registry = registryFor(url);
-        CachedPreview cached = previews.get(url);
+        return previewRegistered(url, ((Number) registry.get("id")).longValue());
+    }
+
+    public Map<String, Object> previewRegistered(String rawUrl, long sourceId) {
+        String url = normalizeUrl(rawUrl);
+        Map<String, Object> registry = registryFor(url, sourceId);
+        String cacheKey = url + "#registry=" + sourceId;
+        CachedPreview cached = previews.get(cacheKey);
         if (cached != null && Instant.now().isBefore(cached.expiresAt())) {
             return cached.value();
         }
@@ -83,7 +90,7 @@ public class WebArticleService {
             throw new BusinessException(502, safeMessage(exception, "网页暂时无法访问或解析"));
         }
         String canonical = normalizeUrl(String.valueOf(result.getOrDefault("canonical_url", url)));
-        registryFor(canonical);
+        registryFor(canonical, sourceId);
         result.put("original_url", url);
         result.put("canonical_url", canonical);
         String originalDomain = URI.create(url).getHost().toLowerCase(Locale.ROOT);
@@ -120,7 +127,7 @@ public class WebArticleService {
                 : "仅生成机构端审核候选，不缓存或公开第三方图片");
         result.put("external_source_verified", true);
         result.put("trust_status", "VERIFIED");
-        previews.put(url, new CachedPreview(Instant.now().plusSeconds(PREVIEW_TTL_SECONDS), result));
+        previews.put(cacheKey, new CachedPreview(Instant.now().plusSeconds(PREVIEW_TTL_SECONDS), result));
         return result;
     }
 
@@ -205,6 +212,16 @@ public class WebArticleService {
     @Transactional
     public Map<String, Object> importArticle(String url, AuthUser user) {
         Map<String, Object> preview = preview(url);
+        return importPreview(preview, user);
+    }
+
+    @Transactional
+    public Map<String, Object> importArticle(String url, long sourceId, AuthUser user) {
+        Map<String, Object> preview = previewRegistered(url, sourceId);
+        return importPreview(preview, user);
+    }
+
+    private Map<String, Object> importPreview(Map<String, Object> preview, AuthUser user) {
         String canonical = text(preview.get("canonical_url"));
         String contentHash = text(preview.get("content_hash"));
         Integer duplicate = jdbc.queryForObject(
@@ -706,6 +723,30 @@ public class WebArticleService {
                 uri.getHost().toLowerCase(Locale.ROOT));
         if (rows.isEmpty()) throw new BusinessException(403, "该域名不在权威来源白名单中");
         return rows.get(0);
+    }
+
+    private Map<String, Object> registryFor(String url, long sourceId) {
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException(400, "请输入有效的 HTTP 或 HTTPS 网址");
+        }
+        if (!List.of("http", "https").contains(uri.getScheme()) || uri.getHost() == null
+                || uri.getUserInfo() != null) {
+            throw new BusinessException(400, "请输入不含账号信息的公开 HTTP 或 HTTPS 网址");
+        }
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT * FROM source_registry WHERE id=? AND enabled=TRUE", sourceId);
+        if (rows.isEmpty()) throw new BusinessException(404, "指定权威来源不存在或已停用");
+        Map<String, Object> registry = rows.get(0);
+        String host = uri.getHost().toLowerCase(Locale.ROOT);
+        String domain = text(registry.get("domain")).toLowerCase(Locale.ROOT);
+        String allowed = text(registry.get("allowed_hosts")).toLowerCase(Locale.ROOT);
+        boolean hostAllowed = host.equals(domain) || List.of(allowed.split("[,\\s]+"))
+                .stream().map(String::trim).filter(value -> !value.isBlank()).anyMatch(host::equals);
+        if (!hostAllowed) throw new BusinessException(403, "该网址不属于指定权威来源");
+        return registry;
     }
 
     private long ensureContentSource(long registryId, Map<String, Object> preview) {

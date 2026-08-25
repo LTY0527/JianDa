@@ -34,16 +34,19 @@ public class AssistantService {
     private final JdbcTemplate jdbc;
     private final AiClient aiClient;
     private final PublishedContentRetriever retriever;
+    private final WebSearchProvider webSearchProvider;
     private final boolean externalEnabled;
 
     public AssistantService(
             JdbcTemplate jdbc,
             AiClient aiClient,
             PublishedContentRetriever retriever,
+            WebSearchProvider webSearchProvider,
             @Value("${jianda.assistant.external-enabled:false}") boolean externalEnabled) {
         this.jdbc = jdbc;
         this.aiClient = aiClient;
         this.retriever = retriever;
+        this.webSearchProvider = webSearchProvider;
         this.externalEnabled = externalEnabled;
     }
 
@@ -63,6 +66,11 @@ public class AssistantService {
     public Map<String, Object> status() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("retrieval", "ready");
+        WebSearchProvider.Status webSearch = webSearchProvider.status();
+        result.put("webSearch", Map.of(
+                "provider", webSearch.provider(),
+                "status", webSearch.state(),
+                "message", webSearch.message()));
         if (!externalEnabled) {
             result.put("status", "disabled");
             result.put("external", "disabled");
@@ -133,6 +141,11 @@ public class AssistantService {
 
         if (ranked.isEmpty()) {
             if (!requiresGroundedEvidence(question) && externalEnabled) {
+                if (webSearchProvider.status().ready()) {
+                    Map<String, Object> webAnswer = webAiResponse(
+                            question, contextSlug, residentUserId, visitorId);
+                    if (webAnswer != null) return webAnswer;
+                }
                 return generalAiResponse(question, contextSlug, residentUserId, visitorId);
             }
             String grounded = requiresGroundedEvidence(question) ? "NO_EVIDENCE" : (externalEnabled ? "AI_DISABLED" : "NO_EVIDENCE");
@@ -380,6 +393,65 @@ public class AssistantService {
                     "EXTERNAL_FALLBACK");
             resp.put("aiErrorHint", "外部 AI 调用暂时失败，已自动降级。可稍后重试。");
             return resp;
+        }
+    }
+
+    private Map<String, Object> webAiResponse(String question, String contextSlug,
+                                               Long residentUserId, String visitorId) {
+        long started = System.nanoTime();
+        try {
+            List<WebSearchProvider.SearchResult> results = webSearchProvider.search(question, MAX_CITATIONS);
+            if (results.isEmpty()) return null;
+            List<Map<String, Object>> citations = new ArrayList<>();
+            List<Map<String, Object>> evidence = new ArrayList<>();
+            for (int index = 0; index < results.size(); index++) {
+                WebSearchProvider.SearchResult item = results.get(index);
+                Map<String, Object> citation = new LinkedHashMap<>();
+                citation.put("title", item.title());
+                citation.put("kind", "external");
+                citation.put("category", "联网资料");
+                citation.put("sourceName", item.sourceName());
+                citation.put("publishedAt", "");
+                citation.put("quote", item.snippet());
+                citation.put("url", item.url());
+                citations.add(citation);
+                evidence.add(Map.of(
+                        "index", index + 1,
+                        "title", item.title(),
+                        "slug", item.url(),
+                        "source_name", item.sourceName(),
+                        "quote", item.snippet()));
+            }
+            Map<String, Object> generated = aiClient.answerAssistant(question, evidence);
+            List<Integer> used = integerList(generated.get("used_citation_indexes"));
+            List<Map<String, Object>> usedCitations = new ArrayList<>();
+            for (Integer index : used) {
+                if (index != null && index >= 1 && index <= citations.size()) {
+                    usedCitations.add(citations.get(index - 1));
+                }
+            }
+            String answer = text(generated, "answer").trim();
+            if (answer.isBlank() || usedCitations.isEmpty()
+                    || !factsCoveredByEvidence(answer, usedCitations)) {
+                throw new IllegalStateException("web assistant response is not grounded");
+            }
+            int promptTokens = number(generated.get("prompt_tokens"));
+            int completionTokens = number(generated.get("completion_tokens"));
+            int totalTokens = number(generated.get("total_tokens"));
+            long elapsed = number(generated.get("elapsed_ms"));
+            if (elapsed <= 0) elapsed = elapsedMs(started);
+            recordEvent(question, contextSlug, "web_ai", citations.size(), usedCitations.size(),
+                    true, text(generated, "model"), text(generated, "request_id"),
+                    promptTokens, completionTokens, totalTokens, elapsed, null,
+                    residentUserId, visitorId);
+            Map<String, Object> response = response(answer, usedCitations, "web_ai");
+            response.put("actions", stringList(generated.get("actions")));
+            response.put("webSearchProvider", webSearchProvider.status().provider());
+            return response;
+        } catch (RuntimeException exception) {
+            LOGGER.warn("assistant_web_search_fallback category={} elapsed_ms={} error_type={}",
+                    questionCategory(question), elapsedMs(started), exception.getClass().getSimpleName());
+            return null;
         }
     }
 

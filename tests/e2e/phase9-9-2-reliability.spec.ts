@@ -106,7 +106,7 @@ test("异步批量加入展示进度并在刷新后可恢复任务", async ({ pa
   await expect.poll(() => page.evaluate(() => localStorage.getItem("jianda_import_job_31"))).toBeNull();
 });
 
-test("会员周月年套餐支持支付宝和微信演示二维码且绝不伪造 PAID", async ({ page }) => {
+test("会员周月年套餐支持支付宝和微信正式支付会话 UI", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("jianda_resident_token", "phase992-resident-token"));
   const methods: string[] = [];
   let sessionIndex = 0;
@@ -118,17 +118,23 @@ test("会员周月年套餐支持支付宝和微信演示二维码且绝不伪�
       { id: 2, name: "月卡", billing_period: "MONTH", price_cents: 790, benefits: ["阅读偏好同步"], demo_price: true },
       { id: 3, name: "年卡", billing_period: "YEAR", price_cents: 5900, original_price_cents: 9480, benefits: ["隐藏合作推广位"], demo_price: true },
     ]);
-    if (path.endsWith("/capabilities")) return json(route, { demoMode: true, realPaymentAvailable: false, message: "演示支付，不会扣款" });
+    if (path.endsWith("/capabilities")) return json(route, { available: true, provider: "LOCAL_TEST", testEnvironment: true, realPaymentAvailable: false, message: "测试环境支付链路已就绪" });
     if (path.endsWith("/me")) return json(route, { active: sessionIndex > 1, plan_name: "月卡", expires_at: "2026-09-25T00:00:00+08:00" });
-    if (path.endsWith("/demo-payments") && request.method() === "POST") {
+    if (path.endsWith("/payments") && request.method() === "POST") {
       const body = request.postDataJSON() as { method: string };
       methods.push(body.method);
       sessionIndex += 1;
-      return json(route, { sessionId: `demo-${sessionIndex}`, method: body.method, amountCents: 790,
-        qrPayload: `jianda-demo-payment://session/demo-${sessionIndex}`, status: "DEMO_PENDING", expiresAt: "2026-08-25T03:00:00+08:00" });
+      return json(route, { sessionId: `payment-${sessionIndex}`, method: body.method, amountCents: 790, planName: "月卡",
+        provider: "LOCAL_TEST", qrPayload: `jianda-local-payment://session/payment-${sessionIndex}`, status: "PENDING", expiresAt: "2026-08-25T13:00:00+08:00", testEnvironment: true });
     }
-    if (path.endsWith("/confirm")) return json(route, {
-      paymentStatus: "DEMO_CONFIRMED", membershipStatus: "DEMO_ACTIVE_MEMBERSHIP", expiresAt: "2026-09-25T00:00:00+08:00",
+    if (path.endsWith("/cancel") && request.method() === "POST") return json(route, {
+      sessionId: "payment-1", method: "ALIPAY", amountCents: 790, planName: "月卡", provider: "LOCAL_TEST",
+      qrPayload: "jianda-local-payment://session/payment-1", status: "CANCELLED", expiresAt: "2026-08-25T13:00:00+08:00",
+    });
+    if (/\/payments\/payment-\d+$/.test(path) && request.method() === "GET") return json(route, {
+      sessionId: `payment-${sessionIndex}`, method: methods.at(-1), amountCents: 790, planName: "月卡",
+      provider: "LOCAL_TEST", qrPayload: `jianda-local-payment://session/payment-${sessionIndex}`,
+      status: sessionIndex === 2 ? "SUCCESS" : "PENDING", expiresAt: "2026-08-25T13:00:00+08:00", testEnvironment: true,
     });
     return json(route, null);
   });
@@ -141,20 +147,20 @@ test("会员周月年套餐支持支付宝和微信演示二维码且绝不伪�
   await page.screenshot({ path: artifact("h5-membership-390.png"), fullPage: true });
   await page.getByRole("button", { name: "选择月卡" }).click();
   await page.screenshot({ path: artifact("h5-membership-payment-sheet-390.png"), fullPage: false });
-  await page.getByRole("button", { name: "确认并显示演示二维码" }).click();
-  await expect(page.getByRole("heading", { name: /支付宝/ })).toBeVisible();
+  await page.getByRole("button", { name: "确认支付" }).click();
+  await expect(page.getByText("支付宝", { exact: true })).toBeVisible();
   expect(await page.locator("canvas").evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL().length)).toBeGreaterThan(100);
-  await page.screenshot({ path: artifact("h5-alipay-demo-qr-390.png"), fullPage: false });
+  await page.screenshot({ path: artifact("h5-alipay-payment-qr-390.png"), fullPage: false });
   await page.getByRole("button", { name: "取消支付" }).click();
+  await page.getByRole("button", { name: "完成" }).click();
   await page.getByRole("button", { name: "选择月卡" }).click();
   await page.getByRole("button", { name: "微信支付" }).click();
-  await page.getByRole("button", { name: "确认并显示演示二维码" }).click();
-  await expect(page.getByRole("heading", { name: /微信支付/ })).toBeVisible();
-  await page.screenshot({ path: artifact("h5-wechat-demo-qr-390.png"), fullPage: false });
-  await page.getByRole("button", { name: "模拟已扫码并激活" }).click();
-  await expect(page.getByText(/演示会员已激活/)).toBeVisible();
+  await page.getByRole("button", { name: "确认支付" }).click();
+  await expect(page.getByText("微信支付", { exact: true })).toBeVisible();
+  await page.screenshot({ path: artifact("h5-wechat-payment-qr-390.png"), fullPage: false });
+  await expect(page.getByText(/支付成功，会员权益已生效/)).toBeVisible({ timeout: 5_000 });
   expect(methods).toEqual(["ALIPAY", "WECHAT"]);
-  await expect(page.getByText("PAID", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/演示支付|模拟已扫码|DEMO/)).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
 

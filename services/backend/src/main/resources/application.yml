@@ -31,8 +31,13 @@ jianda:
   ai-service-url: ${AI_SERVICE_URL:http://127.0.0.1:8001}
   assistant:
     external-enabled: ${ASSISTANT_EXTERNAL_ENABLED:false}
+  web-search:
+    provider: ${WEB_SEARCH_PROVIDER:disabled}
+    api-key: ${WEB_SEARCH_API_KEY:}
+    endpoint: ${WEB_SEARCH_ENDPOINT:https://api.tavily.com/search}
   payment:
-    demo-mode: ${PAYMENT_DEMO_MODE:false}
+    provider: ${PAYMENT_PROVIDER:disabled}
+    local-test-enabled: ${PAYMENT_LOCAL_TEST_ENABLED:false}
   public-fixture: ${JIANDA_PUBLIC_FIXTURE:}
   crawl:
     scheduler-enabled: ${CRAWL_SCHEDULER_ENABLED:false}

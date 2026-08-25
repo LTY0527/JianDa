@@ -131,11 +131,19 @@ public class DocumentController {
     @PostMapping("/{id}/publish")
     public ApiResponse<Map<String, Object>> publish(@PathVariable long id, @Valid @RequestBody PublishRequest request) {
         return ApiResponse.ok(service.publish(id, request.title(), request.category(), request.sourceName(),
-                request.sourceUrl(), request.allowPublicOriginal(), UserContext.current()));
+                request.sourceUrl(), request.allowPublicOriginal(), request.publishChannel(),
+                request.promoteToRecommend(), request.importanceLevel(), UserContext.current()));
     }
 
     @PostMapping("/{id}/withdraw")
     public ApiResponse<Void> withdraw(@PathVariable long id) { service.withdraw(id, UserContext.current()); return ApiResponse.ok(null); }
+
+    @PutMapping("/{id}/publication-channel")
+    public ApiResponse<Void> updatePublicationChannel(
+            @PathVariable long id, @Valid @RequestBody PublicationChannelRequest request) {
+        service.updatePublicationChannel(id, request.publishChannel(), UserContext.current());
+        return ApiResponse.ok(null);
+    }
 
     @PutMapping("/{id}/region-scope")
     public ApiResponse<Map<String, Object>> regionScope(
@@ -159,7 +167,12 @@ public class DocumentController {
     public record PublishRequest(@NotBlank(message = "请输入标题") String title,
                                  @NotBlank(message = "请选择分类") String category,
                                  @NotBlank(message = "请输入来源") String sourceName, String sourceUrl,
-                                 boolean allowPublicOriginal) {}
+                                 boolean allowPublicOriginal,
+                                 String publishChannel,
+                                 boolean promoteToRecommend,
+                                 String importanceLevel) {}
+    public record PublicationChannelRequest(
+            @NotBlank(message = "请选择发布栏目") String publishChannel) {}
     public record RegionScopeRequest(
             @NotBlank String localScope,
             String province,

@@ -19,7 +19,7 @@ interface ConversationMessage {
   communityPosts?: AssistantCommunityPost[];
   citations?: AssistantCitation[];
   disclaimer?: string;
-  mode?: "status" | "retrieval" | "ai" | "general_ai" | "community_post";
+  mode?: "status" | "retrieval" | "ai" | "web_ai" | "general_ai" | "community_post";
   assistantStatus?: AssistantRuntimeStatus;
   createdAt: string;
 }
@@ -143,7 +143,7 @@ function startSpeechInput() {
   recognition.start();
 }
 function detailPath(citation: AssistantCitation) {
-  return `/${citation.kind}/${citation.slug}`;
+  return citation.kind === "external" ? citation.url || "#" : `/${citation.kind}/${citation.slug}`;
 }
 function formatDate(value: string) {
   return value ? new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(new Date(value)) : "发布时间待核对";
@@ -153,6 +153,7 @@ function modeLabel(mode?: ConversationMessage["mode"]) {
     status: "平台运行状态",
     retrieval: "原文检索",
     ai: "已审核内容 + AI 整理",
+    web_ai: "联网资料 + AI 整理",
     general_ai: "通用 AI 参考",
     community_post: "居民邻里信息",
   };
@@ -249,11 +250,20 @@ onMounted(async () => {
           </section>
           <div v-if="message.citations?.length" class="assistant-citations">
             <h3>回答依据</h3>
-            <RouterLink v-for="citation in message.citations" :key="citation.slug" :to="detailPath(citation)" class="assistant-citation">
+            <component
+              :is="citation.kind === 'external' ? 'a' : 'RouterLink'"
+              v-for="citation in message.citations"
+              :key="citation.slug || citation.url"
+              :to="citation.kind === 'external' ? undefined : detailPath(citation)"
+              :href="citation.kind === 'external' ? detailPath(citation) : undefined"
+              :target="citation.kind === 'external' ? '_blank' : undefined"
+              :rel="citation.kind === 'external' ? 'noopener noreferrer' : undefined"
+              class="assistant-citation"
+            >
               <span>{{ citation.category }} · {{ citation.sourceName }} · {{ formatDate(citation.publishedAt) }}</span><b>{{ citation.title }}</b>
               <blockquote>“{{ citation.quote }}”</blockquote>
-              <small>查看完整内容与原文 <ChevronRight /></small>
-            </RouterLink>
+              <small>{{ citation.kind === 'external' ? '打开联网来源' : '查看完整内容与原文' }} <ChevronRight /></small>
+            </component>
           </div>
           <p v-if="message.disclaimer" class="assistant-disclaimer"><CircleAlert />{{ message.disclaimer }}</p>
         </article>

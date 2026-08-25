@@ -59,6 +59,15 @@ DocumentKind = Literal[
     "NEWS_ARTICLE",
     "GENERAL_PUBLIC_SERVICE",
 ]
+PublishChannel = Literal[
+    "HEALTH",
+    "ELDERLY",
+    "MEALS",
+    "SERVICES",
+    "FRAUD",
+    "ACTIVITY",
+    "COMMUNITY",
+]
 
 
 class SourceSegment(BaseModel):
@@ -315,6 +324,9 @@ class AnalyzeResult(BaseModel):
     rewrite_mode: Literal["MODEL", "DETERMINISTIC_FALLBACK"] = "MODEL"
     normalization_applied: bool = False
     normalization_rules: list[str] = Field(default_factory=list)
+    suggested_publish_channel: PublishChannel = "COMMUNITY"
+    channel_confidence: float = Field(default=0.35, ge=0, le=1)
+    channel_reason: str = "未识别到明确频道特征，建议由管理员根据原文确认"
 
 
 class FactField(BaseModel):

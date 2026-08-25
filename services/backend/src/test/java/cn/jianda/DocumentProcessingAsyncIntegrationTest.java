@@ -86,6 +86,13 @@ class DocumentProcessingAsyncIntegrationTest {
             throw new AssertionError("background AI task did not start");
         }
 
+        mvc.perform(get("/api/documents/{id}/processing-snapshot", documentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"))
+                .andExpect(jsonPath("$.data.jobStatus").value("PROCESSING"))
+                .andExpect(jsonPath("$.data.stage").value("EXTRACTING_FACTS"));
+
         mvc.perform(post("/api/documents/{id}/process", documentId)
                         .header("Authorization", auth))
                 .andExpect(status().isOk())
@@ -94,10 +101,18 @@ class DocumentProcessingAsyncIntegrationTest {
 
         releaseAi.countDown();
         awaitJob(jobId, "SUCCEEDED");
+        mvc.perform(get("/api/documents/{id}/processing-snapshot", documentId)
+                        .header("Authorization", auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.jobStatus").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.data.error").doesNotExist());
         mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.processing_status").value("WAITING_REVIEW"))
-                .andExpect(jsonPath("$.data.content_kind").value("STANDARD_SPECIFICATION"));
+                .andExpect(jsonPath("$.data.content_kind").value("STANDARD_SPECIFICATION"))
+                .andExpect(jsonPath("$.data.suggested_publish_channel").value("ELDERLY"))
+                .andExpect(jsonPath("$.data.channel_confidence").value(0.86))
+                .andExpect(jsonPath("$.data.channel_reason").value("正文涉及养老服务，建议归入养老；发布前可人工调整"));
         Integer moduleCount = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM generated_content WHERE document_id=? "
                         + "AND content_type='STANDARD_SECTIONS'",
@@ -157,16 +172,19 @@ class DocumentProcessingAsyncIntegrationTest {
     }
 
     private Map<String, Object> reviewableResult() {
-        return Map.of(
-                "fields", List.of(),
-                "document_kind", "STANDARD_SPECIFICATION",
-                "standard_sections", Map.of("scope", "适用于社区养老服务"),
-                "summary", List.of("本标准适用于社区养老服务。"),
-                "plain_text", "这份标准说明了社区养老服务的基本要求。",
-                "steps", List.of(),
-                "term_explanations", Map.of(),
-                "warnings", List.of(),
-                "audio_script", "本标准适用于社区养老服务。");
+        return Map.ofEntries(
+                Map.entry("fields", List.of()),
+                Map.entry("document_kind", "STANDARD_SPECIFICATION"),
+                Map.entry("standard_sections", Map.of("scope", "适用于社区养老服务")),
+                Map.entry("summary", List.of("本标准适用于社区养老服务。")),
+                Map.entry("plain_text", "这份标准说明了社区养老服务的基本要求。"),
+                Map.entry("steps", List.of()),
+                Map.entry("term_explanations", Map.of()),
+                Map.entry("warnings", List.of()),
+                Map.entry("audio_script", "本标准适用于社区养老服务。"),
+                Map.entry("suggested_publish_channel", "ELDERLY"),
+                Map.entry("channel_confidence", 0.86),
+                Map.entry("channel_reason", "正文涉及养老服务，建议归入养老；发布前可人工调整"));
     }
 
     private String login() throws Exception {

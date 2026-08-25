@@ -26,7 +26,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:jianda-phase992-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "jianda.payment.demo-mode=true"
+        "jianda.payment.provider=local_test",
+        "jianda.payment.local-test-enabled=true"
 })
 @AutoConfigureMockMvc
 class Phase992RegionMembershipIntegrationTest {
@@ -39,6 +40,7 @@ class Phase992RegionMembershipIntegrationTest {
     @BeforeEach
     void prepare() throws Exception {
         jdbc.update("DELETE FROM demo_payment_session");
+        jdbc.update("DELETE FROM membership_payment_session");
         jdbc.update("DELETE FROM resident_membership");
         jdbc.update("DELETE FROM published_item");
         jdbc.update("DELETE FROM processing_job WHERE document_id IN (SELECT id FROM source_document WHERE title LIKE 'Phase992%')");
@@ -74,25 +76,30 @@ class Phase992RegionMembershipIntegrationTest {
     }
 
     @Test
-    void demoPaymentNeverUsesRealPaidStatusAndActivatesDemoMembership() throws Exception {
+    void localProviderUsesPersistentPaymentSessionAndActivatesMembership() throws Exception {
         long planId = jdbc.queryForObject("SELECT id FROM membership_plan WHERE plan_code='WEEK_DEMO'", Long.class);
-        String body = mvc.perform(post("/api/public/membership/demo-payments")
+        String body = mvc.perform(post("/api/public/membership/payments")
                         .header("X-Resident-Token", residentToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"planId\":" + planId + ",\"method\":\"ALIPAY\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("DEMO_PENDING"))
-                .andExpect(jsonPath("$.data.qrPayload").value(org.hamcrest.Matchers.startsWith("jianda-demo-payment://session/")))
+                .andExpect(jsonPath("$.data.status").value("PENDING"))
+                .andExpect(jsonPath("$.data.qrPayload").value(org.hamcrest.Matchers.startsWith("jianda-local-payment://session/")))
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         JsonNode json = objectMapper.readTree(body);
         String sessionId = json.path("data").path("sessionId").asText();
-        mvc.perform(post("/api/public/membership/demo-payments/{id}/confirm", sessionId)
+        mvc.perform(post("/api/internal/test/payments/{id}/confirm", sessionId)
                         .header("X-Resident-Token", residentToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.paymentStatus").value("DEMO_CONFIRMED"))
-                .andExpect(jsonPath("$.data.membershipStatus").value("DEMO_ACTIVE_MEMBERSHIP"));
-        org.junit.jupiter.api.Assertions.assertEquals(0L,
-                jdbc.queryForObject("SELECT COUNT(*) FROM demo_payment_session WHERE status='PAID'", Long.class));
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"));
+        mvc.perform(get("/api/public/membership/payments/{id}", sessionId)
+                        .header("X-Resident-Token", residentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"));
+        org.junit.jupiter.api.Assertions.assertEquals(1L,
+                jdbc.queryForObject("SELECT COUNT(*) FROM membership_payment_session WHERE status='SUCCESS'", Long.class));
+        org.junit.jupiter.api.Assertions.assertEquals(1L,
+                jdbc.queryForObject("SELECT COUNT(*) FROM resident_membership WHERE status='ACTIVE'", Long.class));
     }
 
     @Test

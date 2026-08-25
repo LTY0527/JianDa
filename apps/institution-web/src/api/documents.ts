@@ -9,6 +9,10 @@ export interface DocumentRow {
   original_published_at?: string;
   category?: string;
   content_kind?: string;
+  publish_channel?: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+  suggested_publish_channel?: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+  channel_confidence?: number;
+  channel_reason?: string;
   organization_name: string;
   status: string;
   progress: number;
@@ -57,6 +61,10 @@ export interface DocumentDetail {
   extracted_text?: string;
   original_page_available?: boolean;
   content_kind?: string;
+  publish_channel?: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+  suggested_publish_channel?: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+  channel_confidence?: number;
+  channel_reason?: string;
   version_root_id?: number;
   previous_version_id?: number;
   version_no?: number;
@@ -244,6 +252,9 @@ export const documentApi = {
       sourceName: string;
       sourceUrl?: string;
       allowPublicOriginal?: boolean;
+      publishChannel: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
+      promoteToRecommend?: boolean;
+      importanceLevel?: "NORMAL" | "IMPORTANT" | "URGENT";
     },
   ) =>
     http.post<ApiResponse<{ slug: string }>>(

@@ -96,6 +96,14 @@ public class OperationMetricsService {
         return metrics;
     }
 
+    public List<Map<String, Object>> assistantEvents(int requestedLimit) {
+        int limit = Math.max(1, Math.min(requestedLimit, 100));
+        return jdbc.queryForList(
+                "SELECT id,question_category,mode,evidence_count,citation_count,success,model_id,"
+                        + "prompt_tokens,completion_tokens,total_tokens,duration_ms,error_code,created_at "
+                        + "FROM assistant_query_event ORDER BY id DESC LIMIT " + limit);
+    }
+
     private List<Map<String, Object>> sourceStatus() {
         return jdbc.queryForList(
                 "SELECT id,source_name,domain,enabled,last_status,last_crawled_at,"

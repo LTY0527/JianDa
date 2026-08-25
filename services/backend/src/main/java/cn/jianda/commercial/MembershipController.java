@@ -8,16 +8,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.sql.Timestamp;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,13 +28,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class MembershipController {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
-    private final boolean demoMode;
+    private final MembershipPaymentService payments;
 
     public MembershipController(JdbcTemplate jdbc, ObjectMapper objectMapper,
-            @Value("${jianda.payment.demo-mode:false}") boolean demoMode) {
+            MembershipPaymentService payments) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
-        this.demoMode = demoMode;
+        this.payments = payments;
     }
 
     @GetMapping("/plans")
@@ -63,8 +58,7 @@ public class MembershipController {
 
     @GetMapping("/capabilities")
     public ApiResponse<Map<String, Object>> capabilities() {
-        return ApiResponse.ok(Map.of("demoMode", demoMode, "realPaymentAvailable", false,
-                "message", demoMode ? "演示支付已启用，不会扣款" : "线上支付暂未开通"));
+        return ApiResponse.ok(payments.capabilities());
     }
 
     @GetMapping("/me")
@@ -73,54 +67,30 @@ public class MembershipController {
         List<Map<String, Object>> rows = jdbc.queryForList(
                 "SELECT m.status,m.starts_at,m.expires_at,p.name plan_name,p.billing_period "
                         + "FROM resident_membership m JOIN membership_plan p ON p.id=m.plan_id "
-                        + "WHERE m.resident_user_id=? AND m.status='DEMO_ACTIVE_MEMBERSHIP' "
+                        + "WHERE m.resident_user_id=? AND m.status IN ('ACTIVE','DEMO_ACTIVE_MEMBERSHIP') "
                         + "AND m.expires_at>CURRENT_TIMESTAMP ORDER BY m.expires_at DESC LIMIT 1", resident.get("id"));
         return ApiResponse.ok(rows.isEmpty() ? Map.of("active", false) : new LinkedHashMap<>(rows.get(0)) {{ put("active", true); }});
     }
 
-    @PostMapping("/demo-payments")
-    @Transactional
-    public ApiResponse<Map<String, Object>> createDemoPayment(
+    @PostMapping("/payments")
+    public ApiResponse<Map<String, Object>> createPaymentSession(
             @RequestHeader("X-Resident-Token") String token, @RequestBody PaymentRequest request) {
-        if (!demoMode) throw new BusinessException(409, "线上支付暂未开通");
-        if (!Set.of("ALIPAY", "WECHAT").contains(request.method())) throw new BusinessException(400, "请选择支付宝或微信支付");
         Map<String, Object> resident = resident(token);
-        List<Map<String, Object>> plans = jdbc.queryForList("SELECT * FROM membership_plan WHERE id=? AND enabled=TRUE", request.planId());
-        if (plans.isEmpty()) throw new BusinessException(404, "会员套餐不存在或已下架");
-        Map<String, Object> plan = plans.get(0);
-        String id = UUID.randomUUID().toString();
-        String payload = "jianda-demo-payment://session/" + id;
-        Timestamp expires = Timestamp.valueOf(LocalDateTime.now().plusMinutes(5));
-        jdbc.update("INSERT INTO demo_payment_session(id,resident_user_id,plan_id,payment_method,amount_cents,qr_payload,status,expires_at) "
-                        + "VALUES (?,?,?,?,?,?,'DEMO_PENDING',?)", id, resident.get("id"), plan.get("id"),
-                request.method(), plan.get("price_cents"), payload, expires);
-        return ApiResponse.ok(Map.of("sessionId", id, "status", "DEMO_PENDING", "method", request.method(),
-                "amountCents", plan.get("price_cents"), "planName", plan.get("name"), "qrPayload", payload,
-                "expiresAt", expires, "demo", true));
+        return ApiResponse.ok(payments.create(((Number) resident.get("id")).longValue(), request.planId(), request.method()));
     }
 
-    @PostMapping("/demo-payments/{id}/confirm")
-    @Transactional
-    public ApiResponse<Map<String, Object>> confirmDemoPayment(
+    @GetMapping("/payments/{id}")
+    public ApiResponse<Map<String, Object>> getPaymentStatus(
             @PathVariable String id, @RequestHeader("X-Resident-Token") String token) {
-        if (!demoMode) throw new BusinessException(409, "演示支付未启用");
         Map<String, Object> resident = resident(token);
-        List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT s.*,p.duration_days FROM demo_payment_session s JOIN membership_plan p ON p.id=s.plan_id "
-                        + "WHERE s.id=? AND s.resident_user_id=?", id, resident.get("id"));
-        if (rows.isEmpty()) throw new BusinessException(404, "演示支付会话不存在");
-        Map<String, Object> session = rows.get(0);
-        if (!"DEMO_PENDING".equals(session.get("status")) || ((java.util.Date) session.get("expires_at")).before(new java.util.Date())) {
-            throw new BusinessException(409, "演示二维码已失效或已确认");
-        }
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime expires = now.plusDays(((Number) session.get("duration_days")).longValue());
-        jdbc.update("UPDATE demo_payment_session SET status='DEMO_CONFIRMED',confirmed_at=CURRENT_TIMESTAMP WHERE id=?", id);
-        jdbc.update("INSERT INTO resident_membership(resident_user_id,plan_id,status,starts_at,expires_at) "
-                        + "VALUES (?,?,'DEMO_ACTIVE_MEMBERSHIP',?,?)", resident.get("id"), session.get("plan_id"),
-                Timestamp.valueOf(now), Timestamp.valueOf(expires));
-        return ApiResponse.ok(Map.of("sessionId", id, "paymentStatus", "DEMO_CONFIRMED",
-                "membershipStatus", "DEMO_ACTIVE_MEMBERSHIP", "expiresAt", Timestamp.valueOf(expires), "demo", true));
+        return ApiResponse.ok(payments.session(id, ((Number) resident.get("id")).longValue()));
+    }
+
+    @PostMapping("/payments/{id}/cancel")
+    public ApiResponse<Map<String, Object>> cancelPayment(
+            @PathVariable String id, @RequestHeader("X-Resident-Token") String token) {
+        Map<String, Object> resident = resident(token);
+        return ApiResponse.ok(payments.cancel(id, ((Number) resident.get("id")).longValue()));
     }
 
     private Map<String, Object> resident(String token) {

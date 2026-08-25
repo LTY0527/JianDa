@@ -53,6 +53,7 @@ public class PublicController {
             @RequestParam(required = false) String regionCode) {
         String sql = "SELECT p.id,p.slug,p.title,p.summary,p.category,p.source_name,p.source_url,p.published_at,"
                 + "p.content_kind,p.cover_image_url,p.is_local,p.reading_minutes,p.pinned,p.importance,"
+                + "p.publish_channel,p.promote_to_recommend,p.importance_level,"
                 + "p.effective_from,p.deadline_at,p.expires_at,p.last_verified_at,p.source_updated_at,p.verification_status,"
                 + "p.province,p.city,p.district,p.street_or_town,p.community,p.region_code,p.local_scope,"
                 + "d.cover_image_type,d.image_source_name,d.image_source_url,d.image_alt_text,d.image_cached,"
@@ -90,7 +91,7 @@ public class PublicController {
         String like = "%" + keyword.trim() + "%";
         String sql = "SELECT p.id,p.slug,p.title,p.summary,p.category,p.source_name,"
                 + "p.source_url,p.published_at,p.content_kind,p.cover_image_url,p.is_local,p.reading_minutes,"
-                + "p.pinned,p.importance,p.effective_from,p.deadline_at,p.expires_at,p.last_verified_at,"
+                + "p.pinned,p.importance,p.publish_channel,p.promote_to_recommend,p.importance_level,p.effective_from,p.deadline_at,p.expires_at,p.last_verified_at,"
                 + "p.source_updated_at,p.verification_status,d.cover_image_type,d.image_source_name,d.image_source_url,"
                 + "d.image_alt_text,d.image_cached,d.image_license_note "
                 + "FROM published_item p JOIN source_document d ON d.id=p.document_id "

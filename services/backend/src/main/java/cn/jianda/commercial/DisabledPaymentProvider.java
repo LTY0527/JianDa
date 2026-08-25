@@ -3,8 +3,11 @@ package cn.jianda.commercial;
 import cn.jianda.common.BusinessException;
 import java.util.Map;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 
 @Component
+@ConditionalOnExpression("'${jianda.payment.provider:disabled}' == 'disabled' "
+        + "|| ('${jianda.payment.provider:disabled}' == 'local_test' && !${jianda.payment.local-test-enabled:false})")
 public class DisabledPaymentProvider implements PaymentProvider {
     @Override public Map<String, Object> capabilities() {
         return Map.of("available", false, "provider", "UNCONFIGURED",
@@ -15,5 +18,7 @@ public class DisabledPaymentProvider implements PaymentProvider {
     @Override public void closePayment(long paymentOrderId) { throw unavailable(); }
     @Override public Map<String, Object> refund(long paymentOrderId, long amountCents) { throw unavailable(); }
     @Override public Map<String, Object> queryRefund(long refundRequestId) { return capabilities(); }
+    @Override public Map<String, Object> createMembershipSession(String sessionId, String method,
+            long amountCents, String planName, java.sql.Timestamp expiresAt) { throw unavailable(); }
     private BusinessException unavailable() { return new BusinessException(503, "线上支付暂未开通，未创建支付交易"); }
 }
