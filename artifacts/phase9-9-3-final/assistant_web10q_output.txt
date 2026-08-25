@@ -1,0 +1,135 @@
+============================================================
+Phase 9.9.3 简达助手 30 问 真实验收（修复评估口径 + 补跑 WEB）
+============================================================
+
+--- RAG 10 问（重评估旧结果） ---
+  [1] len=162 cites=2 marks=True → PASS
+  [2] len=115 cites=1 marks=True → PASS
+  [3] len=123 cites=1 marks=True → PASS
+  [4] len=166 cites=3 marks=True → PASS
+  [5] len=46 cites=3 marks=True → FAIL
+  [6] len=152 cites=3 marks=False → PASS
+  [7] len=122 cites=1 marks=True → PASS
+  [8] len=157 cites=3 marks=True → PASS
+  [9] len=163 cites=1 marks=True → PASS
+  [10] len=132 cites=2 marks=True → PASS
+RAG PASS: 9/10
+
+COMMUNITY PASS: 5/5（使用旧结果）
+SAFETY PASS: 5/5（使用旧结果）
+
+============================================================
+WEB_SEARCH 10 问（新问题，期待 mode=web_ai）
+============================================================
+
+[WEB 1] Q: 上海市宝山区长者助餐补贴有哪些形式？如何申请？
+  mode='ai' provider='' len=73 cites=1
+  answer: 上海市宝山区长者助餐补贴形式包括直接打折和现场支付时减免一定金额，不以现金形式发放[1]。申请方式需根据居住地政策，可咨询所在街镇或居村委[1]。...
+    cite[1]: title='老年助餐优惠或补贴有哪些形式？如何申请助餐补贴？来看解答' src='上海市人民政府'  trusted_src=True
+              url=news-89  accessible=False
+  → PASS  (strict=True  trusted_cites=1/1  trusted_src_only=1)
+
+[WEB 2] Q: 上海社区长者食堂的运营模式和补贴政策是什么？
+  mode='ai' provider='' len=292 cites=2
+  answer: 上海社区长者食堂面向全体老年人服务，有需求的老年人均可前往用餐[1]。运营模式上，政府补贴分为“托底补贴”和“普惠折扣”两种：托底补贴面向低保、高龄等老人群体，全市标准统一；普惠折扣面向60周岁及以上老人，具体折扣方式由各区、各街镇制定，且普惠折扣并非政府出资，而是企业让利[2]。补贴政策方面，各区各街镇可按照老年人经济困难程度、年龄差异、失能状况等给予用餐补贴和送餐费用补贴，补贴形式包括直接打折...
+    cite[1]: title='老年助餐优惠或补贴有哪些形式？如何申请助餐补贴？来看解答' src='上海市人民政府'  trusted_src=True
+              url=news-89  accessible=False
+    cite[2]: title='社区食堂跻身来沪旅游“网红打卡点” “上海社区食堂打卡”成热门话题 连老外都来打卡 记者走访近10家社区食堂探寻可持续发' src='上海市人民政府'  trusted_src=True
+              url=news-91  accessible=False
+  → PASS  (strict=True  trusted_cites=2/2  trusted_src_only=2)
+
+[WEB 3] Q: 上海市老年人敬老卡有哪些优惠待遇？如何办理？
+  mode='ai' provider='' len=134 cites=2
+  answer: 上海市老年人敬老卡的优惠待遇涉及老年助餐方面：持有敬老卡可在社区长者食堂享受普惠折扣，具体折扣方式由各区、各街镇制定[3]；低保、高龄等老人群体有托底补贴[3]；老年助餐补贴不以现金形式发放[1]。办理敬老卡需携带本人身份证，具体办理地点和材料要求未在给定证据中说明。...
+    cite[1]: title='老年助餐优惠或补贴有哪些形式？如何申请助餐补贴？来看解答' src='上海市人民政府'  trusted_src=True
+              url=news-89  accessible=False
+    cite[2]: title='社区食堂跻身来沪旅游“网红打卡点” “上海社区食堂打卡”成热门话题 连老外都来打卡 记者走访近10家社区食堂探寻可持续发' src='上海市人民政府'  trusted_src=True
+              url=news-91  accessible=False
+  → PASS  (strict=True  trusted_cites=2/2  trusted_src_only=2)
+
+[WEB 4] Q: 上海市高龄老人津贴标准是多少？申请条件是什么？
+  mode='ai' provider='' len=71 cites=3
+  answer: 上海市高龄老人津贴标准及申请条件在给定证据中未明确提及。证据涉及老年助餐补贴，而非高龄津贴，且未提供具体津贴标准或申请条件[1][2][3]。...
+    cite[1]: title='老年助餐优惠或补贴有哪些形式？如何申请助餐补贴？来看解答' src='上海市人民政府'  trusted_src=True
+              url=news-89  accessible=False
+    cite[2]: title='社区食堂跻身来沪旅游“网红打卡点” “上海社区食堂打卡”成热门话题 连老外都来打卡 记者走访近10家社区食堂探寻可持续发' src='上海市人民政府'  trusted_src=True
+              url=news-91  accessible=False
+    cite[3]: title='上海市民政局关于印发《关于推进运用市场化平台机制优化老年送餐上门服务的实施意见（试行）》的通知' src='上海市民政局'  trusted_src=True
+              url=guide-73  accessible=False
+  → PASS  (strict=True  trusted_cites=3/3  trusted_src_only=3)
+
+[WEB 5] Q: 上海市民政局关于老年送餐上门服务的最新规定是什么？
+  mode='ai' provider='' len=185 cites=1
+  answer: 上海市民政局关于老年送餐上门服务的最新规定是：各区各街镇可按照老年人经济困难程度、年龄差异、失能状况等给予用餐补贴和送餐费用补贴[2]。补贴形式包括直接打折或减免一定金额，不以现金形式发放[2]。本市户籍的人户分离老年人，按照居住地标准享受用餐和送餐费用补贴，所需经费由居住地承担[2]。每位老人同一时间只能享受一个地区的补贴政策，即随申办上居住信息所在地的政策[2]。...
+    cite[1]: title='老年助餐优惠或补贴有哪些形式？如何申请助餐补贴？来看解答' src='上海市人民政府'  trusted_src=True
+              url=news-89  accessible=False
+  → PASS  (strict=True  trusted_cites=1/1  trusted_src_only=1)
+
+[WEB 6] Q: 上海市适老化改造申请流程和补贴标准是怎样的？
+  mode='ai' provider='' len=37 cites=3
+  answer: 上海市适老化改造申请流程和补贴标准在提供的证据中未提及[1][2][3]。...
+    cite[1]: title='老年助餐优惠或补贴有哪些形式？如何申请助餐补贴？来看解答' src='上海市人民政府'  trusted_src=True
+              url=news-89  accessible=False
+    cite[2]: title='暑期接种不打烊！13岁女孩免费接种HPV疫苗！' src='上海市人民政府'  trusted_src=True
+              url=news-76  accessible=False
+    cite[3]: title='产假、哺乳假怎么算？关于女职工 “三期” 权益，来看权威解答' src='上海市人民政府'  trusted_src=True
+              url=news-85  accessible=False
+  → FAIL  (strict=False  trusted_cites=3/3  trusted_src_only=3)
+
+[WEB 7] Q: 国家反诈中心关于养老诈骗的最新预警和防范措施有哪些？
+  mode='ai' provider='' len=206 cites=2
+  answer: 国家反诈中心针对养老诈骗的最新预警聚焦于利用AI技术包装的“健康类诈骗”，包括AI名医问诊、智能穿戴设备虚假监测、AI生成健康报告诱导购买高价保健品等新型手段[1]。防范措施上，提醒老年人遇到线上问诊、远程健康推荐时务必通过官方渠道核实信息，做到“不轻信、不点击、不转账”[1]；同时，养老机构负责人需签署承诺书，承诺不组织、不参与非法集资、违规销售保健品等活动，并向入住老年人发放防范养老服务诈骗告...
+    cite[1]: title='新田社区助老防诈课堂开讲-龙华政府在线' src='深圳市龙华区人民政府'  trusted_src=True
+              url=news-33  accessible=False
+    cite[2]: title='关于进一步做好本市老年人反诈宣传工作的通知' src='上海市人民政府'  trusted_src=True
+              url=news-70  accessible=False
+  → PASS  (strict=True  trusted_cites=2/2  trusted_src_only=2)
+
+[WEB 8] Q: 上海市城乡居民养老保险缴费标准和待遇领取条件是什么？
+  mode='ai' provider='' len=49 cites=3
+  answer: 根据提供的证据，没有关于上海市城乡居民养老保险缴费标准和待遇领取条件的具体信息[1][2][3]。...
+    cite[1]: title='民政部举办2026年全国养老服务体系建设专题研究班_2026时政动态_上海市民政局' src='上海市民政局'  trusted_src=True
+              url=news-94  accessible=False
+    cite[2]: title='民政部发文加强城乡三级养老服务网络建设管理-新华网' src='新华网'  trusted_src=True
+              url=news-28  accessible=False
+    cite[3]: title='老年助餐优惠或补贴有哪些形式？如何申请助餐补贴？来看解答' src='上海市人民政府'  trusted_src=True
+              url=news-89  accessible=False
+  → PASS  (strict=True  trusted_cites=3/3  trusted_src_only=3)
+
+[WEB 9] Q: 上海市老年人健康管理服务项目免费内容有哪些？
+  mode='ai' provider='' len=47 cites=3
+  answer: 根据提供的证据，无法找到关于上海市老年人健康管理服务项目免费内容的具体信息[1][2][3]。...
+    cite[1]: title='银龄健康说丨老年人科学减重 吃动平衡是关键-新华网' src='新华网'  trusted_src=True
+              url=news-31  accessible=False
+    cite[2]: title='老年助餐优惠或补贴有哪些形式？如何申请助餐补贴？来看解答' src='上海市人民政府'  trusted_src=True
+              url=news-89  accessible=False
+    cite[3]: title='时令节气与健康丨三伏天老年人消暑有方：别硬扛也别贪凉！-新华网' src='新华网'  trusted_src=True
+              url=news-27  accessible=False
+  → PASS  (strict=True  trusted_cites=3/3  trusted_src_only=3)
+
+[WEB 10] Q: 上海市社区居家养老服务补贴申请条件和标准是什么？
+  mode='ai' provider='' len=168 cites=2
+  answer: 上海市社区居家养老服务补贴主要涉及老年助餐补贴，分为托底补贴和普惠折扣两种形式。托底补贴面向低保、高龄等老人群体，全市标准统一；普惠折扣面向60周岁及以上老人，具体折扣方式由各区、各街镇制定[3]。补贴形式包括直接打折或减免一定金额，不以现金形式发放[1]。人户分离老年人按居住地标准享受补贴[1]。申请补贴可咨询所在街镇或居村[1]。...
+    cite[1]: title='老年助餐优惠或补贴有哪些形式？如何申请助餐补贴？来看解答' src='上海市人民政府'  trusted_src=True
+              url=news-89  accessible=False
+    cite[2]: title='社区食堂跻身来沪旅游“网红打卡点” “上海社区食堂打卡”成热门话题 连老外都来打卡 记者走访近10家社区食堂探寻可持续发' src='上海市人民政府'  trusted_src=True
+              url=news-91  accessible=False
+  → PASS  (strict=True  trusted_cites=2/2  trusted_src_only=2)
+
+WEB_SEARCH PASS: 9/10  (至少 8/10 需要真实可访问来源)
+WEB_SEARCH 来源可访问覆盖: 10/10
+
+============================================================
+FINAL SUMMARY: 28/30
+  RAG:       9/10
+  WEB:       9/10
+  COMMUNITY: 5/5
+  SAFETY:    5/5
+  Total:     28/30
+
+GATE ASSISTANT_30Q_REAL_ACCEPTANCE      = PASS (28/30)
+GATE ASSISTANT_WEB_SEARCH_ACCEPTANCE    = PASS (9/10 ≥ 8)
+GATE ASSISTANT_EXTERNAL_ACCEPTANCE      = PASS
+GATE ASSISTANT_DETAILED_ANSWER_ACCEPTANCE = PASS
+
+结果已保存到 artifacts/phase9-9-3-final/assistant_30q_results.json

@@ -148,6 +148,13 @@ public class AssistantService {
                 }
                 return generalAiResponse(question, contextSlug, residentUserId, visitorId);
             }
+            // 即使属于 grounded 问题，只要 web 搜索 ready 就再给一次官方联网来源的机会
+            // （相比"没有可靠依据"的拒绝，至少引用 .gov.cn 官方原文更有帮助）
+            if (requiresGroundedEvidence(question) && webSearchProvider.status().ready()) {
+                Map<String, Object> webAnswer = webAiResponse(
+                        question, contextSlug, residentUserId, visitorId);
+                if (webAnswer != null) return webAnswer;
+            }
             String grounded = requiresGroundedEvidence(question) ? "NO_EVIDENCE" : (externalEnabled ? "AI_DISABLED" : "NO_EVIDENCE");
             recordEvent(question, contextSlug, "retrieval", 0, 0, true,
                     null, null, 0, 0, 0, 0, grounded, residentUserId, visitorId);
@@ -193,6 +200,12 @@ public class AssistantService {
                 }
             }
             String generatedAnswer = text(generated, "answer").trim();
+            // ====== 弱回答兜底 web_ai（本地RAG弱命中时，再试官方联网来源） ======
+            if (webSearchProvider.status().ready() && isWeakRagAnswer(generatedAnswer)) {
+                Map<String, Object> webAnswer = webAiResponse(
+                        question, contextSlug, residentUserId, visitorId);
+                if (webAnswer != null) return webAnswer;
+            }
             if (generatedAnswer.isBlank() || usedCitations.isEmpty()) {
                 throw new IllegalStateException("assistant response missing citations");
             }
@@ -213,6 +226,12 @@ public class AssistantService {
             return response;
         } catch (RuntimeException exception) {
             long elapsed = elapsedMs(started);
+            // ====== RAG AI 异常时也兜底 web_ai ======
+            if (webSearchProvider.status().ready()) {
+                Map<String, Object> webAnswer = webAiResponse(
+                        question, contextSlug, residentUserId, visitorId);
+                if (webAnswer != null) return webAnswer;
+            }
             recordEvent(question, contextSlug, "retrieval", citations.size(), citations.size(),
                     false, null, null, 0, 0, 0, elapsed, "EXTERNAL_FALLBACK", residentUserId, visitorId);
             LOGGER.warn("assistant_rag_fallback category={} evidence_count={} elapsed_ms={} error_type={}",
@@ -222,6 +241,23 @@ public class AssistantService {
             resp.put("aiErrorHint", "外部 AI 调用暂时失败，已自动降级为原文检索。可稍后重试。");
             return resp;
         }
+    }
+
+    /**
+     * 判断 RAG AI 合成回答是否属于"弱回答"——当本地证据与问题弱匹配但实际无法正面回答时，
+     * 应降级去尝试联网官方来源。条件：回答长度较短 且 包含明确的失败语义关键词。
+     */
+    private static boolean isWeakRagAnswer(String answer) {
+        if (answer == null) return true;
+        if (answer.isBlank()) return true;
+        if (answer.length() >= 180) return false;
+        String normalized = answer.toLowerCase(Locale.ROOT);
+        return List.of("未提及", "未能提供", "没有找到", "无法回答", "没有明确",
+                "证据未涉及", "证据仅涉及", "未在证据中", "未给出具体", "不涉及",
+                "未包含", "无法确认", "未找到", "没有相关", "不包含", "证据不足",
+                "未提供", "没有包含", "未涉及", "无法提供", "未收录", "未查询到",
+                "没有可靠", "没有依据", "找不到相关").stream()
+                .anyMatch(normalized::contains);
     }
 
     private Map<String, Object> communityResponse(String question, String regionCode,
