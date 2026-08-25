@@ -25,10 +25,14 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.CacheControl;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.HexFormat;
 
 @RestController
 @RequestMapping("/api/public")
@@ -149,21 +153,40 @@ public class PublicController {
 
     @GetMapping("/reminders")
     public ApiResponse<List<Map<String, Object>>> reminders(
-            @RequestHeader(value = "X-Anonymous-User") String user) {
-        validateAnonymousUser(user);
+            @RequestHeader(value = "X-Anonymous-User", required = false) String user,
+            @RequestHeader(value = "X-Resident-Token", required = false) String residentToken) {
+        Long residentUserId = resolveResidentUserId(residentToken);
+        final String effectiveUser;
+        if (residentUserId != null) {
+            effectiveUser = "RESIDENT-" + residentUserId;
+        } else {
+            validateAnonymousUser(user);
+            effectiveUser = user;
+        }
         return ApiResponse.ok(jdbc.queryForList(
                 "SELECT r.id,r.reminder_type,r.remind_at,r.created_at,p.id published_item_id,p.slug,p.title,"
                         + "p.category,p.content_kind,p.status content_status FROM resident_reminder r "
                         + "JOIN published_item p ON p.id=r.published_item_id "
-                        + "WHERE r.anonymous_user_id=? ORDER BY r.remind_at,r.id", user));
+                        + "WHERE r.anonymous_user_id=? ORDER BY r.remind_at,r.id", effectiveUser));
     }
 
     @PostMapping("/items/{id}/reminder")
     public ApiResponse<Map<String, Object>> createReminder(
             @PathVariable long id,
-            @RequestHeader(value = "X-Anonymous-User") String user,
+            @RequestHeader(value = "X-Anonymous-User", required = false) String user,
+            @RequestHeader(value = "X-Resident-Token", required = false) String residentToken,
             @RequestBody ReminderRequest request) {
-        validateAnonymousUser(user);
+        Long residentUserId = resolveResidentUserId(residentToken);
+        final String effectiveUser;
+        final Long residentFkId;
+        if (residentUserId != null) {
+            effectiveUser = "RESIDENT-" + residentUserId;
+            residentFkId = residentUserId;
+        } else {
+            validateAnonymousUser(user);
+            effectiveUser = user;
+            residentFkId = null;
+        }
         Timestamp remindAt = parseReminderTime(request.remindAt());
         String type = request.reminderType() == null ? "CONTENT_TIME" : request.reminderType().trim();
         if (!List.of("CONTENT_TIME", "DEADLINE", "ACTIVITY_START").contains(type)) {
@@ -175,15 +198,20 @@ public class PublicController {
         if (count == null || count == 0) throw new BusinessException(404, "内容不存在或已撤回");
         int existing = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM resident_reminder WHERE anonymous_user_id=? AND published_item_id=? AND reminder_type=?",
-                Integer.class, user, id, type);
+                Integer.class, effectiveUser, id, type);
         if (existing == 0) {
-            jdbc.update("INSERT INTO resident_reminder(anonymous_user_id,published_item_id,reminder_type,remind_at) VALUES (?,?,?,?)",
-                    user, id, type, remindAt);
-            recordUsage(user, id, "REMINDER_CREATE");
+            if (residentFkId != null) {
+                jdbc.update("INSERT INTO resident_reminder(anonymous_user_id,resident_user_id,published_item_id,reminder_type,remind_at) VALUES (?,?,?,?,?)",
+                        effectiveUser, residentFkId, id, type, remindAt);
+            } else {
+                jdbc.update("INSERT INTO resident_reminder(anonymous_user_id,published_item_id,reminder_type,remind_at) VALUES (?,?,?,?)",
+                        effectiveUser, id, type, remindAt);
+            }
+            recordUsage(user != null ? user : effectiveUser, id, "REMINDER_CREATE");
         } else {
             jdbc.update("UPDATE resident_reminder SET remind_at=?,created_at=CURRENT_TIMESTAMP "
-                    + "WHERE anonymous_user_id=? AND published_item_id=? AND reminder_type=?",
-                    remindAt, user, id, type);
+                            + "WHERE anonymous_user_id=? AND published_item_id=? AND reminder_type=?",
+                    remindAt, effectiveUser, id, type);
         }
         return ApiResponse.ok(Map.of("publishedItemId", id, "reminderType", type, "remindAt", remindAt));
     }
@@ -191,9 +219,17 @@ public class PublicController {
     @DeleteMapping("/reminders/{id}")
     public ApiResponse<Void> deleteReminder(
             @PathVariable long id,
-            @RequestHeader(value = "X-Anonymous-User") String user) {
-        validateAnonymousUser(user);
-        jdbc.update("DELETE FROM resident_reminder WHERE id=? AND anonymous_user_id=?", id, user);
+            @RequestHeader(value = "X-Anonymous-User", required = false) String user,
+            @RequestHeader(value = "X-Resident-Token", required = false) String residentToken) {
+        Long residentUserId = resolveResidentUserId(residentToken);
+        final String effectiveUser;
+        if (residentUserId != null) {
+            effectiveUser = "RESIDENT-" + residentUserId;
+        } else {
+            validateAnonymousUser(user);
+            effectiveUser = user;
+        }
+        jdbc.update("DELETE FROM resident_reminder WHERE id=? AND anonymous_user_id=?", id, effectiveUser);
         return ApiResponse.ok(null);
     }
 
@@ -405,4 +441,23 @@ public class PublicController {
     }
 
     public record ReminderRequest(String reminderType, String remindAt) {}
+
+    private Long resolveResidentUserId(String token) {
+        if (token == null || token.isBlank()) return null;
+        String hash = sha256(token);
+        List<Long> ids = jdbc.queryForList(
+                "SELECT u.id FROM resident_session s JOIN resident_user u ON u.id=s.resident_user_id "
+                        + "WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP AND u.status='ACTIVE'",
+                Long.class, hash);
+        return ids.isEmpty() ? null : ids.get(0);
+    }
+
+    private static String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
 }
