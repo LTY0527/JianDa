@@ -186,147 +186,149 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="h5-page assistant-page-new">
-    <header class="chat-top">
-      <div class="chat-top__brand">
-        <span class="chat-logo"><MessageCircleQuestion /></span>
-        <div>
-          <h1>简达助手</h1>
-          <small :class="`st st--${assistantStatus}`"><i></i>{{ statusLabel(assistantStatus) }}</small>
+  <div class="h5-page assistant-shell-new">
+    <H5Header />
+    <main class="h5-main assistant-shell">
+      <div class="assistant-inner-head">
+        <div class="a-head__brand">
+          <span class="a-logo"><MessageCircleQuestion /></span>
+          <div>
+            <h1>简达助手</h1>
+            <small :class="`st st--${assistantStatus}`"><i></i>{{ statusLabel(assistantStatus) }}</small>
+          </div>
+        </div>
+        <div class="a-head__actions">
+          <RouterLink to="/assistant/history"><Clock3 /></RouterLink>
+          <button type="button" :disabled="!messages.length" @click="clearSession" aria-label="清空会话"><Trash2 /></button>
         </div>
       </div>
-      <div class="chat-top__actions">
-        <RouterLink to="/assistant/history"><Clock3 /></RouterLink>
-        <button type="button" :disabled="!messages.length" @click="clearSession" aria-label="清空会话"><Trash2 /></button>
-      </div>
-    </header>
 
-    <section v-if="contextTitle" class="chat-context">
-      <BookOpenCheck /><span>围绕这项内容讨论</span><b>{{ contextTitle }}</b>
-      <RouterLink :to="`/guide/${contextSlug}`">原文<ChevronRight /></RouterLink>
-    </section>
-
-    <main ref="conversation" class="chat-main" aria-live="polite" aria-label="问答记录">
-      <section v-if="!messages.length" class="chat-welcome">
-        <div class="chat-welcome__hero">
-          <div class="chat-welcome__avatar"><MessageCircleQuestion /></div>
-          <h2>你好，我是简达</h2>
-          <p>我会优先使用政府、社区和权威医疗机构的已发布内容回答。居民邻里信息会明确区分，不作为政策依据。</p>
-        </div>
-        <div class="chat-welcome__trust">
-          <div><BookOpenCheck /><span><b>原文核对</b><small>每条回答附来源与引用</small></span></div>
-          <div><CircleAlert /><span><b>不确定就说不确定</b><small>AI 不可用时使用确定性检索</small></span></div>
-        </div>
-        <h3 class="chat-welcome__kicker">试试下面的问题</h3>
-        <div class="chat-suggestions">
-          <button v-for="item in suggestions" :key="item" type="button" @click="submit(item)">
-            <b>{{ item }}</b>
-          </button>
-        </div>
-        <p v-if="!suggestions.length" class="chat-welcome__tip">输入政策、健康、反诈或办事方面的问题开始问答。</p>
+      <section v-if="contextTitle" class="chat-context">
+        <BookOpenCheck /><span>围绕这项内容讨论</span><b>{{ contextTitle }}</b>
+        <RouterLink :to="`/guide/${contextSlug}`">原文<ChevronRight /></RouterLink>
       </section>
 
-      <article v-for="message in messages" :key="message.id" class="chat-msg" :class="`chat-msg--${message.role}`">
-        <div v-if="message.role === 'assistant'" class="chat-msg__avatar"><MessageCircleQuestion /></div>
-        <div class="chat-msg__body">
-          <small v-if="message.role === 'assistant'" class="chat-msg__mode">{{ modeLabel(message.mode) }}</small>
-          <div class="chat-msg__bubble">{{ message.text }}</div>
-
-          <section v-if="message.actions?.length" class="chat-actions">
-            <h3><span></span>行动建议</h3>
-            <ol><li v-for="action in message.actions" :key="action">{{ action }}</li></ol>
-          </section>
-
-          <section v-if="message.factCards?.length" class="chat-facts">
-            <h3><span></span>已核对关键信息</h3>
-            <dl>
-              <div v-for="fact in message.factCards" :key="`${fact.type}-${fact.label}-${fact.value}`">
-                <dt>{{ fact.label }}</dt><dd>{{ fact.value }}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section v-if="message.communityPosts?.length" class="chat-community">
-            <h3><span></span>邻里相关讨论（非官方）</h3>
-            <article v-for="post in message.communityPosts" :key="post.id">
-              <small>{{ post.category }} · {{ post.nickname }} · {{ post.street_or_town }}</small>
-              <p>{{ post.content }}</p>
-              <span>{{ formatDate(post.created_at) }}</span>
-            </article>
-          </section>
-
-          <div v-if="message.role === 'assistant'" class="chat-tools">
-            <button type="button" @click="toggleAnswerSpeech(message)">
-              <component :is="spokenMessageId === message.id && speech.status.value === 'playing' ? Pause : spokenMessageId === message.id && speech.status.value === 'paused' ? Play : Volume2" />
-              {{ spokenMessageId === message.id && speech.status.value === "playing" ? "暂停" : spokenMessageId === message.id && speech.status.value === "paused" ? "继续" : "朗读" }}
+      <div ref="conversation" class="assistant-chat-body" aria-live="polite" aria-label="问答记录">
+        <section v-if="!messages.length" class="chat-welcome">
+          <div class="chat-welcome__hero">
+            <div class="chat-welcome__avatar"><MessageCircleQuestion /></div>
+            <h2>你好，我是简达</h2>
+            <p>我会优先使用政府、社区和权威医疗机构的已发布内容回答。居民邻里信息会明确区分，不作为政策依据。</p>
+          </div>
+          <div class="chat-welcome__trust">
+            <div><BookOpenCheck /><span><b>原文核对</b><small>每条回答附来源与引用</small></span></div>
+            <div><CircleAlert /><span><b>不确定就说不确定</b><small>AI 不可用时使用确定性检索</small></span></div>
+          </div>
+          <h3 class="chat-welcome__kicker">试试下面的问题</h3>
+          <div class="chat-suggestions">
+            <button v-for="item in suggestions" :key="item" type="button" @click="submit(item)">
+              <b>{{ item }}</b>
             </button>
-            <button v-if="spokenMessageId === message.id && speech.isActive.value" type="button" @click="stopAnswerSpeech"><Square />停止</button>
-            <SpeechRateSelector :model-value="speech.rate.value" @select="speech.setRate" />
-            <span v-if="spokenMessageId === message.id && speech.progress.value.total" class="chat-tools__progress">
-              {{ speech.progress.value.current }}/{{ speech.progress.value.total }}
-            </span>
           </div>
+          <p v-if="!suggestions.length" class="chat-welcome__tip">输入政策、健康、反诈或办事方面的问题开始问答。</p>
+        </section>
 
-          <div v-if="message.citations?.length" class="chat-citations">
-            <details>
-              <summary>查看 <b>{{ message.citations.length }}</b> 个权威来源 <ChevronRight /></summary>
-              <component
-                :is="citation.kind === 'external' ? 'a' : RouterLink"
-                v-for="citation in message.citations"
-                :key="citation.slug || citation.url"
-                :to="citation.kind === 'external' ? undefined : detailPath(citation)"
-                :href="citation.kind === 'external' ? detailPath(citation) : undefined"
-                :target="citation.kind === 'external' ? '_blank' : undefined"
-                :rel="citation.kind === 'external' ? 'noopener noreferrer' : undefined"
-                class="chat-citation"
-              >
-                <header><span>{{ citation.category }}</span><small>{{ citation.sourceName }} · {{ formatDate(citation.publishedAt) }}</small></header>
-                <b>{{ citation.title }}</b>
-                <blockquote>"{{ citation.quote }}"</blockquote>
-              </component>
-            </details>
+        <article v-for="message in messages" :key="message.id" class="chat-msg" :class="`chat-msg--${message.role}`">
+          <div v-if="message.role === 'assistant'" class="chat-msg__avatar"><MessageCircleQuestion /></div>
+          <div class="chat-msg__body">
+            <small v-if="message.role === 'assistant'" class="chat-msg__mode">{{ modeLabel(message.mode) }}</small>
+            <div class="chat-msg__bubble">{{ message.text }}</div>
+
+            <section v-if="message.actions?.length" class="chat-actions">
+              <h3><span></span>行动建议</h3>
+              <ol><li v-for="action in message.actions" :key="action">{{ action }}</li></ol>
+            </section>
+
+            <section v-if="message.factCards?.length" class="chat-facts">
+              <h3><span></span>已核对关键信息</h3>
+              <dl>
+                <div v-for="fact in message.factCards" :key="`${fact.type}-${fact.label}-${fact.value}`">
+                  <dt>{{ fact.label }}</dt><dd>{{ fact.value }}</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section v-if="message.communityPosts?.length" class="chat-community">
+              <h3><span></span>邻里相关讨论（非官方）</h3>
+              <article v-for="post in message.communityPosts" :key="post.id">
+                <small>{{ post.category }} · {{ post.nickname }} · {{ post.street_or_town }}</small>
+                <p>{{ post.content }}</p>
+                <span>{{ formatDate(post.created_at) }}</span>
+              </article>
+            </section>
+
+            <div v-if="message.role === 'assistant'" class="chat-tools">
+              <button type="button" @click="toggleAnswerSpeech(message)">
+                <component :is="spokenMessageId === message.id && speech.status.value === 'playing' ? Pause : spokenMessageId === message.id && speech.status.value === 'paused' ? Play : Volume2" />
+                {{ spokenMessageId === message.id && speech.status.value === "playing" ? "暂停" : spokenMessageId === message.id && speech.status.value === "paused" ? "继续" : "朗读" }}
+              </button>
+              <button v-if="spokenMessageId === message.id && speech.isActive.value" type="button" @click="stopAnswerSpeech"><Square />停止</button>
+              <SpeechRateSelector :model-value="speech.rate.value" @select="speech.setRate" />
+              <span v-if="spokenMessageId === message.id && speech.progress.value.total" class="chat-tools__progress">
+                {{ speech.progress.value.current }}/{{ speech.progress.value.total }}
+              </span>
+            </div>
+
+            <div v-if="message.citations?.length" class="chat-citations">
+              <details>
+                <summary>查看 <b>{{ message.citations.length }}</b> 个权威来源 <ChevronRight /></summary>
+                <component
+                  :is="citation.kind === 'external' ? 'a' : RouterLink"
+                  v-for="citation in message.citations"
+                  :key="citation.slug || citation.url"
+                  :to="citation.kind === 'external' ? undefined : detailPath(citation)"
+                  :href="citation.kind === 'external' ? detailPath(citation) : undefined"
+                  :target="citation.kind === 'external' ? '_blank' : undefined"
+                  :rel="citation.kind === 'external' ? 'noopener noreferrer' : undefined"
+                  class="chat-citation"
+                >
+                  <header><span>{{ citation.category }}</span><small>{{ citation.sourceName }} · {{ formatDate(citation.publishedAt) }}</small></header>
+                  <b>{{ citation.title }}</b>
+                  <blockquote>"{{ citation.quote }}"</blockquote>
+                </component>
+              </details>
+            </div>
+
+            <p v-if="message.disclaimer" class="chat-disclaimer"><CircleAlert />{{ message.disclaimer }}</p>
           </div>
+          <div v-if="message.role === 'user'" class="chat-msg__avatar chat-msg__avatar--user"><span>您</span></div>
+        </article>
 
-          <p v-if="message.disclaimer" class="chat-disclaimer"><CircleAlert />{{ message.disclaimer }}</p>
+        <div v-if="busy" class="chat-msg chat-msg--assistant chat-msg--typing">
+          <div class="chat-msg__avatar"><MessageCircleQuestion /></div>
+          <div class="chat-msg__body chat-msg__body--typing">
+            <small class="chat-msg__mode">正在整理</small>
+            <div class="chat-dots"><span></span><span></span><span></span></div>
+            <div class="chat-stages">
+              <span :class="{ done: busy && !error }"><Clock3 />查找权威来源</span>
+              <span :class="{ done: busy && !error && messages.length > 0 }"><BookOpenCheck />整理已核对要点</span>
+              <span><CircleAlert />标注不确定内容</span>
+            </div>
+          </div>
         </div>
-        <div v-if="message.role === 'user'" class="chat-msg__avatar chat-msg__avatar--user"><span>您</span></div>
-      </article>
 
-      <div v-if="busy" class="chat-msg chat-msg--assistant chat-msg--typing">
-        <div class="chat-msg__avatar"><MessageCircleQuestion /></div>
-        <div class="chat-msg__body chat-msg__body--typing">
-          <small class="chat-msg__mode">正在整理</small>
-          <div class="chat-dots"><span></span><span></span><span></span></div>
-          <div class="chat-stages">
-            <span :class="{ done: busy && !error }"><Clock3 />查找权威来源</span>
-            <span :class="{ done: busy && !error && messages.length > 0 }"><BookOpenCheck />整理已核对要点</span>
-            <span><CircleAlert />标注不确定内容</span>
-          </div>
+        <div v-if="error" class="chat-error" role="alert">
+          <span>{{ error }}</span>
+          <button v-if="failedQuestion" type="button" :disabled="busy" @click="retryFailedQuestion">重新发送</button>
         </div>
+        <p v-if="speech.error.value" class="chat-error" role="status">{{ speech.error.value }}</p>
       </div>
 
-      <div v-if="error" class="chat-error" role="alert">
-        <span>{{ error }}</span>
-        <button v-if="failedQuestion" type="button" :disabled="busy" @click="retryFailedQuestion">重新发送</button>
-      </div>
-      <p v-if="speech.error.value" class="chat-error" role="status">{{ speech.error.value }}</p>
+      <section class="assistant-composer-new">
+        <small v-if="!messages.length" class="chat-input__tip">问答记录仅保存在本机浏览器</small>
+        <form @submit.prevent="submit()">
+          <textarea v-model="question" maxlength="500" rows="1" placeholder="输入问题，Ctrl/⌘ + Enter 发送" @keydown.ctrl.enter.prevent="submit()" @keydown.meta.enter.prevent="submit()" />
+          <button class="chat-input__mic" type="button" :disabled="!speechSupported" @click="startSpeechInput" :aria-label="speechSupported ? '语音输入' : '当前浏览器不支持语音输入'"><Mic /></button>
+          <button class="chat-input__send" type="submit" :disabled="busy || !question.trim()" aria-label="发送"><Send /></button>
+        </form>
+      </section>
     </main>
-
-    <section class="chat-input">
-      <small v-if="!messages.length" class="chat-input__tip">问答记录仅保存在本机浏览器</small>
-      <form @submit.prevent="submit()">
-        <textarea v-model="question" maxlength="500" rows="1" placeholder="输入问题，Ctrl/⌘ + Enter 发送" @keydown.ctrl.enter.prevent="submit()" @keydown.meta.enter.prevent="submit()" />
-        <button class="chat-input__mic" type="button" :disabled="!speechSupported" @click="startSpeechInput" :aria-label="speechSupported ? '语音输入' : '当前浏览器不支持语音输入'"><Mic /></button>
-        <button class="chat-input__send" type="submit" :disabled="busy || !question.trim()" aria-label="发送"><Send /></button>
-      </form>
-    </section>
-
     <BottomNav />
   </div>
 </template>
 
 <style scoped>
-.assistant-page-new {
+.assistant-shell-new {
   --at: #0E5A55;
   --at-soft: #E7F1EE;
   --ink: #172326;
@@ -335,25 +337,19 @@ onMounted(async () => {
   --surface: #fff;
   --warn: #D58B32;
   --err: #B84A42;
-  padding: 0 0 140px;
-  min-height: 100vh;
-  background: var(--bg);
   color: var(--ink);
 }
-.chat-top {
-  position: sticky;
-  top: 0;
-  z-index: 20;
+.assistant-shell {
+  padding: 0 24px 360px;
+}
+.assistant-inner-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px 12px;
-  background: rgba(247, 244, 238, .92);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid #E7ECE9;
+  padding: 22px 0 16px;
 }
-.chat-top__brand { display: flex; align-items: center; gap: 12px; }
-.chat-logo {
+.a-head__brand { display: flex; align-items: center; gap: 12px; }
+.a-logo {
   width: 44px; height: 44px;
   display: grid; place-items: center;
   border-radius: 12px;
@@ -361,8 +357,8 @@ onMounted(async () => {
   color: #fff;
   box-shadow: 0 6px 18px rgba(14, 90, 85, .22);
 }
-.chat-logo svg { width: 22px; }
-.chat-top__brand h1 {
+.a-logo svg { width: 22px; }
+.a-head__brand h1 {
   margin: 0;
   font-size: 20px;
   font-weight: 800;
@@ -381,8 +377,8 @@ onMounted(async () => {
 .st--ready i { background: #1E9E59; box-shadow: 0 0 0 3px rgba(30, 158, 89, .14); }
 .st--degraded i { background: #D58B32; }
 .st--unreachable i, .st--disabled i { background: #B84A42; }
-.chat-top__actions { display: flex; gap: 4px; }
-.chat-top__actions > * {
+.a-head__actions { display: flex; gap: 4px; }
+.a-head__actions > * {
   min-width: 44px; height: 44px;
   border: 0; border-radius: 10px;
   background: var(--surface);
@@ -392,8 +388,8 @@ onMounted(async () => {
   text-decoration: none;
   font-weight: 700;
 }
-.chat-top__actions svg { width: 19px; }
-.chat-top__actions button:disabled { opacity: .4; }
+.a-head__actions svg { width: 19px; }
+.a-head__actions button:disabled { opacity: .4; }
 
 .chat-context {
   display: grid;
@@ -403,7 +399,7 @@ onMounted(async () => {
   padding: 12px 20px;
   background: #FFF6E9;
   color: #7A4A15;
-  margin: 0 16px;
+  margin: 0 0 14px;
   border-radius: 12px;
   border: 1px solid #F1E2C7;
 }
@@ -426,7 +422,7 @@ onMounted(async () => {
 }
 .chat-context a svg { color: #0E5A55; width: 15px; }
 
-.chat-main { padding: 14px 16px 8px; }
+.assistant-chat-body { padding: 14px 4px 8px; }
 .chat-welcome { padding: 12px 4px 22px; }
 .chat-welcome__hero {
   padding: 28px 24px;
@@ -854,15 +850,15 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-.chat-input {
+.assistant-composer-new {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
   right: auto;
-  bottom: 0;
-  z-index: 15;
+  bottom: 76px;
+  z-index: 11;
   width: min(100%, 760px);
-  padding: 10px 14px calc(10px + env(safe-area-inset-bottom) + 60px);
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
   background: linear-gradient(180deg, rgba(247,244,238,0) 0%, #F7F4EE 28%);
   backdrop-filter: saturate(1.2);
 }
@@ -873,7 +869,7 @@ onMounted(async () => {
   font-size: 11px;
   margin: 0 4px 6px;
 }
-.chat-input form {
+.assistant-composer-new form {
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 8px;
@@ -884,7 +880,7 @@ onMounted(async () => {
   border-radius: 14px;
   box-shadow: 0 8px 28px rgba(23, 35, 38, .08);
 }
-.chat-input textarea {
+.assistant-composer-new textarea {
   resize: none;
   min-height: 40px;
   max-height: 160px;
@@ -912,14 +908,17 @@ onMounted(async () => {
 .chat-input__send svg { width: 20px; }
 
 @media (max-width: 768px) {
-  .chat-top { padding: 12px 16px 10px; }
+  .assistant-shell { padding: 0 14px 360px; }
+  .assistant-inner-head { padding: 14px 0 10px; }
   .chat-suggestions { grid-template-columns: 1fr; }
   .chat-welcome__trust { grid-template-columns: 1fr; }
-  .chat-main { padding-inline: 14px; }
-  .chat-input {
+  .assistant-chat-body { padding-inline: 4px; }
+  .chat-context { margin-inline: 0; }
+  .assistant-composer-new {
     left: 0; right: 0;
     transform: none;
     width: 100%;
+    bottom: 72px;
     padding-inline: 12px;
   }
 }
