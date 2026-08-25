@@ -46,6 +46,11 @@ export interface PublicItem {
   last_verified_at?: string;
   source_updated_at?: string;
   verification_status?: "VERIFIED" | "REVIEW_REQUIRED";
+  view_count?: number;
+  like_count?: number;
+  favorite_count?: number;
+  reminder_count?: number;
+  hot_score?: number;
 }
 
 export interface AssistantCitation {

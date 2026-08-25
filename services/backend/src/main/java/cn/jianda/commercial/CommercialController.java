@@ -41,7 +41,9 @@ public class CommercialController {
                         + "v.id provider_id,v.name provider_name,v.verification_status,v.contact_phone,v.refund_policy "
                         + "FROM service_product p JOIN service_provider v ON v.id=p.provider_id "
                         + "WHERE p.status='ACTIVE' AND v.status='ACTIVE' AND v.verification_status='VERIFIED' AND p.region_code=? "
-                        + "ORDER BY p.id DESC", regionCode.trim()));
+                        + "ORDER BY CASE WHEN p.price_cents=0 THEN 0 ELSE 1 END ASC,"
+                        + "CASE WHEN LENGTH(p.description)>50 THEN 0 ELSE 1 END ASC,"
+                        + "p.id DESC", regionCode.trim()));
     }
 
     @GetMapping("/public/commercial/sponsors")

@@ -52,7 +52,7 @@ export function normalizeTitle(title: string): string {
     .trim();
 }
 
-export function truncateSummary(summary: string, maxLength = 120): string {
+export function truncateSummary(summary: string, maxLength = 50): string {
   const cleaned = sanitizeDisplayText(summary);
   return cleaned.length > maxLength
     ? `${cleaned.slice(0, maxLength).replace(/[，、；：\s]+$/, "")}…`

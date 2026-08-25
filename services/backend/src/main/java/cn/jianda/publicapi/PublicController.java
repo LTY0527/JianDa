@@ -57,10 +57,19 @@ public class PublicController {
                 + "p.effective_from,p.deadline_at,p.expires_at,p.last_verified_at,p.source_updated_at,p.verification_status,"
                 + "p.province,p.city,p.district,p.street_or_town,p.community,p.region_code,p.local_scope,"
                 + "d.cover_image_type,d.image_source_name,d.image_source_url,d.image_alt_text,d.image_cached,"
-                + "d.image_license_note "
+                + "d.image_license_note,"
+                + "COALESCE(ev.view_count,0) view_count,COALESCE(el.like_count,0) like_count,"
+                + "COALESCE(f.favorite_count,0) favorite_count,COALESCE(r.reminder_count,0) reminder_count,"
+                + "(CASE WHEN p.pinned THEN 500 ELSE 0 END + p.importance*5"
+                + " + COALESCE(ev.view_count,0)*3 + COALESCE(el.like_count,0)*5"
+                + " + COALESCE(f.favorite_count,0)*12 + COALESCE(r.reminder_count,0)*8) hot_score "
                 + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
+                + "LEFT JOIN (SELECT published_item_id,COUNT(*) view_count FROM content_engagement_event WHERE event_type='VIEW' GROUP BY published_item_id) ev ON ev.published_item_id=p.id "
+                + "LEFT JOIN (SELECT published_item_id,COUNT(*) like_count FROM content_engagement_event WHERE event_type='LIKE' GROUP BY published_item_id) el ON el.published_item_id=p.id "
+                + "LEFT JOIN (SELECT published_item_id,COUNT(*) favorite_count FROM favorite GROUP BY published_item_id) f ON f.published_item_id=p.id "
+                + "LEFT JOIN (SELECT published_item_id,COUNT(*) reminder_count FROM resident_reminder GROUP BY published_item_id) r ON r.published_item_id=p.id "
                 + "WHERE p.status='PUBLISHED' AND (p.expires_at IS NULL OR p.expires_at>=CURRENT_TIMESTAMP) ";
-        String order = "ORDER BY p.pinned DESC,p.importance DESC,p.published_at DESC,p.id DESC";
+        String order = "ORDER BY p.pinned DESC,hot_score DESC,p.importance DESC,p.published_at DESC,p.id DESC";
         List<Object> parameters = new ArrayList<>();
         if (category != null && !category.isBlank()) {
             sql += "AND p.category=? ";
@@ -93,8 +102,17 @@ public class PublicController {
                 + "p.source_url,p.published_at,p.content_kind,p.cover_image_url,p.is_local,p.reading_minutes,"
                 + "p.pinned,p.importance,p.publish_channel,p.promote_to_recommend,p.importance_level,p.effective_from,p.deadline_at,p.expires_at,p.last_verified_at,"
                 + "p.source_updated_at,p.verification_status,d.cover_image_type,d.image_source_name,d.image_source_url,"
-                + "d.image_alt_text,d.image_cached,d.image_license_note "
+                + "d.image_alt_text,d.image_cached,d.image_license_note,"
+                + "COALESCE(ev.view_count,0) view_count,COALESCE(el.like_count,0) like_count,"
+                + "COALESCE(f.favorite_count,0) favorite_count,COALESCE(r.reminder_count,0) reminder_count,"
+                + "(CASE WHEN p.pinned THEN 500 ELSE 0 END + p.importance*5"
+                + " + COALESCE(ev.view_count,0)*3 + COALESCE(el.like_count,0)*5"
+                + " + COALESCE(f.favorite_count,0)*12 + COALESCE(r.reminder_count,0)*8) hot_score "
                 + "FROM published_item p JOIN source_document d ON d.id=p.document_id "
+                + "LEFT JOIN (SELECT published_item_id,COUNT(*) view_count FROM content_engagement_event WHERE event_type='VIEW' GROUP BY published_item_id) ev ON ev.published_item_id=p.id "
+                + "LEFT JOIN (SELECT published_item_id,COUNT(*) like_count FROM content_engagement_event WHERE event_type='LIKE' GROUP BY published_item_id) el ON el.published_item_id=p.id "
+                + "LEFT JOIN (SELECT published_item_id,COUNT(*) favorite_count FROM favorite GROUP BY published_item_id) f ON f.published_item_id=p.id "
+                + "LEFT JOIN (SELECT published_item_id,COUNT(*) reminder_count FROM resident_reminder GROUP BY published_item_id) r ON r.published_item_id=p.id "
                 + "WHERE p.status='PUBLISHED' AND (p.expires_at IS NULL OR p.expires_at>=CURRENT_TIMESTAMP) "
                 + "AND (p.title LIKE ? OR p.summary LIKE ? OR p.category LIKE ?) ";
         List<Object> parameters = new ArrayList<>(List.of(like, like, like));
@@ -102,7 +120,7 @@ public class PublicController {
             sql += "AND " + PublishedRegionScope.predicate("p") + " ";
             parameters.addAll(PublishedRegionScope.parameters(regionCode));
         }
-        sql += "ORDER BY p.pinned DESC,p.importance DESC,p.published_at DESC,p.id DESC";
+        sql += "ORDER BY p.pinned DESC,hot_score DESC,p.importance DESC,p.published_at DESC,p.id DESC";
         return ApiResponse.ok(jdbc.queryForList(sql, parameters.toArray()));
     }
 
@@ -235,8 +253,13 @@ public class PublicController {
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String regionCode) {
         List<Map<String, Object>> currentRows = jdbc.queryForList(
-                "SELECT id,pinned,importance,published_at,category,region_code FROM published_item "
-                        + "WHERE slug=? AND status='PUBLISHED'", slug);
+                "SELECT p.id,p.pinned,p.importance,p.published_at,p.category,p.region_code,"
+                        + "(CASE WHEN p.pinned THEN 500 ELSE 0 END + p.importance*5 "
+                        + "+ COALESCE((SELECT COUNT(*) FROM content_engagement_event WHERE event_type='VIEW' AND published_item_id=p.id),0)*3 "
+                        + "+ COALESCE((SELECT COUNT(*) FROM content_engagement_event WHERE event_type='LIKE' AND published_item_id=p.id),0)*5 "
+                        + "+ COALESCE((SELECT COUNT(*) FROM favorite WHERE published_item_id=p.id),0)*12 "
+                        + "+ COALESCE((SELECT COUNT(*) FROM resident_reminder WHERE published_item_id=p.id),0)*8) hot_score "
+                        + "FROM published_item p WHERE slug=? AND p.status='PUBLISHED'", slug);
         if (currentRows.isEmpty()) throw new BusinessException(404, "内容不存在或已撤回");
         Map<String, Object> current = currentRows.get(0);
         String activeCategory = category == null || category.isBlank()
@@ -258,26 +281,33 @@ public class PublicController {
         Object pinnedValue = current.get("pinned");
         int pinned = pinnedValue instanceof Number number ? number.intValue()
                 : Boolean.TRUE.equals(pinnedValue) ? 1 : 0;
+        long hotScore = current.get("hot_score") == null ? 0L : ((Number) current.get("hot_score")).longValue();
         int importance = ((Number) current.get("importance")).intValue();
         Object publishedAt = current.get("published_at");
         long id = ((Number) current.get("id")).longValue();
         String comparison = previous ? ">" : "<";
         String order = previous ? "ASC" : "DESC";
+        String hotExpr = "(CASE WHEN p.pinned THEN 500 ELSE 0 END + p.importance*5 "
+                + "+ COALESCE((SELECT COUNT(*) FROM content_engagement_event WHERE event_type='VIEW' AND published_item_id=p.id),0)*3 "
+                + "+ COALESCE((SELECT COUNT(*) FROM content_engagement_event WHERE event_type='LIKE' AND published_item_id=p.id),0)*5 "
+                + "+ COALESCE((SELECT COUNT(*) FROM favorite WHERE published_item_id=p.id),0)*12 "
+                + "+ COALESCE((SELECT COUNT(*) FROM resident_reminder WHERE published_item_id=p.id),0)*8)";
         String sql = "SELECT p.id,p.slug,p.title,p.category,p.cover_image_url,p.content_kind "
                 + "FROM published_item p WHERE p.status='PUBLISHED' "
                 + (category == null ? "" : "AND p.category=? ")
                 + (regionCode == null || regionCode.isBlank() ? "" : "AND " + PublishedRegionScope.predicate("p") + " ")
                 + "AND ((CASE WHEN p.pinned THEN 1 ELSE 0 END " + comparison + " ?) "
-                + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND p.importance " + comparison + " ?) "
-                + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND p.importance=? AND p.published_at " + comparison + " ?) "
-                + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND p.importance=? AND p.published_at=? AND p.id " + comparison + " ?)) "
-                + "ORDER BY p.pinned " + order + ",p.importance " + order + ",p.published_at " + order
+                + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND " + hotExpr + " " + comparison + " ?) "
+                + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND " + hotExpr + "=? AND p.importance " + comparison + " ?) "
+                + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND " + hotExpr + "=? AND p.importance=? AND p.published_at " + comparison + " ?) "
+                + "OR ((CASE WHEN p.pinned THEN 1 ELSE 0 END)=? AND " + hotExpr + "=? AND p.importance=? AND p.published_at=? AND p.id " + comparison + " ?)) "
+                + "ORDER BY p.pinned " + order + "," + hotExpr + " " + order + ",p.importance " + order + ",p.published_at " + order
                 + ",p.id " + order + " LIMIT 1";
         List<Object> parameters = new ArrayList<>();
         if (category != null) parameters.add(category);
         if (regionCode != null && !regionCode.isBlank()) parameters.addAll(PublishedRegionScope.parameters(regionCode));
-        parameters.addAll(List.of(pinned, pinned, importance, pinned, importance, publishedAt,
-                pinned, importance, publishedAt, id));
+        parameters.addAll(List.of(pinned, pinned, hotScore, pinned, hotScore, importance,
+                pinned, hotScore, importance, publishedAt, pinned, hotScore, importance, publishedAt, id));
         return firstOrNull(jdbc.queryForList(sql, parameters.toArray()));
     }
 
