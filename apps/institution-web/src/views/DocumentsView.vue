@@ -4,8 +4,8 @@ import PageHeader from "../components/PageHeader.vue";
 import StatusTag from "../components/StatusTag.vue";
 import { documentApi, type DocumentRow } from "../api/documents";
 import { apiMessage } from "../api/http";
-import { Search, Plus, Upload, Globe2, FileImage, FileText, PenLine, X, RefreshCw } from "lucide-vue-next";
-import { formatDisplayDate, formatDisplayDateTime, statusLabel } from "../utils/display";
+import { Search, Plus, Upload, Globe2, FileImage, FileText, PenLine, X, RefreshCw, Zap, MapPin, Layers, Timer } from "lucide-vue-next";
+import { formatDisplayDate, formatDisplayDateTime, statusLabel, stageLabel, channelLabel, estimateEtaMinutes } from "../utils/display";
 import { isPlatformAdmin } from "../auth";
 import { useRoute } from "vue-router";
 import { publicSourceApi } from "../api/publicSources";
@@ -77,6 +77,13 @@ function sourceLabel(document: DocumentRow) {
   if (document.source_type === "IMAGE") return "图片材料";
   return "PDF 材料";
 }
+function isProcessing(document: DocumentRow) {
+  return document.status === "UPLOADED" || document.status === "PROCESSING" || document.status === "QUEUED";
+}
+function processHref(document: DocumentRow) {
+  if (document.status === "WAITING_REVIEW") return `/documents/${document.id}/review`;
+  return `/documents/${document.id}/process`;
+}
 async function refreshDocuments(initial = false) {
   if (refreshing.value) return;
   refreshing.value = true;
@@ -137,57 +144,81 @@ onMounted(async () => {
           <Search :size="18" /><input
             v-model="query"
             aria-label="搜索材料标题或文件名"
-            placeholder="搜索材料标题或文件名"
+            placeholder="搜索材料标题、来源、地区或栏目"
           />
         </div>
       </div>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>材料</th>
-            <th>所属机构</th>
-            <th>处理状态</th>
-            <th>进度</th>
-            <th>更新时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody v-if="!loading && !error">
-          <tr v-for="d in filtered" :key="d.id">
-            <td>
-              <div class="material-title">
-                <component :is="sourceIcon(d)" :size="18" />
-                <span><b>{{ d.title }}</b
-                ><small>{{ sourceLabel(d) }} · {{ d.source_type === "WEB_ARTICLE" ? [d.source_name, d.category, formatDisplayDate(d.original_published_at)].filter(Boolean).join(" · ") : d.file_name || "尚未上传文件" }}</small></span>
-              </div>
-            </td>
-            <td>{{ d.organization_name }}</td>
-            <td>
-              <StatusTag
-                :status="d.status"
-                :text="statusLabel(d.status)"
-              />
-            </td>
-            <td>
-              <div class="progress">
-                <i :style="{ width: displayProgress(d) + '%' }"></i>
-              </div>
-              <small>{{ displayProgress(d) }}%</small>
-            </td>
-            <td>{{ formatDisplayDateTime(d.updated_at) }}</td>
-            <td>
-              <RouterLink
-                :to="
-                  d.status === 'WAITING_REVIEW'
-                    ? `/documents/${d.id}/review`
-                    : `/documents/${d.id}/process`
-                "
-                >查看</RouterLink
-              >
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <table class="data-table dense">
+          <thead>
+            <tr>
+              <th style="min-width:280px">材料</th>
+              <th style="min-width:140px"><span class="th-icon"><Layers :size="13" />来源</span></th>
+              <th style="min-width:130px"><span class="th-icon"><MapPin :size="13" />所属地区</span></th>
+              <th style="min-width:100px">栏目</th>
+              <th style="min-width:110px">处理Stage</th>
+              <th style="min-width:150px"><span class="th-icon"><Timer :size="13" />队列 / ETA</span></th>
+              <th style="min-width:130px">所属机构</th>
+              <th style="min-width:100px">状态</th>
+              <th style="min-width:120px">进度</th>
+              <th style="min-width:150px">更新时间</th>
+              <th style="min-width:100px">操作</th>
+            </tr>
+          </thead>
+          <tbody v-if="!loading && !error">
+            <tr v-for="d in filtered" :key="d.id" :class="{ 'processing-row': isProcessing(d) }">
+              <td>
+                <div class="material-title">
+                  <component :is="sourceIcon(d)" :size="18" />
+                  <span><b>{{ d.title }}</b
+                  ><small>{{ sourceLabel(d) }} · {{ d.source_type === "WEB_ARTICLE" ? formatDisplayDate(d.original_published_at) : (d.file_name || "尚未上传文件") }}</small></span>
+                </div>
+              </td>
+              <td>
+                <b class="source-cell">{{ d.source_name || "—" }}</b>
+                <small v-if="d.source_type">{{ sourceLabel(d) }}</small>
+              </td>
+              <td>
+                <b>{{ d.region_display || d.region_code || "—" }}</b>
+                <small v-if="d.region_code">编码 {{ d.region_code }}</small>
+              </td>
+              <td>
+                <span class="channel-tag">{{ channelLabel(d.publish_channel || d.category) }}</span>
+              </td>
+              <td>
+                <span v-if="d.stage" class="stage-tag"><Zap :size="11" />{{ stageLabel(d.stage) }}</span>
+                <span v-else class="stage-tag muted">未开始</span>
+              </td>
+              <td>
+                <span class="eta-cell">{{ estimateEtaMinutes(d.queue_position, d.stage) }}</span>
+              </td>
+              <td>{{ d.organization_name }}</td>
+              <td>
+                <StatusTag
+                  :status="d.status"
+                  :text="statusLabel(d.status)"
+                />
+              </td>
+              <td>
+                <div class="progress">
+                  <i :style="{ width: displayProgress(d) + '%' }"></i>
+                </div>
+                <small>{{ displayProgress(d) }}%</small>
+              </td>
+              <td>{{ formatDisplayDateTime(d.updated_at) }}</td>
+              <td>
+                <RouterLink
+                  :to="processHref(d)"
+                  :class="['row-action', { 'primary-action': isProcessing(d) }]"
+                >
+                  <Zap v-if="isProcessing(d)" :size="13" />
+                  {{ d.status === 'WAITING_REVIEW' ? '审核' : (isProcessing(d) ? '查看处理' : '查看') }}
+                </RouterLink>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <div v-if="loading" class="empty-state">正在加载材料…</div>
 
@@ -214,3 +245,21 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+<style scoped>
+.content-updated { margin: -12px 0 18px; color: var(--color-muted); font-size: 12px; }
+.content-updated.import-filter { padding: 12px 16px; background: var(--color-primary-soft); border-radius: 8px; color: var(--color-primary); }
+.content-updated.import-filter a { margin-left: 10px; font-weight: 700; }
+.th-icon { display: inline-flex; align-items: center; gap: 5px; }
+.table-wrap { overflow-x: auto; }
+.data-table.dense th, .data-table.dense td { padding: 11px 14px; font-size: 12.5px; }
+.source-cell { color: var(--color-ink); font-size: 12.5px; }
+.channel-tag { display: inline-block; padding: 3px 9px; border-radius: 5px; background: var(--color-primary-soft); color: var(--color-primary); font-size: 11.5px; font-weight: 600; }
+.stage-tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 5px; background: #FBEFE1; color: #B56518; font-size: 11.5px; font-weight: 600; }
+.stage-tag.muted { background: #F0F2F1; color: var(--color-muted); }
+.eta-cell { color: var(--color-primary); font-weight: 600; font-size: 12px; font-variant-numeric: tabular-nums; }
+.row-action { display: inline-flex; align-items: center; gap: 5px; padding: 6px 11px; border-radius: 6px; background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.row-action:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.row-action.primary-action { background: var(--color-primary); color: #fff; border-color: var(--color-primary); box-shadow: 0 1px 3px rgba(14,90,85,.22); }
+.row-action.primary-action:hover { background: var(--color-primary-dark); color: #fff; }
+.material-title small { margin-top: 5px; display: block; }
+</style>

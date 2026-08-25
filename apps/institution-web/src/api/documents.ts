@@ -13,6 +13,10 @@ export interface DocumentRow {
   suggested_publish_channel?: "HEALTH" | "ELDERLY" | "MEALS" | "SERVICES" | "FRAUD" | "ACTIVITY" | "COMMUNITY";
   channel_confidence?: number;
   channel_reason?: string;
+  region_code?: string;
+  region_display?: string;
+  stage?: string;
+  queue_position?: number;
   organization_name: string;
   status: string;
   progress: number;

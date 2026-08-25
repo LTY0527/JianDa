@@ -79,8 +79,14 @@ public class DocumentService {
 
     public List<Map<String, Object>> list(AuthUser user) {
         String sql = "SELECT d.id,d.title,d.file_name,d.file_type,d.source_type,d.source_name,d.original_published_at,"
-                + "d.category,d.content_kind,d.processing_status status,d.page_count,d.created_at,d.updated_at,o.name organization_name,"
-                + "COALESCE((SELECT MAX(progress) FROM processing_job j WHERE j.document_id=d.id),0) progress "
+                + "d.category,d.content_kind,d.publish_channel,d.region_code,"
+                + "CONCAT_WS('',d.province,d.city,d.district,d.street_or_town) region_display,"
+                + "d.processing_status status,d.page_count,d.created_at,d.updated_at,o.name organization_name,"
+                + "COALESCE((SELECT MAX(progress) FROM processing_job j WHERE j.document_id=d.id),0) progress,"
+                + "(SELECT j.stage FROM processing_job j WHERE j.document_id=d.id ORDER BY j.id DESC LIMIT 1) stage,"
+                + "(SELECT COUNT(1) FROM processing_job q WHERE q.status IN ('QUEUED','RUNNING') AND q.id<="
+                + "  COALESCE((SELECT j.id FROM processing_job j WHERE j.document_id=d.id AND j.status IN ('QUEUED','RUNNING') ORDER BY j.id DESC LIMIT 1),0)"
+                + ") queue_position "
                 + "FROM source_document d JOIN organization o ON o.id=d.organization_id ";
         if (user.isPlatformAdmin()) {
             return jdbc.queryForList(sql + "ORDER BY d.updated_at DESC");

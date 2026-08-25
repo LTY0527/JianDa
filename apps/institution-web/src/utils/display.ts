@@ -53,6 +53,27 @@ const statuses: Record<string, string> = {
   DUPLICATE: "重复内容",
 };
 
+const stages: Record<string, string> = {
+  QUEUED: "已排队",
+  TEXT_EXTRACTION: "正文提取",
+  FACT_EXTRACTION: "事实提取",
+  TRACE_VALIDATION: "原文核对",
+  ACCESSIBLE_REWRITE: "适老化生成",
+  PERSISTENCE: "保存结果",
+  REVIEW_READY: "等待审核",
+  COMPLETED: "已完成",
+};
+
+const channels: Record<string, string> = {
+  HEALTH: "健康科普",
+  ELDERLY: "养老政策",
+  MEALS: "助餐服务",
+  SERVICES: "办事指南",
+  FRAUD: "防诈提醒",
+  ACTIVITY: "活动通知",
+  COMMUNITY: "社区资讯",
+};
+
 export function coverTypeLabel(value?: string | null): string {
   return value ? coverTypes[value] || "其他封面" : "待确认";
 }
@@ -96,4 +117,21 @@ export function formatDisplayDateTime(value?: string | null): string {
     minute: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+export function stageLabel(value?: string | null): string {
+  return value ? stages[value] || "处理中" : "未开始";
+}
+
+export function channelLabel(value?: string | null): string {
+  return value ? channels[value] || "综合资讯" : "待分类";
+}
+
+export function estimateEtaMinutes(queuePosition?: number, stage?: string): string {
+  if (!queuePosition || queuePosition <= 0) {
+    if (stage && stage !== "COMPLETED" && stage !== "REVIEW_READY") return "约2-4分钟";
+    return "-";
+  }
+  const minutes = Math.max(2, queuePosition * 3);
+  return `队列第${queuePosition}位 · 约${minutes}分钟`;
 }
