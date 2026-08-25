@@ -44,6 +44,7 @@ const elapsedSeconds = ref(0);
 const snapshotQueuePosition = ref(0);
 const snapshotActiveProcessing = ref(0);
 const snapshotEstimatedMs = ref<string | null>(null);
+const startingAI = ref(false);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 const latestJob = computed(
@@ -139,8 +140,23 @@ const stageText: Record<string, string> = {
   QUEUE_REJECTED: "后台处理队列暂时已满",
   REWRITE_PENDING: "事实提取已保留，等待适老化改写",
   accessible_rewrite: "适老化改写失败，可单独重试",
+  HEARTBEAT_STALE: "任务心跳超时，可安全重试",
+  QUEUED: "已加入处理队列",
+  QUEUE_TIMEOUT_STALE: "在队列中等待过久，已安全暂停，可重新提交",
   SUCCEEDED: "处理完成",
   FAILED: "处理失败",
+};
+const reasonCodeText: Record<string, string> = {
+  AUTO_AI_DISABLED: "平台自动 AI 开关关闭，等待人工批准",
+  AI_UNAVAILABLE: "AI 服务暂时不可用",
+  AI_SERVICE_FAILED: "AI 服务调用失败，通常为网络或模型错误",
+  AI_TIMEOUT: "AI 调用超时，通常为 DeepSeek 或 Tavily 响应慢",
+  LLM_JSON_PARSE_FAILED: "AI 返回格式无法解析，已记录原始响应指纹",
+  DETERMINISTIC_FALLBACK: "已生成基础易读版本，自然化表达失败",
+  QUEUE_TIMEOUT_STALE: "在处理队列中等待过久",
+  MANUAL_APPROVAL: "平台管理员批准",
+  RECONCILED: "管理员重新排队",
+  MANUAL_RETRY: "管理员重试",
 };
 
 const railStages: Array<{ key: string; label: string; hint: string }> = [
@@ -171,20 +187,52 @@ const etaText = computed(() => {
   return `约 ${h} 小时 ${m} 分`;
 });
 
-const failed = computed(() => document.value?.processing_status === "FAILED");
+const notStarted = computed(
+  () =>
+    !loading.value &&
+    !failed.value &&
+    !completed.value &&
+    (document.value?.processing_status === "UPLOADED" ||
+      document.value?.processing_status === "IMPORTED" ||
+      !document.value?.processing_status) &&
+    jobs.value.length === 0,
+);
+const retryable = computed(
+  () =>
+    document.value?.processing_status === "FAILED_RETRYABLE" ||
+    latestJob.value?.status === "FAILED_RETRYABLE" ||
+    latestJob.value?.stage === "HEARTBEAT_STALE",
+);
+const failed = computed(
+  () =>
+    document.value?.processing_status === "FAILED" ||
+    document.value?.processing_status === "FAILED_RETRYABLE" ||
+    latestJob.value?.status === "FAILED" ||
+    latestJob.value?.status === "FAILED_RETRYABLE",
+);
 const emptyReviewResult = computed(
   () =>
     !loading.value &&
     document.value?.processing_status === "WAITING_REVIEW" &&
     !hasReviewContent.value,
 );
-const failureMessage = computed(
-  () =>
-    jobs.value.find((job) => job.status === "FAILED")?.error_message ||
-    (emptyReviewResult.value
-      ? "本次处理未生成可审核字段，请重新处理或查看任务日志"
-      : error.value || "处理未完成，请重新尝试"),
-);
+const failureMessage = computed(() => {
+  const failedJob = jobs.value.find(
+    (job) => job.status === "FAILED" || job.status === "FAILED_RETRYABLE",
+  );
+  const baseError = failedJob?.error_message;
+  const reasonCode = (failedJob?.reason_code || latestJob.value?.reason_code || "") as string;
+  const reasonHuman = reasonCodeText[reasonCode] || "";
+  const stage = (failedJob?.stage || latestJob.value?.stage || "") as string;
+  const stageHuman = stageText[stage] || "";
+  if (baseError) {
+    return baseError + (reasonHuman ? ` · ${reasonHuman}` : "");
+  }
+  if (stageHuman) return stageHuman + (reasonHuman ? ` · ${reasonHuman}` : "");
+  if (reasonHuman) return reasonHuman;
+  if (emptyReviewResult.value) return "本次处理未生成可审核字段，请重新处理或查看任务日志";
+  return error.value || "处理未完成，请重新尝试";
+});
 
 function parseJsonArray(value?: string): unknown[] {
   if (!value) return [];
@@ -371,6 +419,21 @@ function updateElapsed() {
   );
 }
 
+async function startNow() {
+  if (startingAI.value) return;
+  startingAI.value = true;
+  error.value = "";
+  try {
+    await documentApi.process(documentId);
+    startPolling();
+  } catch (cause) {
+    error.value = apiMessage(cause);
+  } finally {
+    await load();
+    startingAI.value = false;
+  }
+}
+
 async function retry() {
   retrying.value = true;
   error.value = "";
@@ -389,7 +452,11 @@ async function retry() {
 onMounted(async () => {
   await load();
   updateElapsed();
-  if (!terminal.value) startPolling();
+  if (route.query.autostart === "1" && notStarted.value) {
+    void startNow();
+  } else if (!terminal.value && !notStarted.value) {
+    startPolling();
+  }
   elapsedTimer = setInterval(updateElapsed, 1000);
 });
 onUnmounted(() => {
@@ -412,10 +479,31 @@ onUnmounted(() => {
       >进入原文对照审核<ArrowRight :size="17" /></RouterLink>
     </PageHeader>
 
-    <section class="process-summary-card">
+    <section v-if="notStarted" class="panel process-not-started">
+      <WandSparkles />
+      <div>
+        <h2>该材料尚未开始 AI 处理</h2>
+        <p>文件已保存，点击下方按钮启动正文提取与 AI 分析。处理过程中可随时离开此页面，后台会继续运行。</p>
+        <p v-if="isWebArticle && document" class="info-note">
+          来源：{{ document.source_url || document.source_name || "官方网页" }}
+          <template v-if="document.source_registry_id"> · 登记来源 #{{ document.source_registry_id }}</template>
+        </p>
+        <div>
+          <RouterLink class="btn secondary" to="/documents">返回材料列表</RouterLink>
+          <button class="btn primary" :disabled="startingAI" @click="startNow">
+            <WandSparkles v-if="!startingAI" :size="17" />
+            <LoaderCircle v-else class="spin" :size="17" />
+            {{ startingAI ? "正在启动 AI 处理…" : "开始 AI 处理" }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section v-else class="process-summary-card">
       <div class="process-summary-card__title">
         <h1>{{ document?.title || `文档 #${documentId}` }}</h1>
         <span v-if="latestJob?.status === 'WAITING_BUDGET'" class="pill pill--warning">等待预算恢复</span>
+        <span v-else-if="retryable" class="pill pill--warning">可安全重试</span>
         <span v-else-if="failed" class="pill pill--danger">处理失败</span>
         <span v-else-if="completed" class="pill pill--success">可审核</span>
         <span v-else class="pill pill--primary">处理中</span>
@@ -477,12 +565,13 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <div class="process-actions">
-      <RouterLink class="btn secondary" to="/documents">返回材料列表，后台继续处理</RouterLink>
-      <button class="btn secondary" :disabled="refreshing" @click="load(true)">
-        <RefreshCw :size="17" />{{ refreshing ? "正在刷新…" : "重新加载状态" }}
-      </button>
-    </div>
+    <template v-if="!notStarted">
+      <div class="process-actions">
+        <RouterLink class="btn secondary" to="/documents">返回材料列表，后台继续处理</RouterLink>
+        <button class="btn secondary" :disabled="refreshing" @click="load(true)">
+          <RefreshCw :size="17" />{{ refreshing ? "正在刷新…" : "重新加载状态" }}
+        </button>
+      </div>
 
     <section class="process-rail">
       <template v-for="(stage, idx) in railStages" :key="stage.key">
@@ -536,16 +625,27 @@ onUnmounted(() => {
     </section>
 
     <section
-      v-if="!loading && (failed || emptyReviewResult || error)"
-      class="panel process-failure"
+      v-if="!loading && !notStarted && (failed || emptyReviewResult || error)"
+      :class="['panel', retryable ? 'process-retryable' : 'process-failure']"
     >
-      <TriangleAlert />
+      <TriangleAlert v-if="!retryable" />
+      <RefreshCw v-else class="spin-slow" />
       <div>
-        <h2>{{ rewriteRecoverable ? "事实提取已完成，适老化改写失败" : "本次处理没有生成可审核结果" }}</h2>
+        <h2 v-if="retryable">
+          {{ rewriteRecoverable
+            ? "事实提取已完成，适老化改写可重试"
+            : latestJob?.stage === "HEARTBEAT_STALE" || latestJob?.status === "FAILED_RETRYABLE"
+              ? "处理中间状态可安全恢复，已自动保留上下文"
+              : "处理可重试，不会重复扣费" }}
+        </h2>
+        <h2 v-else>{{ rewriteRecoverable ? "事实提取已完成，适老化改写失败" : "本次处理没有生成可审核结果" }}</h2>
         <p>{{ failureMessage }}</p>
         <p v-if="latestJob" class="info-note">
           <span v-if="rewriteRecoverable">
             已保留 {{ fields.length }} 个可追溯事实字段，不会再次调用事实提取。
+          </span>
+          <span v-else-if="retryable && latestJob?.stage === 'HEARTBEAT_STALE'">
+            原因：任务超过 10 分钟未收到心跳，系统已安全标记。点击重试可从断点继续。
           </span>
           <span v-if="latestJob.provider_request_id">请求编号：{{ latestJob.provider_request_id }}</span>
           <span v-if="latestJob.reason_code">原因代码：{{ latestJob.reason_code }}</span>
@@ -557,13 +657,15 @@ onUnmounted(() => {
         </p>
         <div>
           <RouterLink class="btn secondary" to="/documents"
-            >返回材料详情</RouterLink
+            >返回材料列表</RouterLink
           >
-          <button class="btn primary" :disabled="retrying" @click="retry">
+          <button :class="retryable ? 'btn primary' : 'btn primary'" :disabled="retrying" @click="retry">
             <RefreshCw :size="17" />{{
               retrying
                 ? rewriteRecoverable ? "正在重新生成适老化内容…" : "正在重新处理…"
-                : rewriteRecoverable ? "重新生成适老化内容" : "重新处理"
+                : retryable
+                  ? (rewriteRecoverable ? "重新生成适老化内容" : "安全重试")
+                  : (rewriteRecoverable ? "重新生成适老化内容" : "重新处理")
             }}
           </button>
         </div>
@@ -639,6 +741,7 @@ onUnmounted(() => {
         </section>
       </aside>
     </div>
+    </template>
   </div>
 </template>
 
@@ -779,6 +882,25 @@ onUnmounted(() => {
 .rail-connector--active { background: linear-gradient(90deg, #D58B32, #F1DDA0); }
 .rail-connector--failed { background: #F1C8BF; }
 
+.process-not-started {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  background: linear-gradient(135deg, #F4FAF7 0%, #E8F5F0 100%);
+  border: 1px solid #C8E3D7;
+  border-radius: 18px;
+  padding: 28px 30px;
+  margin-top: 18px;
+}
+.process-not-started > svg {
+  width: 40px; height: 40px; flex: 0 0 40px;
+  color: #0E5A55; background: #fff; border-radius: 50%; padding: 8px;
+}
+.process-not-started h2 { margin: 0 0 8px; font-size: 20px; color: #0E5A55; }
+.process-not-started p { margin: 0 0 8px; color: #405953; }
+.process-not-started .info-note { font-size: 13px; color: #667378; margin-bottom: 16px; }
+.process-not-started > div > div:last-child { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
 .panel-title {
   display: flex;
   align-items: center;
@@ -813,4 +935,16 @@ onUnmounted(() => {
   .process-metric b { font-size: 15px; }
   .rail-node { min-width: 160px; }
 }
+.process-retryable{
+  display:flex;align-items:flex-start;gap:16px;
+  background:linear-gradient(135deg, #FFF9EE 0%, #FFF3D6 100%);
+  border:1px solid #EAD8A1;border-radius:18px;padding:24px 28px;margin-top:18px;
+}
+.process-retryable > svg:first-child{width:40px;height:40px;flex:0 0 40px;color:#D58B32;background:#fff;border-radius:50%;padding:8px}
+.process-retryable h2{margin:0 0 8px;font-size:18px;color:#7A5A00}
+.process-retryable p{margin:0 0 8px;color:#65501F}
+.process-retryable .info-note{font-size:12px;color:#857348;margin-bottom:14px}
+.process-retryable > div > div:last-child{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.spin-slow{animation:spin 2.4s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>

@@ -50,6 +50,8 @@ export interface DocumentDetail {
   file_size?: number;
   file_sha256?: string;
   source_type?: string;
+  source_url?: string;
+  source_registry_id?: number;
   canonical_url?: string;
   source_authority_level?: string;
   original_published_at?: string;
