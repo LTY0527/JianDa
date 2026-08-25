@@ -316,8 +316,18 @@ export async function residentLogin(username: string, password: string): Promise
   localStorage.setItem("jianda_resident_profile", JSON.stringify(response.data.data.profile));
   return response.data.data.profile;
 }
-export async function residentRegister(username: string, password: string, nickname: string, regionCode?: string): Promise<ResidentProfile> {
-  const response = await client.post("/public/resident/register", { username, password, nickname, regionCode });
+export async function residentRegister(
+  username: string,
+  password: string,
+  nickname: string,
+  regionCode?: string,
+  phone?: string,
+): Promise<ResidentProfile> {
+  const payload: Record<string, string> = { password, nickname };
+  if (username) payload.username = username;
+  if (phone) payload.phone = phone;
+  if (regionCode) payload.regionCode = regionCode;
+  const response = await client.post("/public/resident/register", payload);
   localStorage.setItem("jianda_resident_token", response.data.data.token);
   localStorage.setItem("jianda_resident_profile", JSON.stringify(response.data.data.profile));
   return response.data.data.profile;

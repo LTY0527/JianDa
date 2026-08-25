@@ -36,6 +36,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class ResidentCommunityController {
     private static final String DEFAULT_REGION = SupportedRegions.DEFAULT_CODE;
     private static final Pattern USERNAME = Pattern.compile("[A-Za-z0-9_]{4,30}");
+    private static final Pattern PHONE = Pattern.compile("^1[3-9]\\d{9}$");
     private final JdbcTemplate jdbc;
     private final PasswordEncoder passwordEncoder;
     private final SmsProvider smsProvider;
@@ -51,25 +52,56 @@ public class ResidentCommunityController {
 
     @GetMapping("/api/public/resident/registration-capabilities")
     public ApiResponse<Map<String, Object>> registrationCapabilities() {
-        return ApiResponse.ok(Map.of("usernamePassword", true, "sms", smsProvider.status()));
+        return ApiResponse.ok(Map.of("usernamePassword", true, "sms", smsProvider.status(),
+                "phonePassword", true));
     }
 
     @PostMapping("/api/public/resident/register")
     public ApiResponse<Map<String, Object>> register(@RequestBody RegisterRequest request) {
         String username = clean(request.username(), 30);
+        String phone = clean(request.phone(), 20);
         String password = request.password() == null ? "" : request.password();
         String nickname = clean(request.nickname(), 60);
-        if (!USERNAME.matcher(username).matches()) throw new BusinessException(400, "用户名需为 4-30 位字母、数字或下划线");
+        boolean hasUsername = !username.isBlank();
+        boolean hasPhone = !phone.isBlank();
+        if (!hasUsername && !hasPhone) throw new BusinessException(400, "请输入手机号或用户名");
+        if (hasPhone && !PHONE.matcher(phone).matches()) throw new BusinessException(400, "手机号格式不正确");
+        if (hasUsername && !USERNAME.matcher(username).matches()) throw new BusinessException(400, "用户名需为 4-30 位字母、数字或下划线");
         if (password.length() < 8 || password.length() > 72 || !password.matches(".*[A-Za-z].*") || !password.matches(".*\\d.*")) {
             throw new BusinessException(400, "密码需为 8-72 位，且同时包含字母和数字");
         }
         if (nickname.length() < 2) throw new BusinessException(400, "昵称至少需要 2 个字");
-        Integer duplicate = jdbc.queryForObject("SELECT COUNT(*) FROM resident_user WHERE username=?", Integer.class, username);
-        if (duplicate != null && duplicate > 0) throw new BusinessException(409, "该用户名已被注册");
+        if (hasUsername) {
+            Integer duplicate = jdbc.queryForObject("SELECT COUNT(*) FROM resident_user WHERE username=?", Integer.class, username);
+            if (duplicate != null && duplicate > 0) throw new BusinessException(409, "该用户名已被注册");
+        }
+        if (hasPhone) {
+            Integer duplicate = jdbc.queryForObject("SELECT COUNT(*) FROM resident_user WHERE phone=?", Integer.class, phone);
+            if (duplicate != null && duplicate > 0) throw new BusinessException(409, "该手机号已被注册");
+        }
         SupportedRegions.Region region = SupportedRegions.require(request.regionCode());
-        jdbc.update("INSERT INTO resident_user(username,password_hash,nickname,district,street_or_town,region_code) VALUES (?,?,?,?,?,?)",
-                username, passwordEncoder.encode(password), nickname, region.district(), region.townName(), region.code());
-        return login(new LoginRequest(username, password));
+        String finalUsername = hasUsername ? username : generateInternalUsername(phone);
+        if (hasPhone) {
+            jdbc.update("INSERT INTO resident_user(username,password_hash,nickname,phone,district,street_or_town,region_code) VALUES (?,?,?,?,?,?,?)",
+                    finalUsername, passwordEncoder.encode(password), nickname, phone, region.district(), region.townName(), region.code());
+        } else {
+            jdbc.update("INSERT INTO resident_user(username,password_hash,nickname,district,street_or_town,region_code) VALUES (?,?,?,?,?,?)",
+                    finalUsername, passwordEncoder.encode(password), nickname, region.district(), region.townName(), region.code());
+        }
+        return login(new LoginRequest(hasPhone ? phone : finalUsername, password));
+    }
+
+    private String generateInternalUsername(String phone) {
+        String base = phone != null && !phone.isBlank() ? "jd_" + phone : "jd_" + System.currentTimeMillis();
+        if (base.length() > 30) base = base.substring(0, 30);
+        String candidate = base;
+        for (int i = 1; i <= 50; i++) {
+            Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM resident_user WHERE username=?", Integer.class, candidate);
+            if (count != null && count == 0) return candidate;
+            candidate = (base + "_" + i);
+            if (candidate.length() > 30) candidate = candidate.substring(0, 30);
+        }
+        return candidate;
     }
 
     @PostMapping(value = "/api/public/community/media", consumes = "multipart/form-data")
@@ -92,8 +124,12 @@ public class ResidentCommunityController {
 
     @PostMapping("/api/public/resident/login")
     public ApiResponse<Map<String, Object>> login(@RequestBody LoginRequest request) {
-        List<Map<String, Object>> users = jdbc.queryForList(
-                "SELECT * FROM resident_user WHERE username=? AND status='ACTIVE'", clean(request.username(), 60));
+        String credential = clean(request.username(), 60);
+        boolean byPhone = PHONE.matcher(credential).matches();
+        String sql = byPhone
+                ? "SELECT * FROM resident_user WHERE phone=? AND status='ACTIVE'"
+                : "SELECT * FROM resident_user WHERE username=? AND status='ACTIVE'";
+        List<Map<String, Object>> users = jdbc.queryForList(sql, credential);
         if (users.isEmpty() || !passwordEncoder.matches(request.password(), String.valueOf(users.get(0).get("password_hash")))) {
             throw new BusinessException(401, "账号或密码不正确");
         }
@@ -263,10 +299,16 @@ public class ResidentCommunityController {
     }
 
     private static Map<String, Object> profile(Map<String, Object> user) {
-        return Map.ofEntries(Map.entry("id", user.get("id")), Map.entry("username", user.get("username")),
-                Map.entry("nickname", user.get("nickname")), Map.entry("district", user.get("district")),
-                Map.entry("streetOrTown", user.get("street_or_town")), Map.entry("regionCode", user.get("region_code")),
-                Map.entry("demo", Boolean.TRUE.equals(user.get("is_demo"))));
+        var entries = new java.util.ArrayList<Map.Entry<String, Object>>();
+        entries.add(Map.entry("id", user.get("id")));
+        entries.add(Map.entry("username", user.get("username")));
+        entries.add(Map.entry("nickname", user.get("nickname")));
+        entries.add(Map.entry("district", user.get("district")));
+        entries.add(Map.entry("streetOrTown", user.get("street_or_town")));
+        entries.add(Map.entry("regionCode", user.get("region_code")));
+        entries.add(Map.entry("demo", Boolean.TRUE.equals(user.get("is_demo"))));
+        if (user.get("phone") != null) entries.add(Map.entry("phone", user.get("phone")));
+        return Map.ofEntries(entries.toArray(new Map.Entry[0]));
     }
 
     private static String clean(String value, int max) {
@@ -285,7 +327,7 @@ public class ResidentCommunityController {
     }
 
     public record LoginRequest(String username, String password) {}
-    public record RegisterRequest(String username, String password, String nickname, String regionCode) {}
+    public record RegisterRequest(String username, String phone, String password, String nickname, String regionCode) {}
     public record PostRequest(String category, String content, List<Long> mediaIds) {}
     public record CommentRequest(String content) {}
     public record ReportRequest(String reason) {}

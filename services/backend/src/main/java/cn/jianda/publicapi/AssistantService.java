@@ -223,6 +223,8 @@ public class AssistantService {
             Map<String, Object> response = response(generatedAnswer, usedCitations, "ai");
             response.put("actions", stringList(generated.get("actions")));
             response.put("factCards", factCards(ranked, used));
+            String quality = text(generated, "answer_quality");
+            if (!quality.isBlank()) response.put("answerQuality", quality);
             return response;
         } catch (RuntimeException exception) {
             long elapsed = elapsedMs(started);
@@ -416,6 +418,8 @@ public class AssistantService {
                     residentUserId, visitorId);
             Map<String, Object> result = response(answer, List.of(), "general_ai");
             result.put("actions", stringList(generated.get("actions")));
+            String quality = text(generated, "answer_quality");
+            if (!quality.isBlank()) result.put("answerQuality", quality);
             return result;
         } catch (RuntimeException exception) {
             long elapsed = elapsedMs(started);
@@ -483,6 +487,8 @@ public class AssistantService {
             Map<String, Object> response = response(answer, usedCitations, "web_ai");
             response.put("actions", stringList(generated.get("actions")));
             response.put("webSearchProvider", webSearchProvider.status().provider());
+            String quality = text(generated, "answer_quality");
+            if (!quality.isBlank()) response.put("answerQuality", quality);
             return response;
         } catch (RuntimeException exception) {
             LOGGER.warn("assistant_web_search_fallback category={} elapsed_ms={} error_type={}",

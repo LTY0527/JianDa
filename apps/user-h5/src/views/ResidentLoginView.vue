@@ -1,10 +1,148 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { LogIn, UserRound } from "lucide-vue-next";
-import H5Header from "../components/H5Header.vue";
-import { residentLogin } from "../api";
-const route=useRoute(); const router=useRouter(); const username=ref(""); const password=ref(""); const error=ref(""); const busy=ref(false);
-async function submit(){busy.value=true;error.value="";try{await residentLogin(username.value,password.value);const redirect=typeof route.query.redirect==="string"&&route.query.redirect.startsWith("/")?route.query.redirect:"/profile";await router.replace(redirect);}catch{error.value="账号或密码不正确，请重新输入。";}finally{busy.value=false;}}
+import { Phone, UserRound, ShieldCheck } from "lucide-vue-next";
+import { residentLogin, residentRegistrationCapabilities } from "../api";
+const route = useRoute();
+const router = useRouter();
+
+const mode = ref<"phone" | "username">("phone");
+const phone = ref("");
+const username = ref("");
+const password = ref("");
+const error = ref("");
+const busy = ref(false);
+const smsEnabled = ref(false);
+
+onMounted(async () => {
+  try {
+    const caps = await residentRegistrationCapabilities();
+    smsEnabled.value = !!caps.sms?.enabled;
+  } catch {
+    smsEnabled.value = false;
+  }
+});
+
+async function submit() {
+  busy.value = true;
+  error.value = "";
+  try {
+    const loginId = mode.value === "phone" ? phone.value.trim() : username.value.trim();
+    await residentLogin(loginId, password.value);
+    const redirect = typeof route.query.redirect === "string" && route.query.redirect.startsWith("/")
+      ? route.query.redirect
+      : "/";
+    await router.replace(redirect);
+  } catch (e: any) {
+    error.value = e?.response?.data?.message || "账号或密码不正确，请重新输入。";
+  } finally {
+    busy.value = false;
+  }
+}
+
+function switchMode(next: "phone" | "username") {
+  mode.value = next;
+  error.value = "";
+}
 </script>
-<template><div class="h5-page"><H5Header/><main class="h5-main auth-page"><section class="resident-auth"><header><LogIn/><div><h1>居民登录</h1><p>登录后可发布邻里消息、点赞、评论和举报。</p></div></header><form @submit.prevent="submit"><label>用户名<input v-model.trim="username" required autocomplete="username"/></label><label>密码<input v-model="password" required type="password" autocomplete="current-password"/></label><p v-if="error" class="form-error" role="alert">{{ error }}</p><button :disabled="busy">{{ busy?'登录中…':'登录' }}</button></form><footer><UserRound/>还没有居民账号？<RouterLink :to="{path:'/resident/register',query:{redirect:route.query.redirect}}">使用用户名和密码注册</RouterLink></footer></section></main></div></template>
+
+<template>
+  <div class="h5-page login-page">
+    <main class="h5-main login-page__main">
+      <section class="login-hero">
+        <div class="login-hero__brand">
+          <div class="login-logo" aria-hidden="true">
+            <svg viewBox="0 0 48 48" width="56" height="56" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="48" height="48" rx="14" fill="#0E5A55"/>
+              <path d="M15 34V18h8c4.4 0 8 3.1 8 7.6S27.4 33.2 23 33.2h-2.9V34H15Zm4.4-4.1h3c2.2 0 3.8-1.4 3.8-3.5s-1.6-3.5-3.8-3.5h-3V29.9Z" fill="#F7F4EE"/>
+            </svg>
+          </div>
+          <h1 class="login-hero__name">简达</h1>
+        </div>
+        <p class="login-hero__tagline">社区里的事，讲得更明白。</p>
+        <p class="login-hero__sub">权威通知、办事提醒和邻里服务，都在这里。</p>
+      </section>
+
+      <section class="login-form-wrap">
+        <div class="login-tabs">
+          <button
+            :class="['login-tab', { 'is-active': mode === 'phone' }]"
+            type="button"
+            @click="switchMode('phone')"
+          >
+            <Phone :size="18" />
+            <span>手机号登录</span>
+          </button>
+          <button
+            :class="['login-tab', { 'is-active': mode === 'username' }]"
+            type="button"
+            @click="switchMode('username')"
+          >
+            <UserRound :size="18" />
+            <span>用户名登录</span>
+          </button>
+        </div>
+
+        <form class="login-form" @submit.prevent="submit" novalidate>
+          <label v-if="mode === 'phone'" class="login-field">
+            <span class="login-field__label">手机号</span>
+            <input
+              v-model.trim="phone"
+              required
+              inputmode="numeric"
+              pattern="1[3-9][0-9]{9}"
+              maxlength="11"
+              autocomplete="tel"
+              placeholder="请输入 11 位手机号"
+            />
+          </label>
+
+          <label v-else class="login-field">
+            <span class="login-field__label">用户名</span>
+            <input
+              v-model.trim="username"
+              required
+              minlength="4"
+              maxlength="30"
+              pattern="[A-Za-z0-9_]+"
+              autocomplete="username"
+              placeholder="4-30 位字母、数字或下划线"
+            />
+          </label>
+
+          <label class="login-field">
+            <span class="login-field__label">密码</span>
+            <input
+              v-model="password"
+              required
+              type="password"
+              minlength="8"
+              maxlength="72"
+              autocomplete="current-password"
+              placeholder="请输入密码"
+            />
+          </label>
+
+          <p v-if="error" class="login-error" role="alert">{{ error }}</p>
+
+          <button class="login-submit" type="submit" :disabled="busy">
+            {{ busy ? "登录中…" : "登录" }}
+          </button>
+        </form>
+
+        <footer class="login-footer">
+          <p class="login-footer__register">
+            还没有账号？
+            <RouterLink :to="{ path: '/resident/register', query: route.query.redirect ? { redirect: route.query.redirect } : {} }">
+              注册账号
+            </RouterLink>
+          </p>
+          <p class="login-footer__legal">
+            <ShieldCheck :size="14" />
+            <span>登录即表示同意《用户服务协议》和《隐私政策》</span>
+          </p>
+        </footer>
+      </section>
+    </main>
+  </div>
+</template>
