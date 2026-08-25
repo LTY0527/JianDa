@@ -494,6 +494,10 @@ class WebArticleRequest(BaseModel):
     allow_image_candidates: bool = False
     # Kept for rolling upgrades between backend and AI service containers.
     allow_image_download: bool = False
+    # 当后端已通过 source_registry 白名单人工审核时，
+    # 对政府网站全站 Disallow: / 或 robots 不可用的场景执行软豁免，
+    # 保留 robots_status 原值用于追溯。
+    robots_soft_allow: bool = False
 
 
 class WebArticleImage(BaseModel):

@@ -341,6 +341,7 @@ async def web_ingest_preview(request: WebArticleRequest) -> WebArticlePreview:
             allow_image_candidates=(
                 request.allow_image_candidates or request.allow_image_download
             ),
+            robots_soft_allow=request.robots_soft_allow,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

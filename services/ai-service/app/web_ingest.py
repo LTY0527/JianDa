@@ -40,7 +40,10 @@ def _client() -> httpx.AsyncClient:
             timeout=REQUEST_TIMEOUT,
             follow_redirects=True,
             limits=httpx.Limits(max_connections=8, max_keepalive_connections=4),
-            headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"},
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,text/plain,*/*;q=0.8",
+            },
         )
     return _CLIENT
 
@@ -72,7 +75,7 @@ async def _rate_limit(domain: str, interval_seconds: int) -> None:
         _LAST_REQUEST_AT[domain] = time.monotonic()
 
 
-async def _robots(url: str, interval_seconds: int) -> tuple[bool, str]:
+async def _robots(url: str, interval_seconds: int, soft_allow: bool = False) -> tuple[bool, str]:
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
     await _rate_limit(parsed.hostname or "", interval_seconds)
@@ -82,11 +85,15 @@ async def _robots(url: str, interval_seconds: int) -> tuple[bool, str]:
     if response.status_code == 404:
         return True, "NOT_FOUND_ALLOW"
     if response.status_code >= 400:
+        if soft_allow:
+            return True, f"UNAVAILABLE_SOFT_ALLOW_{response.status_code}"
         return False, f"UNAVAILABLE_HTTP_{response.status_code}"
     parser = RobotFileParser()
     parser.set_url(robots_url)
     parser.parse(response.text.splitlines())
     allowed = parser.can_fetch(USER_AGENT, url)
+    if not allowed and soft_allow:
+        return True, "DISALLOWED_SOFT_ALLOW"
     return allowed, "ALLOWED" if allowed else "DISALLOWED"
 
 
@@ -524,13 +531,17 @@ async def preview_web_article(
     url: str,
     rate_limit_seconds: int = 3,
     allow_image_candidates: bool = False,
+    robots_soft_allow: bool = False,
 ) -> WebArticlePreview:
-    cache_key = f"{url}|image-candidates={allow_image_candidates}"
+    cache_key = (
+        f"{url}|image-candidates={allow_image_candidates}"
+        f"|robots-soft={robots_soft_allow}"
+    )
     cached = _CACHE.get(cache_key)
     if cached and time.monotonic() - cached[0] < 600:
         return cached[1]
     await _assert_public_host(url)
-    allowed, robots_status = await _robots(url, rate_limit_seconds)
+    allowed, robots_status = await _robots(url, rate_limit_seconds, soft_allow=robots_soft_allow)
     if not allowed:
         raise PermissionError(f"robots.txt 不允许采集：{robots_status}")
     parsed_url = urlparse(url)

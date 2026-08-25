@@ -57,7 +57,7 @@ class PublicImportIntegrationTest {
         when(aiClient.fetchImage(anyString())).thenReturn(
                 new AiClient.ImageAsset(new byte[] {(byte) 0x89, 0x50, 0x4e, 0x47},
                         "image/png", 1200, 675));
-        when(aiClient.previewWebArticle(anyString(), anyBoolean())).thenAnswer(invocation -> {
+        when(aiClient.previewWebArticle(anyString(), anyBoolean(), anyBoolean())).thenAnswer(invocation -> {
             String url = invocation.getArgument(0);
             return Map.ofEntries(
                     Map.entry("title", "老年人科学减重"),
@@ -398,7 +398,7 @@ class PublicImportIntegrationTest {
                 .andExpect(jsonPath("$.data.allow_image_cache").value(false))
                 .andExpect(jsonPath("$.data.cover_image_type").value("ORIGINAL_COVER"))
                 .andExpect(jsonPath("$.data.image_cached").value(false));
-        verify(aiClient).previewWebArticle(url, true);
+        verify(aiClient).previewWebArticle(url, true, true);
 
         String imported = mvc.perform(post("/api/web-articles/import").header("Authorization", auth)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -524,7 +524,7 @@ class PublicImportIntegrationTest {
         mvc.perform(get("/api/public/items/{slug}/original-file", slug))
                 .andExpect(status().isNotFound());
 
-        when(aiClient.previewWebArticle(org.mockito.ArgumentMatchers.eq(url), anyBoolean())).thenReturn(Map.ofEntries(
+        when(aiClient.previewWebArticle(org.mockito.ArgumentMatchers.eq(url), anyBoolean(), anyBoolean())).thenReturn(Map.ofEntries(
                 Map.entry("title", "老年人科学减重（更新版）"),
                 Map.entry("source_name", "新华网"),
                 Map.entry("published_at", "2026-07-16T08:52:45+08:00"),

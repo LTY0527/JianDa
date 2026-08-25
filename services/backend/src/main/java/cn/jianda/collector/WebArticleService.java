@@ -84,7 +84,8 @@ public class WebArticleService {
             result = new LinkedHashMap<>(aiClient.previewWebArticle(
                     url,
                     webImageCandidatesEnabled
-                            && Boolean.TRUE.equals(registry.get("allow_image_candidates"))
+                            && Boolean.TRUE.equals(registry.get("allow_image_candidates")),
+                    true
             ));
         } catch (RuntimeException exception) {
             throw new BusinessException(502, safeMessage(exception, "网页暂时无法访问或解析"));
@@ -135,7 +136,7 @@ public class WebArticleService {
         String url = normalizeUrl(rawUrl);
         Map<String, Object> raw;
         try {
-            raw = new LinkedHashMap<>(aiClient.previewWebArticle(url, webImageCandidatesEnabled));
+            raw = new LinkedHashMap<>(aiClient.previewWebArticle(url, webImageCandidatesEnabled, false));
         } catch (RuntimeException exception) {
             throw new BusinessException(502, safeMessage(exception, "网页暂时无法访问或解析"));
         }
@@ -328,7 +329,7 @@ public class WebArticleService {
         Map<String, Object> preview;
         try {
             preview = new LinkedHashMap<>(aiClient.previewWebArticle(
-                    url, Boolean.TRUE.equals(registry.get("allow_image_candidates"))));
+                    url, Boolean.TRUE.equals(registry.get("allow_image_candidates")), true));
         } catch (RuntimeException exception) {
             throw new BusinessException(502, safeMessage(exception, "网页暂时无法访问或解析"));
         }

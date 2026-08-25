@@ -13,7 +13,7 @@ public interface AiClient {
 
     Map<String, Object> previewMetadata(Path file, String fileName, String contentType);
 
-    Map<String, Object> previewWebArticle(String url, boolean allowImageCandidates);
+    Map<String, Object> previewWebArticle(String url, boolean allowImageCandidates, boolean robotsSoftAllow);
 
     Map<String, Object> discoverArticles(long sourceId, String sourceUrl, String entryUrl,
                                          String method, int rateLimitSeconds);

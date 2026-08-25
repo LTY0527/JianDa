@@ -53,7 +53,7 @@ class CrawlSchedulerIntegrationTest {
                         "published_time", "2026-08-23", "discovery_method", "SECTION",
                         "discovery_page", "https://scheduler-fixture.example/list", "dedup_key", "scheduler-1")),
                         "errors", List.of()));
-        when(aiClient.previewWebArticle(anyString(), anyBoolean())).thenReturn(Map.ofEntries(
+        when(aiClient.previewWebArticle(anyString(), anyBoolean(), anyBoolean())).thenReturn(Map.ofEntries(
                 Map.entry("title", "社区服务通知"), Map.entry("source_name", "调度测试来源"),
                 Map.entry("canonical_url", article), Map.entry("content_hash", "6".repeat(64)),
                 Map.entry("extracted_text", "社区服务通知正文。"), Map.entry("content_kind", "COMMUNITY_SERVICE"),

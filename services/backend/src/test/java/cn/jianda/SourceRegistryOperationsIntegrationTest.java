@@ -68,7 +68,7 @@ class SourceRegistryOperationsIntegrationTest {
                                 "discovered_at", published.plusMinutes(1).toString(),
                                 "dedup_key", "controlled-article")),
                         "errors", List.of()));
-        when(aiClient.previewWebArticle(anyString(), anyBoolean())).thenReturn(Map.ofEntries(
+        when(aiClient.previewWebArticle(anyString(), anyBoolean(), anyBoolean())).thenReturn(Map.ofEntries(
                 Map.entry("title", "受控采集测试文章"),
                 Map.entry("source_name", "新华网"),
                 Map.entry("published_at", "2026-07-29T10:00:00+08:00"),
