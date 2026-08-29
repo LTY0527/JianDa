@@ -13,7 +13,6 @@ user-h5 (Vue 3, :5174) ─────────┘              │
 - `apps/user-h5`：移动优先公开阅读端。
 - `services/backend`：鉴权、RBAC、材料、公开来源、审核发布、文件与审计日志。
 - `services/ai-service`：文本提取、结构化、通俗化、步骤、风险提示与追溯。
-- `packages/shared-types`：前端共享领域类型。
 - `packages/shared-ui`：CSS 设计 token。
 - `fixtures`：离线权威公开信息测试数据。
 

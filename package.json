@@ -15,8 +15,7 @@
     "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
-    "prettier": "^3.9.6"
+    "@playwright/test": "^1.61.1"
   },
   "dependencies": {
     "pdfjs-dist": "4.10.38"

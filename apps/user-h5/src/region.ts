@@ -48,5 +48,3 @@ export function selectRegion(regionCode: string): void {
   activeRegion.value = region;
   localStorage.setItem(storageKey, JSON.stringify(region));
 }
-
-export const selectDachangRegion = () => selectRegion(dachangRegion.region_code);

@@ -148,11 +148,6 @@ export async function fetchItems(category?: string, regionCode?: string): Promis
   return response.data.data;
 }
 
-export async function searchItems(keyword: string, regionCode?: string): Promise<PublicItem[]> {
-  const response = await client.get("/public/search", { params: { keyword, regionCode } });
-  return response.data.data;
-}
-
 export interface PublicItemNeighbor {
   id: number;
   slug: string;

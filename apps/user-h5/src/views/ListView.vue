@@ -5,6 +5,7 @@ import AppTopBar from "../components/navigation/AppTopBar.vue";
 import BottomNav from "../components/BottomNav.vue";
 import ContentCard from "../components/ContentCard.vue";
 import { fetchItems } from "../api";
+import { activeRegion } from "../region";
 import { MessageCircleQuestion, Search, WifiOff } from "lucide-vue-next";
 const route = useRoute();
 const router = useRouter();
@@ -16,13 +17,27 @@ const title = computed(() => route.path === "/search" ? "搜索" : String(route.
 const stateKey = computed(() => `jianda_list_${route.path}`);
 const filtered = computed(() => items.value.filter((item) => !query.value || item.title.includes(query.value) || item.summary.includes(query.value)));
 watch(query, (value) => router.replace({ query: value ? { q: value } : {} }));
+async function load() {
+  loading.value = true;
+  error.value = "";
+  try {
+    items.value = await fetchItems(
+      title.value === "搜索" || title.value === "全部内容" ? undefined : title.value,
+      activeRegion.value.region_code,
+    );
+  } catch {
+    error.value = "网络连接失败，请检查服务后重试";
+  } finally {
+    loading.value = false;
+  }
+}
 onMounted(async () => {
   const saved = sessionStorage.getItem(stateKey.value);
   if (saved && !route.query.q) query.value = JSON.parse(saved).query || "";
-  try { items.value = await fetchItems(title.value === "搜索" || title.value === "全部内容" ? undefined : title.value); }
-  catch { error.value = "网络连接失败，请检查服务后重试"; }
-  finally { loading.value = false; requestAnimationFrame(() => window.scrollTo(0, Number(saved ? JSON.parse(saved).scroll : 0))); }
+  await load();
+  requestAnimationFrame(() => window.scrollTo(0, Number(saved ? JSON.parse(saved).scroll : 0)));
 });
+watch(() => activeRegion.value.region_code, load);
 onUnmounted(() => sessionStorage.setItem(stateKey.value, JSON.stringify({ query: query.value, scroll: window.scrollY })));
 </script>
 <template>

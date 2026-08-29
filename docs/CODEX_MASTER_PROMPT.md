@@ -324,9 +324,6 @@ AI 内部接口：
 
 - POST `/internal/extract-text`
 - POST `/internal/analyze`
-- POST `/internal/simplify`
-- POST `/internal/generate-steps`
-- POST `/internal/trace-fields`
 - GET `/health`
 
 ## 七、Mock AI 要求

@@ -72,8 +72,8 @@ function switchMode(next: "phone" | "username") {
         <div class="login-hero__brand">
           <div class="login-logo" aria-hidden="true">
             <svg viewBox="0 0 48 48" width="56" height="56" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="48" height="48" rx="14" fill="#0E5A55"/>
-              <path d="M15 34V18h8c4.4 0 8 3.1 8 7.6S27.4 33.2 23 33.2h-2.9V34H15Zm4.4-4.1h3c2.2 0 3.8-1.4 3.8-3.5s-1.6-3.5-3.8-3.5h-3V29.9Z" fill="#F7F4EE"/>
+              <rect width="48" height="48" rx="8" fill="#0057B8"/>
+              <path d="M15 34V18h8c4.4 0 8 3.1 8 7.6S27.4 33.2 23 33.2h-2.9V34H15Zm4.4-4.1h3c2.2 0 3.8-1.4 3.8-3.5s-1.6-3.5-3.8-3.5h-3V29.9Z" fill="#FFFFFF"/>
             </svg>
           </div>
           <h1 class="login-hero__name">简达</h1>

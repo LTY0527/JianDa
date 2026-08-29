@@ -1,5 +1,7 @@
 package cn.jianda;
 
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
@@ -31,6 +33,15 @@ class ResidentCommunityIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper objectMapper;
+
+    @Test
+    void supportedRegionReceivesClassifiedDemoContentOnly() throws Exception {
+        mvc.perform(get("/api/public/items").param("regionCode", "310113102"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].slug", hasItem("summer-heat-health")))
+                .andExpect(jsonPath("$.data[*].slug", hasItem("anti-fraud-screen-sharing")))
+                .andExpect(jsonPath("$.data[*].slug", not(hasItem("senior-canteen-application"))));
+    }
 
     @Test
     void bcryptResidentCompletesPostLikeCommentReportAndAdminModeration() throws Exception {

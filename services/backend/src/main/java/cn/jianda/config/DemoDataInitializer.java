@@ -209,6 +209,34 @@ public class DemoDataInitializer implements ApplicationRunner {
                 seedGuideField(documentId, "DEADLINE", "办理时限", content.deadline(), content.rawText());
             }
         }
+        classifyDemoCatalog();
+    }
+
+    private void classifyDemoCatalog() {
+        String national = "'anti-fraud-screen-sharing','government-subsidy-scam'";
+        String city = "'social-security-card-renewal','summer-heat-health','pension-qualification-reminder',"
+                + "'rainstorm-travel-safety','museum-senior-service','fall-prevention-home'";
+        String district = "'vaccination-summer-notice','home-accessibility-renovation'";
+
+        jdbc.update("UPDATE published_item SET province='全国',city=NULL,district=NULL,street_or_town=NULL,"
+                + "region_code='100000',local_scope='NATIONAL_SHARED' WHERE local_scope IN ('UNCLASSIFIED','UNSPECIFIED') AND slug IN (" + national + ")");
+        jdbc.update("UPDATE published_item SET province='上海市',city='上海市',district=NULL,street_or_town=NULL,"
+                + "region_code='310000',local_scope='CITY_SHARED' WHERE local_scope IN ('UNCLASSIFIED','UNSPECIFIED') AND slug IN (" + city + ")");
+        jdbc.update("UPDATE published_item SET province='上海市',city='上海市',district='宝山区',street_or_town=NULL,"
+                + "region_code='310113',local_scope='DISTRICT_SHARED' WHERE local_scope IN ('UNCLASSIFIED','UNSPECIFIED') AND slug IN (" + district + ")");
+        jdbc.update("UPDATE published_item SET publish_channel=CASE WHEN category='健康' THEN 'HEALTH' "
+                + "WHEN category='养老' THEN 'ELDERLY' WHEN category='反诈' THEN 'FRAUD' ELSE 'SERVICES' END "
+                + "WHERE publish_channel='COMMUNITY' AND slug IN (" + national + "," + city + "," + district + ")");
+
+        jdbc.update("UPDATE source_document SET province='全国',city=NULL,district=NULL,street_or_town=NULL,"
+                + "region_code='100000',local_scope='NATIONAL_SHARED' WHERE local_scope IN ('UNCLASSIFIED','UNSPECIFIED') "
+                + "AND id IN (SELECT document_id FROM published_item WHERE slug IN (" + national + "))");
+        jdbc.update("UPDATE source_document SET province='上海市',city='上海市',district=NULL,street_or_town=NULL,"
+                + "region_code='310000',local_scope='CITY_SHARED' WHERE local_scope IN ('UNCLASSIFIED','UNSPECIFIED') "
+                + "AND id IN (SELECT document_id FROM published_item WHERE slug IN (" + city + "))");
+        jdbc.update("UPDATE source_document SET province='上海市',city='上海市',district='宝山区',street_or_town=NULL,"
+                + "region_code='310113',local_scope='DISTRICT_SHARED' WHERE local_scope IN ('UNCLASSIFIED','UNSPECIFIED') "
+                + "AND id IN (SELECT document_id FROM published_item WHERE slug IN (" + district + "))");
     }
 
     private void seedGuideField(long documentId, String type, String label, String value, String quote) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Headphones,
@@ -18,6 +18,7 @@ import BottomNav from "../components/BottomNav.vue";
 import SpeechRateSelector from "../components/SpeechRateSelector.vue";
 import { fetchItems, type PublicItem } from "../api";
 import { contentKind, importanceScore } from "../content";
+import { activeRegion } from "../region";
 import {
   favoriteItems,
   listenHistoryItems,
@@ -101,7 +102,7 @@ async function load() {
   loading.value = true;
   loadError.value = "";
   try {
-    items.value = await fetchItems();
+    items.value = await fetchItems(undefined, activeRegion.value.region_code);
   } catch {
     loadError.value = "暂时无法读取已发布内容，请检查网络后重试。";
   } finally {
@@ -109,6 +110,7 @@ async function load() {
   }
 }
 onMounted(load);
+watch(() => activeRegion.value.region_code, load);
 </script>
 
 <template>

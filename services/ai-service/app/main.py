@@ -237,22 +237,6 @@ def _with_channel_suggestion(
     )
 
 
-@app.post("/internal/simplify")
-def simplify(request: TextRequest) -> dict[str, object]:
-    result = analyze(request)
-    return {"summary": result.summary, "plain_text": result.plain_text, "audio_script": result.audio_script}
-
-
-@app.post("/internal/generate-steps")
-def generate_steps(request: TextRequest) -> dict[str, object]:
-    return {"steps": analyze(request).steps}
-
-
-@app.post("/internal/trace-fields")
-def trace_fields(request: TextRequest) -> dict[str, object]:
-    return {"fields": analyze(request).fields}
-
-
 @app.get("/internal/assistant/status", response_model=AssistantStatusResponse)
 def assistant_status() -> AssistantStatusResponse:
     enabled = os.getenv("ASSISTANT_EXTERNAL_ENABLED", "false").lower() == "true"

@@ -2,7 +2,6 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-COPY packages/shared-types/package.json ./packages/shared-types/
 COPY packages/shared-ui/package.json ./packages/shared-ui/
 COPY apps/institution-web/package.json ./apps/institution-web/
 COPY apps/user-h5/package.json ./apps/user-h5/

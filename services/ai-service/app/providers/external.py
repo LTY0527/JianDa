@@ -1,11 +1,9 @@
-import asyncio
 import hashlib
 import json
 import logging
 import os
 import re
 import time
-import threading
 from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -63,38 +61,7 @@ from app.providers.base import LlmProvider
 LOGGER = logging.getLogger("uvicorn.error")
 SCHEMA_VERSION = "1.1"
 _RESULT_CACHE: dict[str, AnalyzeResult] = {}
-_ASYNC_LOOP = asyncio.new_event_loop()
-_ASYNC_THREAD = threading.Thread(target=_ASYNC_LOOP.run_forever, daemon=True)
-_ASYNC_THREAD.start()
-
-
-class _AsyncClientAdapter:
-    """Sync provider bridge backed by one process-level AsyncClient event loop."""
-
-    def __init__(self, timeout: float) -> None:
-        async def create() -> httpx.AsyncClient:
-            return httpx.AsyncClient(
-                timeout=timeout,
-                limits=httpx.Limits(
-                    max_connections=20,
-                    max_keepalive_connections=10,
-                    keepalive_expiry=30,
-                ),
-            )
-
-        self.client = asyncio.run_coroutine_threadsafe(create(), _ASYNC_LOOP).result()
-
-    @property
-    def is_closed(self) -> bool:
-        return self.client.is_closed
-
-    def post(self, *args: Any, **kwargs: Any) -> httpx.Response:
-        return asyncio.run_coroutine_threadsafe(
-            self.client.post(*args, **kwargs), _ASYNC_LOOP
-        ).result()
-
-
-_SHARED_CLIENTS: dict[tuple[str, float], _AsyncClientAdapter] = {}
+_SHARED_CLIENTS: dict[tuple[str, float], httpx.Client] = {}
 
 
 def _deduplicate_warnings(warnings: list[str]) -> list[str]:
@@ -310,11 +277,18 @@ class ExternalLlmProvider(LlmProvider):
             return normalized
         return f"{normalized}/chat/completions"
 
-    def _shared_client(self) -> _AsyncClientAdapter:
+    def _shared_client(self) -> httpx.Client:
         key = (self.settings.base_url, self.settings.timeout_seconds)
         client = _SHARED_CLIENTS.get(key)
         if client is None or client.is_closed:
-            client = _AsyncClientAdapter(self.settings.timeout_seconds)
+            client = httpx.Client(
+                timeout=self.settings.timeout_seconds,
+                limits=httpx.Limits(
+                    max_connections=20,
+                    max_keepalive_connections=10,
+                    keepalive_expiry=30,
+                ),
+            )
             _SHARED_CLIENTS[key] = client
         return client
 
@@ -1106,7 +1080,7 @@ class ExternalLlmProvider(LlmProvider):
 
     def _complete_rewrite_with_recovery(
         self,
-        client: httpx.Client | _AsyncClientAdapter,
+        client: httpx.Client,
         system_prompt: str,
         user_prompt: str,
         request: TextRequest,

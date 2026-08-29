@@ -39,21 +39,19 @@ public class ResidentCommunityController {
     private static final Pattern PHONE = Pattern.compile("^1[3-9]\\d{9}$");
     private final JdbcTemplate jdbc;
     private final PasswordEncoder passwordEncoder;
-    private final SmsProvider smsProvider;
     private final CommunityMediaService mediaService;
 
     public ResidentCommunityController(JdbcTemplate jdbc, PasswordEncoder passwordEncoder,
-                                       SmsProvider smsProvider, CommunityMediaService mediaService) {
+                                       CommunityMediaService mediaService) {
         this.jdbc = jdbc;
         this.passwordEncoder = passwordEncoder;
-        this.smsProvider = smsProvider;
         this.mediaService = mediaService;
     }
 
     @GetMapping("/api/public/resident/registration-capabilities")
     public ApiResponse<Map<String, Object>> registrationCapabilities() {
-        return ApiResponse.ok(Map.of("usernamePassword", true, "sms", smsProvider.status(),
-                "phonePassword", true));
+        return ApiResponse.ok(Map.of("usernamePassword", true,
+                "sms", Map.of("enabled", false, "provider", "NONE", "message", ""), "phonePassword", true));
     }
 
     @PostMapping("/api/public/resident/register")

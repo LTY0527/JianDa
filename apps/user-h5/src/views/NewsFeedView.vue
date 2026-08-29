@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
 import BottomNav from "../components/BottomNav.vue";
 import ContentCard from "../components/ContentCard.vue";
 import { fetchItems, type PublicItem } from "../api";
 import { importanceScore, isFavorite } from "../content";
+import { activeRegion } from "../region";
 import { Newspaper, Search, RefreshCw, WifiOff } from "lucide-vue-next";
 const channels = ["推荐", "健康", "养老政策", "防诈", "社区服务", "文化学习"];
 const channelMap: Record<string,string> = {};
@@ -21,8 +22,9 @@ const filtered = computed(() => {
   if (mode.value === "已收藏") result = result.filter((item) => isFavorite(item.id));
   return [...result].sort((a,b) => mode.value === "重要" ? importanceScore(b) - importanceScore(a) : String(b.published_at).localeCompare(String(a.published_at)));
 });
-async function load() { loading.value = true; error.value = ""; try { items.value = await fetchItems(); } catch { error.value = "无法连接权威内容服务，请稍后重试。"; } finally { loading.value = false; } }
+async function load() { loading.value = true; error.value = ""; try { items.value = await fetchItems(undefined, activeRegion.value.region_code); } catch { error.value = "无法连接权威内容服务，请稍后重试。"; } finally { loading.value = false; } }
 onMounted(load);
+watch(() => activeRegion.value.region_code, load);
 </script>
 <template>
   <div class="h5-page"><AppTopBar />

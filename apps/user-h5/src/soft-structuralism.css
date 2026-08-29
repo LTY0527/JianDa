@@ -1,0 +1,787 @@
+/*
+ * Resident H5 visual lock: Soft Structuralism.
+ * This layer intentionally follows the product brief's exact accessibility,
+ * color, type, spacing, control and motion constraints.
+ */
+
+:root {
+  --resident-background: #ffffff;
+  --resident-card: #f7f8fa;
+  --resident-text: #1a1a1a;
+  --resident-text-secondary: #4a4a4a;
+  --resident-primary: #0057b8;
+  --resident-primary-hover: #004494;
+  --resident-border: #d1d5db;
+  --resident-input-border: #9ca3af;
+  --resident-radius: 8px;
+  --resident-shadow: 0 8px 24px rgba(26, 26, 26, 0.08);
+
+  /* Normalize the legacy H5 variables without affecting the institution app. */
+  --brand-deep-teal: #0057b8;
+  --brand-deep-teal-contrast: #ffffff;
+  --ink: #1a1a1a;
+  --warm-ivory: #ffffff;
+  --surface: #f7f8fa;
+  --muted: #4a4a4a;
+  --soft-teal: #f7f8fa;
+  --warm-amber: #0057b8;
+  --alert-red: #1a1a1a;
+  --color-primary: #0057b8;
+  --color-primary-dark: #004494;
+  --color-primary-light: #f7f8fa;
+  --color-text: #1a1a1a;
+  --color-muted: #4a4a4a;
+  --color-border: #d1d5db;
+  --color-bg: #ffffff;
+  --color-surface: #f7f8fa;
+  --radius-card: 8px;
+  --radius-button: 8px;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+  background: #ffffff;
+  color: #1a1a1a;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+#app,
+#app * {
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif !important;
+}
+
+#app *,
+#app *::before,
+#app *::after {
+  background-image: none !important;
+  border-color: #d1d5db !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  animation: none !important;
+  transition-duration: 150ms !important;
+  transition-timing-function: ease !important;
+}
+
+#app details *,
+#app [aria-expanded] {
+  transition-duration: 200ms !important;
+}
+
+#app h1 {
+  margin: 0;
+  color: #1a1a1a !important;
+  font-size: 28px !important;
+  font-weight: 700 !important;
+  line-height: 1.3 !important;
+}
+
+#app h2 {
+  margin: 0;
+  color: #1a1a1a !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  line-height: 1.4 !important;
+}
+
+#app h3,
+#app h4 {
+  margin: 0;
+  color: #1a1a1a !important;
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  line-height: 1.5 !important;
+}
+
+#app :is(p, li, dd, blockquote) {
+  color: #4a4a4a !important;
+  font-size: 18px !important;
+  font-weight: 400;
+  line-height: 1.7 !important;
+}
+
+#app :is(small, figcaption, .meta, .hint, .description, .helper-text, .status-text) {
+  color: #4a4a4a !important;
+  font-size: 16px !important;
+  line-height: 1.6 !important;
+}
+
+#app :is(strong, b, dt, label) {
+  color: #1a1a1a !important;
+}
+
+#app :is(main, section, article, header, footer, nav, div) {
+  color: #1a1a1a !important;
+}
+
+#app a {
+  color: #0057b8;
+}
+
+#app span {
+  color: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit;
+}
+
+#app svg {
+  color: #0057b8 !important;
+}
+
+#app button svg {
+  color: inherit !important;
+}
+
+#app a:hover {
+  color: #004494;
+}
+
+#app :focus-visible {
+  outline: 3px solid #0057b8 !important;
+  outline-offset: 2px;
+}
+
+#app .h5-page {
+  min-height: 100dvh;
+  padding-bottom: 88px;
+  background: #ffffff !important;
+  color: #1a1a1a;
+}
+
+#app :is(.h5-header, .app-top-bar) {
+  position: sticky;
+  z-index: 40;
+  top: 0;
+  width: 100%;
+  min-height: 64px;
+  height: 64px;
+  padding-top: 0;
+  padding-bottom: 0;
+  background: #ffffff !important;
+  border-bottom: 1px solid #d1d5db !important;
+  box-shadow: none !important;
+}
+
+#app .h5-header {
+  padding-right: max(24px, calc((100% - 960px) / 2));
+  padding-left: max(24px, calc((100% - 960px) / 2));
+}
+
+#app :is(.h5-brand, .app-top-bar__title) {
+  color: #1a1a1a !important;
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  line-height: 1.5 !important;
+}
+
+#app :is(.h5-brand__mark, .h5-header svg, .app-top-bar svg) {
+  color: #0057b8 !important;
+}
+
+#app .h5-brand > span {
+  border: 1px solid #0057b8 !important;
+  border-radius: 8px !important;
+  background: #0057b8 !important;
+}
+
+#app .h5-brand > span svg {
+  color: #ffffff !important;
+}
+
+#app .login-logo {
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+#app .login-logo rect {
+  fill: #0057b8 !important;
+}
+
+#app .login-logo path {
+  fill: #ffffff !important;
+}
+
+#app :is(.h5-header__region, .h5-header__nav a, .app-top-bar a, .app-top-bar button) {
+  min-width: 48px;
+  min-height: 48px;
+  color: #0057b8 !important;
+  font-size: 14px !important;
+  font-weight: 600;
+}
+
+#app .h5-main {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+#app .h5-main > * + * {
+  margin-top: 48px;
+}
+
+#app :is(main, .h5-main, .reader, .settings, .assistant-page, .membership-page, .profile-page-new) {
+  background: #ffffff !important;
+}
+
+#app :is(form, .form-stack, .login-form, .register-form, .settings-form) {
+  display: grid;
+  gap: 24px;
+}
+
+#app label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  line-height: 1.5;
+}
+
+#app :is(input, textarea, select) {
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 16px;
+  border: 2px solid #9ca3af !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #1a1a1a !important;
+  font-size: 18px !important;
+  font-weight: 400;
+  line-height: 1.5;
+  box-shadow: none !important;
+}
+
+#app :is(input[type="checkbox"], input[type="radio"]) {
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0;
+  border: 2px solid #9ca3af !important;
+  accent-color: #0057b8;
+}
+
+#app input[type="range"] {
+  min-height: 52px;
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+  accent-color: #0057b8;
+}
+
+#app textarea {
+  min-height: 128px;
+  resize: vertical;
+}
+
+#app :is(input, textarea)::placeholder {
+  color: #4a4a4a !important;
+  opacity: 1;
+}
+
+#app :is(button, [role="button"], nav a) {
+  min-width: 48px;
+  min-height: 48px;
+}
+
+#app button {
+  border: 1px solid #d1d5db !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #0057b8 !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  line-height: 1.4;
+  box-shadow: none !important;
+}
+
+#app :is(a, summary) {
+  min-width: 48px;
+  min-height: 48px;
+}
+
+#app .login-footer a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#app :is(
+  .green-link,
+  .featured-guide > a,
+  .login-submit,
+  .register-submit,
+  .pay-confirm,
+  .chat-input__send,
+  .primary-button,
+  .button-primary,
+  button[type="submit"]
+) {
+  min-height: 52px;
+  padding: 0 28px;
+  border: 1px solid #0057b8 !important;
+  border-radius: 8px !important;
+  background: #0057b8 !important;
+  color: #ffffff !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+
+#app :is(
+  .green-link,
+  .featured-guide > a,
+  .login-submit,
+  .register-submit,
+  .pay-confirm,
+  .chat-input__send,
+  .primary-button,
+  .button-primary,
+  button[type="submit"]
+):hover {
+  background: #004494 !important;
+  color: #ffffff !important;
+}
+
+#app :is(.reader-tools button.active, .settings button[aria-pressed="true"]) {
+  border-color: #0057b8 !important;
+  background: #0057b8 !important;
+  color: #ffffff !important;
+}
+
+#app :is(
+  .secondary-button,
+  .button-secondary,
+  .reader-tools button,
+  .settings button,
+  .chat-suggestions button,
+  .profile-links button
+) {
+  min-height: 52px;
+  padding: 0 28px;
+  border: 1px solid #d1d5db !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #0057b8 !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+
+#app .login-tabs {
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid #d1d5db !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+}
+
+#app .login-tab {
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #4a4a4a !important;
+  font-size: 16px !important;
+  box-shadow: none !important;
+}
+
+#app .login-tab.is-active {
+  border-color: #d1d5db !important;
+  background: #f7f8fa !important;
+  color: #0057b8 !important;
+}
+
+#app :is(.login-footer__register, .login-footer__legal) {
+  color: #4a4a4a !important;
+  font-size: 16px !important;
+}
+
+#app .login-footer__legal svg {
+  color: #0057b8 !important;
+}
+
+#app .login-field svg {
+  color: #0057b8 !important;
+}
+
+#app :is(
+  .categories,
+  .guide-focus,
+  .latest,
+  .today-focus,
+  .list-surface,
+  .feed-surface,
+  .summary-block,
+  .quick-info,
+  .original-link,
+  .home-skeleton,
+  .list-skeleton,
+  .app-section-pending,
+  .login-form-wrap,
+  .profile-page-new .profile-hero,
+  .profile-page-new .profile-stats,
+  .profile-page-new .profile-links,
+  .profile-foot__card,
+  .trusted-service-list article,
+  .service-orders article,
+  .membership-plans article,
+  .chat-welcome,
+  .chat-suggestions button,
+  .chat-msg__bubble,
+  .chat-actions,
+  .chat-facts,
+  .chat-community,
+  .chat-citations details,
+  .chat-msg__body--typing,
+  [class$="-card"]
+) {
+  padding: 24px;
+  border: 1px solid #d1d5db !important;
+  border-radius: 8px !important;
+  background: #f7f8fa !important;
+  box-shadow: var(--resident-shadow) !important;
+}
+
+#app :is(.categories, .membership-plans, .profile-stats, .profile-links, .chat-facts dl) {
+  gap: 16px;
+}
+
+#app :is(.welcome, .assistant-hero, .membership-hero, .member-banner) {
+  overflow: hidden;
+  padding: 24px;
+  border: 1px solid #0057b8 !important;
+  border-radius: 8px !important;
+  background: #0057b8 !important;
+  color: #ffffff !important;
+  box-shadow: var(--resident-shadow) !important;
+}
+
+#app :is(.welcome, .assistant-hero, .membership-hero, .member-banner) :is(h1, h2, h3, h4, p, small, strong, b, span, svg) {
+  color: #ffffff !important;
+}
+
+#app .member-badge {
+  border-radius: 8px !important;
+  background: #004494 !important;
+}
+
+#app .channel-empty a {
+  min-height: 52px;
+  padding: 0 28px;
+  border: 1px solid #0057b8 !important;
+  border-radius: 8px !important;
+  background: #0057b8 !important;
+  color: #ffffff !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+}
+
+#app .channel-empty a:hover {
+  background: #004494 !important;
+  color: #ffffff !important;
+}
+
+#app .home-search b {
+  background: #0057b8 !important;
+  color: #ffffff !important;
+}
+
+#app .home-search:hover b {
+  background: #004494 !important;
+}
+
+#app .home-channels {
+  background: #f7f8fa !important;
+}
+
+#app .quick-tasks a > span,
+#app .feed-entry__icon,
+#app .feed-entry__date,
+#app .bottom-nav__icon {
+  background: #f7f8fa !important;
+  color: #0057b8 !important;
+}
+
+#app .feed-entry {
+  background: #f7f8fa !important;
+}
+
+#app .feed-entry footer {
+  color: #4a4a4a !important;
+}
+
+#app .chat-welcome {
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#app .neighborhood-feed article > header > span,
+#app .profile-avatar,
+#app .li-icon,
+#app .editorial-card__image,
+#app .article-head__cover,
+#app .reading-mode-tabs,
+#app .image-source-note,
+#app .settings .preview,
+#app .trusted-service-entry,
+#app .compact-empty,
+#app .service-card-metrics,
+#app .local-service-directory article > span,
+#app .service-card-counts span,
+#app .service-status-legend span {
+  background: #f7f8fa !important;
+}
+
+#app .neighborhood-feed header em,
+#app .service-channel-page time,
+#app .membership-plans del,
+#app .profile-links em,
+#app .chat-citations summary {
+  color: #4a4a4a !important;
+}
+
+#app .neighborhood-feed header i,
+#app .profile-links em {
+  color: #0057b8 !important;
+}
+
+#app .st i,
+#app .settings i {
+  background: #4a4a4a !important;
+  box-shadow: none !important;
+}
+
+#app .chat-msg__avatar--user {
+  background: #0057b8 !important;
+  color: #ffffff !important;
+}
+
+#app .chat-msg__mode,
+#app .chat-msg__body span {
+  background: #f7f8fa !important;
+}
+
+#app .chat-disclaimer {
+  background: #f7f8fa !important;
+  color: #4a4a4a !important;
+}
+
+#app .chat-citations blockquote,
+#app .service-action-card header > span,
+#app .profile-links .li-trail u {
+  background: #f7f8fa !important;
+}
+
+#app .profile-links .li-trail u {
+  color: #0057b8 !important;
+}
+
+#app .summary-block li > span {
+  background: #0057b8 !important;
+  color: #ffffff !important;
+}
+
+#app .services-page a.trusted-service-entry,
+#app .services-page .service-action-card footer a {
+  background: #f7f8fa !important;
+  color: #0057b8 !important;
+}
+
+#app :is(.commercial-disclosure, .payment-unavailable, .payment-note) {
+  background: #f7f8fa !important;
+  color: #4a4a4a !important;
+}
+
+#app .service-orders .empty a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+}
+
+#app :is(.welcome, .assistant-hero, .membership-hero, .member-banner) :is(input, textarea, select) {
+  background: #ffffff !important;
+  color: #1a1a1a !important;
+}
+
+#app .welcome::after,
+#app .welcome::before,
+#app .member-banner::after,
+#app .assistant-hero::after {
+  display: none !important;
+}
+
+#app :is(.hot-badge, .badge, .tag, .chip, .status-pill) {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid #d1d5db !important;
+  border-radius: 8px !important;
+  background: #f7f8fa !important;
+  color: #1a1a1a !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.5;
+  box-shadow: none !important;
+}
+
+#app :is(.error, .warning, .empty, .pending, .feedback, .notice) {
+  border-color: #d1d5db !important;
+  background: #f7f8fa !important;
+  color: #1a1a1a !important;
+}
+
+#app :is(.skeleton-line, .skeleton-block, .skeleton-circle, .skeleton-text, [class*="skeleton-"]) {
+  background: #d1d5db !important;
+  color: #4a4a4a !important;
+  box-shadow: none !important;
+}
+
+#app .bottom-nav {
+  position: fixed;
+  z-index: 50;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  width: min(100%, 960px);
+  min-height: 64px;
+  height: 64px;
+  margin: 0 auto;
+  padding: 0;
+  border: 1px solid #d1d5db !important;
+  border-bottom: 0 !important;
+  border-radius: 8px 8px 0 0 !important;
+  background: #ffffff !important;
+  box-shadow: 0 -8px 24px rgba(26, 26, 26, 0.08) !important;
+}
+
+#app .bottom-nav a {
+  display: flex;
+  min-width: 0;
+  min-height: 48px;
+  margin: 8px 0;
+  padding: 0 4px;
+  border-radius: 8px !important;
+  color: #4a4a4a !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.2;
+}
+
+#app .bottom-nav a:hover,
+#app .bottom-nav a.router-link-active {
+  background: #f7f8fa !important;
+  color: #0057b8 !important;
+}
+
+#app .bottom-nav__primary {
+  margin-top: 8px;
+}
+
+#app .bottom-nav__primary .bottom-nav__icon {
+  width: auto;
+  height: auto;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: inherit !important;
+  box-shadow: none !important;
+}
+
+#app .bottom-nav__icon svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2;
+}
+
+#app .document {
+  color: #1a1a1a !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif !important;
+  font-size: 18px !important;
+  line-height: 1.7 !important;
+}
+
+#app :is(.section-heading, .list-heading, .page-heading) {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+@media (hover: hover) {
+  #app button:hover,
+  #app a:hover {
+    transition-duration: 150ms !important;
+  }
+}
+
+@media (max-width: 767px) {
+  #app .h5-header {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  #app .h5-main {
+    max-width: 100%;
+    padding: 24px 16px;
+  }
+
+  #app .h5-main > * + * {
+    margin-top: 48px;
+  }
+
+  #app :is(
+    .categories,
+    .membership-plans,
+    .profile-stats,
+    .profile-links,
+    .profile-foot,
+    .chat-facts dl,
+    .form-row,
+    .settings-grid,
+    .service-grid,
+    .content-grid
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #app :is(.h5-header__nav, .h5-header__region span) {
+    display: none;
+  }
+
+  #app .profile-page-new .profile-hero {
+    grid-template-columns: minmax(0, 1fr) !important;
+    margin-right: 0;
+    margin-left: 0;
+    border: 1px solid #d1d5db !important;
+    border-radius: 8px !important;
+  }
+
+  #app .profile-page-new .logout-btn {
+    flex-direction: row;
+    justify-content: center;
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app *,
+  #app *::before,
+  #app *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

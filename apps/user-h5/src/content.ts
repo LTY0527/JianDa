@@ -1,8 +1,6 @@
 import type { PublicItem } from "./api";
 
 export const newsCategories = ["时政", "健康", "反诈", "文化", "养老政策", "防诈", "社区服务", "文化学习"];
-export const serviceCategories = ["养老", "生活服务", "办事通知"];
-
 export function contentKind(item: PublicItem): "news" | "guide" {
   if (item.content_kind) return item.content_kind === "SERVICE_NOTICE" ? "guide" : "news";
   if (item.slug?.startsWith("news-")) return "news";

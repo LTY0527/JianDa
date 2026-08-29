@@ -34,6 +34,3 @@ export async function copyText(text: string): Promise<boolean> {
     return false;
   }
 }
-
-// Reserved for a future map provider adapter. No third-party URL is assumed now.
-export type MapUrlBuilder = (address: string) => string | null;
