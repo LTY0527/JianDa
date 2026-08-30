@@ -1,0 +1,11 @@
+{
+  "date": "2026-08-31",
+  "ai_tests": { "passed": 127, "warnings": 5, "duration_seconds": 54.82 },
+  "backend_tests": { "passed": 110, "failed": 0 },
+  "frontend": { "institution_typecheck": "PASS", "institution_build": "PASS", "h5_typecheck": "PASS", "h5_build": "PASS" },
+  "playwright": { "passed": 147, "skipped": 31, "failed": 0, "total": 178 },
+  "regional_leakage": 0,
+  "assistant_real_questions": 10,
+  "docker": { "build": "PASS", "healthy_services": 4, "http_200": 4 },
+  "overall": "PARTIAL"
+}

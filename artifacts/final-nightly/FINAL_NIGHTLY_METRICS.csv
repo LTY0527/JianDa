@@ -1,0 +1,11 @@
+metric,value,status
+AI pytest,127 passed,PASS
+Maven,110 passed,PASS
+机构端 typecheck/build,2/2,PASS
+H5 typecheck/build,2/2,PASS
+Playwright,147 passed / 31 skipped / 0 failed,PASS
+Docker build与健康,4 healthy / 4 HTTP 200,PASS
+LOCAL_TOWN 跨镇泄漏,0,PASS
+真实助手问题,10,PASS
+顾村当前本地内容,0,PARTIAL
+高德真实地图凭据,未配置,BLOCKED_BY_CONFIGURATION

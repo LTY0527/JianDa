@@ -1,0 +1,4 @@
+region,registered,current_local_result,verdict,note
+大场镇,true,有,PASS,当前本地内容可追溯
+顾村镇,true,无,PARTIAL,仅有历史本地内容且当前首页正确隐藏
+庙行镇,true,有,PASS,当前本地内容可追溯

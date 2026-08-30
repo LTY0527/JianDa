@@ -1,0 +1,12 @@
+gate,scope,result,evidence
+1,居民登录门禁,PASS,gates/GATE1_AUTH_E2E.md
+2,AI pytest,PASS,127 passed
+3,Backend Maven,PASS,110 passed
+4,两端 typecheck/build,PASS,4 commands passed
+4.1,Playwright全量,PASS,147 passed / 31 skipped / 0 failed
+5,三区域隔离,PASS,LOCAL_TOWN leakage 0
+6,内容新鲜度,PARTIAL,顾村当前本地内容为0
+7,助手真实问题,PASS,10题且高风险无依据拒答
+8,图片回退与解码,PASS,可见图片自然宽高断言
+9,高德真实地图,BLOCKED_BY_CONFIGURATION,当前环境未配置JS API凭据
+10,AI故障注入,PASS,gates/GATE10_REAL_FAULT_INJECTION.md

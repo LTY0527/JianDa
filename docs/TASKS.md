@@ -637,3 +637,17 @@ Phase 7.3 已完成。下一阶段为 Phase 8 部署准备，但必须由用户�
 - [x] 全量 Playwright 的历史数据硬编码已迁移到当前真实发布内容；缺凭据和一次性审核场景明确 skip。
 - [ ] `BLOCKED_BY_CREDENTIALS`：高德真实渲染、Web Search、真实支付。
 - [ ] `PARTIAL`：本轮没有新的 External 外发授权；顾村/庙行缺 LOCAL 精品；真机体验待人工验收。
+
+## 验收前最终夜间收口（2026-08-31）
+
+- [x] AI 全量测试 127 passed；Backend Maven 110 tests、0 failure/error。
+- [x] 两个前端 typecheck 与 production build 全部通过。
+- [x] 修复居民登录门禁全量回归的临时会话隔离，开发端与 Docker 用户端深链均受保护。
+- [x] 修复助手站内来源链接不可点击，并完成真实问题证据边界回归。
+- [x] Processing、来源运营、动态导入、会员支付和封面回退测试已对齐当前产品契约。
+- [x] AI 服务停机时已发布内容保持可读，新处理任务明确失败；恢复后业务重试成功，无 Mock 冒充。
+- [x] LOCAL_TOWN 跨镇泄漏为 0，大场与庙行有当前本地内容。
+- [ ] `PARTIAL`：顾村只有历史本地内容，当前首页本地内容为 0；不得用伪数据补齐。
+- [ ] `BLOCKED_BY_CONFIGURATION`：当前机器未配置高德 JS API 凭据，真实地图用例明确跳过并展示降级说明。
+- [ ] iPhone Safari / Android Chrome 的系统语音、拨号器和主观触控仍待设备人工验收。
+- [x] 验收证据归档于 `artifacts/final-nightly/`，最终结论为 `REAL ACCEPTANCE: PARTIAL`。
