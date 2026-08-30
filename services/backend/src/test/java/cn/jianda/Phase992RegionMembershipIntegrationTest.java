@@ -42,6 +42,7 @@ class Phase992RegionMembershipIntegrationTest {
         jdbc.update("DELETE FROM demo_payment_session");
         jdbc.update("DELETE FROM membership_payment_session");
         jdbc.update("DELETE FROM resident_membership");
+        jdbc.update("DELETE FROM source_registry WHERE domain='phase992-town-source.example'");
         jdbc.update("DELETE FROM published_item");
         jdbc.update("DELETE FROM processing_job WHERE document_id IN (SELECT id FROM source_document WHERE title LIKE 'Phase992%')");
         jdbc.update("DELETE FROM source_document WHERE title LIKE 'Phase992%'");
@@ -73,6 +74,75 @@ class Phase992RegionMembershipIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[*].slug", hasItem("phase992-gucun")))
                 .andExpect(jsonPath("$.data[*].slug", not(hasItem("phase992-dachang"))));
+    }
+
+    @Test
+    void supportedRegionsAndSourceRegistryExposeAuditableScope() throws Exception {
+        mvc.perform(get("/api/public/regions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].region_code", containsInAnyOrder(
+                        "310113102", "310113109", "310113112")));
+        mvc.perform(get("/api/source-registries").header("Authorization", staffAuth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.region_code == '310113109')].street_or_town", hasItem("顾村镇")))
+                .andExpect(jsonPath("$.data[?(@.region_code == '310113112')].street_or_town", hasItem("庙行镇")));
+    }
+
+    @Test
+    void sourceRegistryCreationPersistsStrictTownScope() throws Exception {
+        mvc.perform(post("/api/source-registries")
+                        .header("Authorization", staffAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"Phase992顾村官方来源",
+                                  "domain":"phase992-town-source.example",
+                                  "type":"GOVERNMENT",
+                                  "authorityLevel":"A",
+                                  "homepageUrl":"https://phase992-town-source.example/",
+                                  "sectionUrl":"https://phase992-town-source.example/gucun/",
+                                  "discoveryMode":"SECTION",
+                                  "province":"上海市",
+                                  "city":"上海市",
+                                  "district":"宝山区",
+                                  "streetOrTown":"顾村镇",
+                                  "regionCode":"310113109"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.region_code").value("310113109"))
+                .andExpect(jsonPath("$.data.street_or_town").value("顾村镇"));
+
+        mvc.perform(post("/api/source-registries")
+                        .header("Authorization", staffAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"Phase992错误地域来源",
+                                  "domain":"phase992-invalid-town.example",
+                                  "type":"GOVERNMENT",
+                                  "homepageUrl":"https://phase992-invalid-town.example/",
+                                  "sectionUrl":"https://phase992-invalid-town.example/region/",
+                                  "discoveryMode":"SECTION",
+                                  "province":"上海市",
+                                  "city":"上海市",
+                                  "district":"宝山区",
+                                  "streetOrTown":"庙行镇",
+                                  "regionCode":"310113109"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void simulatedCommunityContentIsExplicitAndRegionIsolated() throws Exception {
+        for (String code : java.util.List.of("310113102", "310113109", "310113112")) {
+            mvc.perform(get("/api/public/community/posts").param("regionCode", code))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()", org.hamcrest.Matchers.greaterThanOrEqualTo(6)))
+                    .andExpect(jsonPath("$.data[*].region_code", org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is(code))))
+                    .andExpect(jsonPath("$.data[*].user_is_demo", org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is(true))));
+        }
     }
 
     @Test

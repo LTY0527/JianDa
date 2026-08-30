@@ -539,7 +539,7 @@ public class WebArticleService {
     }
 
     private static String localScope(Map<String, Object> region) {
-        if (!text(region.get("street_or_town")).isBlank()) return "STREET";
+        if (!text(region.get("street_or_town")).isBlank()) return "LOCAL_TOWN";
         if (!text(region.get("district")).isBlank()) return "DISTRICT";
         if (!text(region.get("city")).isBlank()) return "CITY";
         if (!text(region.get("province")).isBlank()) return "PROVINCE";

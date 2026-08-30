@@ -36,6 +36,7 @@ public class SourceRegistryService {
             + "schedule_mode,interval_hours,schedule_timezone,recent_days,include_keywords,exclude_keywords,"
             + "auto_save_draft,duplicate_strategy,max_retries,image_usage_policy,image_usage_basis,"
             + "auto_approve_images,image_cache_allowed,image_policy_reviewed_by,image_policy_reviewed_at,"
+            + "province,city,district,street_or_town,region_code,"
             + "last_crawled_at,last_status,next_run_at,last_error,failure_count,created_at,updated_at";
 
     private final JdbcTemplate jdbc;
@@ -107,6 +108,8 @@ public class SourceRegistryService {
                         + "schedule_mode=?,interval_hours=?,schedule_timezone=?,recent_days=?,include_keywords=?,exclude_keywords=?,"
                         + "auto_save_draft=?,duplicate_strategy=?,max_retries=?,image_usage_policy=?,image_usage_basis=?,"
                         + "auto_approve_images=?,image_cache_allowed=?,allow_image_cache=?,image_policy_reviewed_by=?,image_policy_reviewed_at=?,"
+                        + "province=COALESCE(?,province),city=COALESCE(?,city),district=COALESCE(?,district),"
+                        + "street_or_town=COALESCE(?,street_or_town),region_code=COALESCE(?,region_code),"
                         + "operator_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 value.domain(), value.allowedHosts(), value.name(), value.type(), value.authorityLevel(), value.discoveryMode(),
                 value.homepageUrl(), value.rssUrl(), value.sitemapUrl(), value.sectionUrl(), value.dailyCrawlTime(),
@@ -117,6 +120,7 @@ public class SourceRegistryService {
                 value.autoApproveImages(), value.imageCacheAllowed(), value.imageCacheAllowed(),
                 value.autoApproveImages() ? user.id() : null,
                 value.autoApproveImages() ? Timestamp.valueOf(LocalDateTime.now()) : null,
+                value.province(), value.city(), value.district(), value.streetOrTown(), value.regionCode(),
                 user.id(), id);
         if (changed == 0) throw new BusinessException(404, "权威来源不存在");
         log(user, "UPDATE_SOURCE_REGISTRY", id);
@@ -190,7 +194,7 @@ public class SourceRegistryService {
                     true, false, 20, 100000, "DAILY", 24, "Asia/Shanghai", 7, "", "",
                     true, "SKIP", 3, defaultNormalized(request.imageUsagePolicy(), "MANUAL_REVIEW"),
                     request.imageUsageBasis(), Boolean.TRUE.equals(request.autoApproveImages()),
-                    Boolean.TRUE.equals(request.imageCacheAllowed()), "");
+                    Boolean.TRUE.equals(request.imageCacheAllowed()), "", null, null, null, null, null);
             registryId = ((Number) create(configuration, user).get("id")).longValue();
         } else {
             registryId = existing.get(0);
@@ -307,13 +311,48 @@ public class SourceRegistryService {
             throw new BusinessException(400, "自动确认或缓存图片前必须选择明确策略并填写使用依据");
         }
         String allowedHosts = normalizeAllowedHosts(request.allowedHosts(), domain);
+        SourceRegion region = validateRegion(request.province(), request.city(), request.district(),
+                request.streetOrTown(), request.regionCode());
         return new ValidatedSource(request.name().trim(), domain, type, authority, homepage.toString(), rss, sitemap,
                 section, discoveryMode, crawlTime, maxArticles, Boolean.TRUE.equals(request.allowImageCandidates()),
                 Boolean.TRUE.equals(request.allowAutoAi()), articleBudget, tokenBudget, scheduleMode, intervalHours,
                 timezone, recentDays, optionalText(request.includeKeywords(), 1000),
                 optionalText(request.excludeKeywords(), 1000), !Boolean.FALSE.equals(request.autoSaveDraft()),
                 duplicateStrategy, maxRetries, imagePolicy, imageBasis, autoApproveImages, imageCacheAllowed,
-                allowedHosts);
+                allowedHosts, region.province(), region.city(), region.district(), region.streetOrTown(), region.regionCode());
+    }
+
+    private static SourceRegion validateRegion(
+            String province, String city, String district, String streetOrTown, String regionCode) {
+        String code = optionalText(regionCode, 20);
+        if (code == null) return new SourceRegion(null, null, null, null, null);
+        String normalizedProvince = optionalText(province, 40);
+        String normalizedCity = optionalText(city, 40);
+        String normalizedDistrict = optionalText(district, 60);
+        String normalizedTown = optionalText(streetOrTown, 80);
+        Map<String, String> supportedTowns = Map.of(
+                "310113102", "大场镇",
+                "310113109", "顾村镇",
+                "310113112", "庙行镇");
+        if (supportedTowns.containsKey(code)) {
+            if (!"上海市".equals(normalizedProvince) || !"上海市".equals(normalizedCity)
+                    || !"宝山区".equals(normalizedDistrict)
+                    || !supportedTowns.get(code).equals(normalizedTown)) {
+                throw new BusinessException(400, "镇级来源的行政区和区域代码不一致");
+            }
+        } else if ("310113".equals(code)) {
+            if (!"上海市".equals(normalizedCity) || !"宝山区".equals(normalizedDistrict)
+                    || normalizedTown != null) {
+                throw new BusinessException(400, "宝山区级来源不能绑定具体街镇");
+            }
+        } else if ("310000".equals(code)) {
+            if (!"上海市".equals(normalizedCity) || normalizedDistrict != null || normalizedTown != null) {
+                throw new BusinessException(400, "上海市级来源不能绑定区或街镇");
+            }
+        } else if (!"100000".equals(code)) {
+            throw new BusinessException(400, "来源区域代码不在当前支持范围内");
+        }
+        return new SourceRegion(normalizedProvince, normalizedCity, normalizedDistrict, normalizedTown, code);
     }
 
     private static URI httpUri(String value, String label) {
@@ -384,13 +423,15 @@ public class SourceRegistryService {
         jdbc.update("UPDATE source_registry SET schedule_mode=?,interval_hours=?,schedule_timezone=?,recent_days=?,"
                         + "include_keywords=?,exclude_keywords=?,auto_save_draft=?,duplicate_strategy=?,max_retries=?,"
                         + "image_usage_policy=?,image_usage_basis=?,auto_approve_images=?,image_cache_allowed=?,"
-                        + "allow_image_cache=?,image_policy_reviewed_by=?,image_policy_reviewed_at=?,allowed_hosts=? WHERE id=?",
+                        + "allow_image_cache=?,image_policy_reviewed_by=?,image_policy_reviewed_at=?,allowed_hosts=?,"
+                        + "province=?,city=?,district=?,street_or_town=?,region_code=? WHERE id=?",
                 value.scheduleMode(), value.intervalHours(), value.scheduleTimezone(), value.recentDays(),
                 value.includeKeywords(), value.excludeKeywords(), value.autoSaveDraft(), value.duplicateStrategy(),
                 value.maxRetries(), value.imageUsagePolicy(), value.imageUsageBasis(), value.autoApproveImages(),
                 value.imageCacheAllowed(), value.imageCacheAllowed(), value.autoApproveImages() ? operatorId : null,
                 value.autoApproveImages() ? Timestamp.valueOf(LocalDateTime.now()) : null,
-                value.allowedHosts(), id);
+                value.allowedHosts(), value.province(), value.city(), value.district(), value.streetOrTown(),
+                value.regionCode(), id);
     }
 
     private static void bind(PreparedStatement statement, ValidatedSource value, long operatorId) throws java.sql.SQLException {
@@ -425,7 +466,8 @@ public class SourceRegistryService {
             String scheduleTimezone, Integer recentDays, String includeKeywords, String excludeKeywords,
             Boolean autoSaveDraft, String duplicateStrategy, Integer maxRetries, String imageUsagePolicy,
             String imageUsageBasis, Boolean autoApproveImages, Boolean imageCacheAllowed,
-            String allowedHosts) {}
+            String allowedHosts, String province, String city, String district, String streetOrTown,
+            String regionCode) {}
 
     public record QuickSourceConfirmation(String sourceName, String sourceType, String verificationNote,
             boolean officialConfirmed, String mode, String imageUsagePolicy, String imageUsageBasis,
@@ -438,5 +480,9 @@ public class SourceRegistryService {
             String scheduleTimezone, int recentDays, String includeKeywords, String excludeKeywords,
             boolean autoSaveDraft, String duplicateStrategy, int maxRetries, String imageUsagePolicy,
             String imageUsageBasis, boolean autoApproveImages, boolean imageCacheAllowed,
-            String allowedHosts) {}
+            String allowedHosts, String province, String city, String district, String streetOrTown,
+            String regionCode) {}
+
+    private record SourceRegion(String province, String city, String district, String streetOrTown,
+            String regionCode) {}
 }

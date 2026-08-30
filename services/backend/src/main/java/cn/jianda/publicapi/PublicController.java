@@ -88,13 +88,13 @@ public class PublicController {
 
     @GetMapping("/regions")
     public ApiResponse<List<Map<String, Object>>> regions() {
-        return ApiResponse.ok(List.of(Map.of(
+        return ApiResponse.ok(SupportedRegions.all().stream().map(region -> Map.<String, Object>of(
                 "province", "上海市",
                 "city", "上海市",
-                "district", "宝山区",
-                "street_or_town", "大场镇",
-                "region_code", "310113102"
-        )));
+                "district", region.district(),
+                "street_or_town", region.townName(),
+                "region_code", region.code()
+        )).toList());
     }
 
     @GetMapping("/search")

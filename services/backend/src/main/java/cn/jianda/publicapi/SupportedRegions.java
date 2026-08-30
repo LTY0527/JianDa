@@ -2,6 +2,7 @@ package cn.jianda.publicapi;
 
 import cn.jianda.common.BusinessException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -34,6 +35,10 @@ final class SupportedRegions {
     static Optional<Region> mentionedIn(String text) {
         if (text == null) return Optional.empty();
         return REGIONS.values().stream().filter(region -> text.contains(region.townName())).findFirst();
+    }
+
+    static List<Region> all() {
+        return List.copyOf(REGIONS.values());
     }
 
     private static void register(String code, String townName) {

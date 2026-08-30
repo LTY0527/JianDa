@@ -56,27 +56,51 @@ public class DemoDataInitializer implements ApplicationRunner {
     private void seedResidentCommunity() {
         String password = passwordEncoder.encode("Resident@123");
         for (String[] resident : List.of(
-                new String[]{"demo_chen", "陈阿姨"}, new String[]{"demo_li", "李叔叔"},
-                new String[]{"demo_wang", "王老师"}, new String[]{"demo_zhou", "周师傅"},
-                new String[]{"demo_zhang", "张奶奶"})) {
+                new String[]{"demo_chen", "陈阿姨", "大场镇", "310113102"},
+                new String[]{"demo_li", "李叔叔", "大场镇", "310113102"},
+                new String[]{"demo_wang", "王老师", "大场镇", "310113102"},
+                new String[]{"demo_zhou", "周师傅", "大场镇", "310113102"},
+                new String[]{"demo_zhang", "张奶奶", "大场镇", "310113102"},
+                new String[]{"demo_gucun_hua", "顾村花友", "顾村镇", "310113109"},
+                new String[]{"demo_gucun_reader", "顾村读书会", "顾村镇", "310113109"},
+                new String[]{"demo_miaohang_reader", "庙行读书会", "庙行镇", "310113112"},
+                new String[]{"demo_miaohang_zhou", "庙行晨练老周", "庙行镇", "310113112"})) {
             Integer exists = jdbc.queryForObject("SELECT COUNT(*) FROM resident_user WHERE username=?", Integer.class, resident[0]);
             if (exists != null && exists == 0) {
                 jdbc.update("INSERT INTO resident_user(username,password_hash,nickname,district,street_or_town,region_code,is_demo) "
-                                + "VALUES (?,?,?,?,?,?,TRUE)", resident[0], password, resident[1], "宝山区", "大场镇", "310113102");
+                                + "VALUES (?,?,?,?,?,?,TRUE)", resident[0], password, resident[1], "宝山区", resident[2], resident[3]);
             }
         }
-        Integer posts = jdbc.queryForObject("SELECT COUNT(*) FROM community_post WHERE is_demo=TRUE", Integer.class);
-        if (posts != null && posts == 0) {
-            seedDemoPost("demo_chen", "互助", "想请教大家，社区智能手机课堂在哪里查看报名通知？");
-            seedDemoPost("demo_li", "活动", "今天在简达看到了大场镇的活动通知，提醒大家先核对官方时间再出门。");
-            seedDemoPost("demo_wang", "最新", "邻里交流请不要发布身份证、银行卡和具体门牌等个人信息。");
-        }
+        seedDemoPost("demo_chen", "互助", "想请教大家，社区智能手机课堂在哪里查看报名通知？", "大场镇", "310113102");
+        seedDemoPost("demo_li", "活动", "今天在简达看到了大场镇的活动通知，提醒大家先核对官方时间再出门。", "大场镇", "310113102");
+        seedDemoPost("demo_wang", "互助", "邻里交流请不要发布身份证、银行卡和具体门牌等个人信息。", "大场镇", "310113102");
+        seedDemoPost("demo_zhou", "活动", "晨练结束后想约邻居一起参加社区公益讲座，有兴趣可以先看官方报名说明。", "大场镇", "310113102");
+        seedDemoPost("demo_zhang", "互助", "长者食堂体验不错，第一次去的邻居记得先确认营业时间。", "大场镇", "310113102");
+        seedDemoPost("demo_chen", "活动", "社区文化活动名额有限，建议大家报名成功后再安排出行。", "大场镇", "310113102");
+
+        seedDemoPost("demo_gucun_hua", "互助", "顾村的花友们最近在交流阳台养护经验，欢迎分享不涉及住址的小技巧。", "顾村镇", "310113109");
+        seedDemoPost("demo_gucun_reader", "活动", "读书会想选一本适合长者共读的书，大家可以在这里交流建议。", "顾村镇", "310113109");
+        seedDemoPost("demo_gucun_hua", "活动", "看到顾村镇公益活动通知后，记得先从官方原文核对日期和地点。", "顾村镇", "310113109");
+        seedDemoPost("demo_gucun_reader", "互助", "第一次使用线上办事的邻居，可以互相交流页面操作，但不要发送证件照片。", "顾村镇", "310113109");
+        seedDemoPost("demo_gucun_hua", "活动", "周末准备参加公共文化活动，欢迎邻居分享无障碍出行体验。", "顾村镇", "310113109");
+        seedDemoPost("demo_gucun_reader", "互助", "想了解长者食堂体验的邻居，可以交流感受，政策条件仍以官方通知为准。", "顾村镇", "310113109");
+
+        seedDemoPost("demo_miaohang_reader", "活动", "庙行读书会准备开展公益共读，具体安排会以社区公开通知为准。", "庙行镇", "310113112");
+        seedDemoPost("demo_miaohang_zhou", "互助", "晨练时发现公共空间很整洁，提醒大家一起文明使用健身设施。", "庙行镇", "310113112");
+        seedDemoPost("demo_miaohang_reader", "互助", "不会使用手机查看通知的邻居可以互相帮助，但不要代为输入支付密码。", "庙行镇", "310113112");
+        seedDemoPost("demo_miaohang_zhou", "活动", "参加社区讲座前可以先收藏通知，出门前再核对时间和地点。", "庙行镇", "310113112");
+        seedDemoPost("demo_miaohang_reader", "互助", "想交流长者友好文化活动体验，欢迎只分享公开、非隐私的信息。", "庙行镇", "310113112");
+        seedDemoPost("demo_miaohang_zhou", "活动", "邻里志愿服务欢迎交流参与感受，正式招募要求请查看权威来源。", "庙行镇", "310113112");
     }
 
-    private void seedDemoPost(String username, String category, String content) {
+    private void seedDemoPost(String username, String category, String content, String town, String regionCode) {
+        Integer exists = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM community_post WHERE is_demo=TRUE AND region_code=? AND content=?",
+                Integer.class, regionCode, content);
+        if (exists != null && exists > 0) return;
         Long userId = jdbc.queryForObject("SELECT id FROM resident_user WHERE username=?", Long.class, username);
         jdbc.update("INSERT INTO community_post(resident_user_id,category,content,region_code,district,street_or_town,is_demo) "
-                        + "VALUES (?,?,?,'310113102','宝山区','大场镇',TRUE)", userId, category, content);
+                        + "VALUES (?,?,?,?,'宝山区',?,TRUE)", userId, category, content, regionCode, town);
     }
 
     private void seedPublicSources() {
