@@ -552,6 +552,7 @@ public class AssistantService {
                 title.contains(anchor) || category.contains(anchor) || summary.contains(anchor)
                         || verifiedFacts.contains(anchor));
         if (!contextual && !anchorMatched) return 0;
+        if (anchorMatched) score += 16;
         for (String term : terms) {
             if (term.length() < 2) continue;
             if (category.contains(term) || term.contains(category)) score += 12;
@@ -639,6 +640,27 @@ public class AssistantService {
         for (List<String> group : topics) {
             if (group.stream().anyMatch(normalized::contains)) result.addAll(group);
         }
+        // Preserve concrete project, estate and building names even when the question
+        // appends conversational suffixes such as “讲了什么” or “由哪个镇公开”.
+        // Four-character windows are specific enough to avoid promoting generic
+        // one/two-character words, while allowing titles to match a named entity.
+        String entityText = normalized.replaceAll(
+                "(?:请问|想知道|告诉我|讲了什么|说了什么|内容是什么|什么时候|何时|多少|多大|哪个部门|哪个镇|由谁|公开)",
+                "");
+        int maxWindow = Math.min(12, entityText.length());
+        for (int length = maxWindow; length >= 4; length--) {
+            for (int start = 0; start + length <= entityText.length(); start++) {
+                result.add(entityText.substring(start, start + length));
+            }
+        }
+        if (normalized.contains("生态林")) {
+            result.add("生态公益林");
+            result.add("公益林");
+        }
+        if (normalized.contains("电梯")) {
+            result.add("加装电梯");
+            result.add("电梯公示");
+        }
         return result;
     }
 
@@ -673,7 +695,10 @@ public class AssistantService {
                 "金额", "补贴多少", "费用多少", "收费多少",
                 "补贴", "电话", "联系方式", "咨询电话",
                 "办理材料", "申请材料", "需要什么材料", "带什么证件",
-                "法律", "投资", "收益", "转账")
+                "法律", "投资", "收益", "转账",
+                "哪个部门", "哪个镇", "由谁公开", "谁发布",
+                "什么时候", "何时", "哪一天", "日期", "时间",
+                "多少", "面积", "规模", "项目", "公示", "竣工", "验收", "加装电梯")
                 .stream().anyMatch(normalized::contains);
     }
 
@@ -688,6 +713,10 @@ public class AssistantService {
                 List.of("材料", "证件"),
                 List.of("金额", "费用", "收费"),
                 List.of("电话", "联系方式", "咨询电话"),
+                List.of("时间", "日期", "什么时候", "何时", "竣工", "验收"),
+                List.of("面积", "规模", "多少"),
+                List.of("项目", "公示", "加装电梯"),
+                List.of("哪个部门", "哪个镇", "由谁公开", "谁发布", "来源"),
                 List.of("诊断", "症状", "治疗", "用药", "吃药", "剂量"),
                 List.of("法律", "投资", "收益", "转账"));
         boolean checked = false;

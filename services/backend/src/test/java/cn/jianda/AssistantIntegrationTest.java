@@ -191,6 +191,34 @@ class AssistantIntegrationTest {
     }
 
     @Test
+    void officialProjectFactsUsePublishedEvidenceAndUnknownProjectsNeverFallThroughToGeneralAi() throws Exception {
+        long forest = insertDocument("助手测试-生态公益林", "顾村镇生态公益林项目于2026年7月完成竣工验收，建设面积120亩。");
+        insertRegionalPublished(forest, "assistant-test-forest", "顾村镇生态公益林项目竣工验收", "项目完成竣工验收。",
+                "310113109", "顾村镇人民政府");
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"顾村生态林项目什么时候竣工？","regionCode":"310113109"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
+                .andExpect(jsonPath("$.data.citations[0].slug").value("assistant-test-forest"))
+                .andExpect(jsonPath("$.data.citations[0].quote")
+                        .value(org.hamcrest.Matchers.containsString("2026年7月")));
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"顾村不存在的星河工程面积是多少？","regionCode":"310113109"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
+                .andExpect(jsonPath("$.data.citations.length()").value(0))
+                .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("不会猜测")));
+    }
+
+    @Test
     void demoCatalogContainsEnoughGuidesAndAuthorityNews() {
         Integer guides = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM published_item WHERE status='PUBLISHED' AND category IN ('养老','生活服务')",
@@ -212,5 +240,13 @@ class AssistantIntegrationTest {
         jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,published_at,status,source_name,source_url,province,local_scope) "
                         + "VALUES (?,?,?,?, '反诈',1,?,?, '测试权威来源','https://example.gov.cn/source','全国','NATIONAL_SHARED')",
                 documentId, slug, title, summary, Timestamp.valueOf(LocalDateTime.of(2026, 7, 23, 10, 0)), status);
+    }
+
+    private void insertRegionalPublished(long documentId, String slug, String title, String summary,
+                                         String regionCode, String sourceName) {
+        jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,published_at,status,source_name,source_url,province,city,district,street_or_town,region_code,local_scope) "
+                        + "VALUES (?,?,?,?, '时政',1,?,'PUBLISHED',?,'https://example.gov.cn/source','上海市','上海市','宝山区','顾村镇',?,'LOCAL_TOWN')",
+                documentId, slug, title, summary, Timestamp.valueOf(LocalDateTime.of(2026, 8, 30, 10, 0)),
+                sourceName, regionCode);
     }
 }

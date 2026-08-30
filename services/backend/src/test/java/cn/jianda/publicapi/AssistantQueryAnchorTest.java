@@ -20,4 +20,15 @@ class AssistantQueryAnchorTest {
         assertTrue(anchors.contains("诈骗"));
         assertTrue(anchors.contains("反诈"));
     }
+
+    @Test
+    void keepsConcreteProjectAndBuildingNamesBeforeQuestionSuffixes() {
+        var forest = AssistantService.queryAnchors("顾村生态林项目什么时候竣工？");
+        assertTrue(forest.contains("生态公益林"));
+        assertTrue(forest.stream().anyMatch(value -> value.contains("生态林项目")));
+
+        var elevator = AssistantService.queryAnchors("共康六村130号由哪个镇公开？");
+        assertTrue(elevator.stream().anyMatch(value -> value.contains("共康六村130号")));
+        assertFalse(elevator.contains("加装电梯"));
+    }
 }
