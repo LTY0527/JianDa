@@ -5,6 +5,7 @@ import { setFavorite } from "../api";
 import { normalizeTitle, truncateSummary, contentKind, isFavorite, isRead } from "../content";
 import { saveFavorite } from "../library";
 import { articleCover, categoryDefaultCover } from "../utils/coverImage";
+import { SPEECH_RATES } from "../composables/useSpeechPlayer";
 const props = withDefaults(defineProps<{ item: any; kind?: "guide" | "news"; actions?: boolean }>(), { actions: false });
 const kind = computed(() => props.kind || contentKind(props.item));
 const favorite = ref(isFavorite(props.item.id));
@@ -27,7 +28,8 @@ function listen() {
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(`${props.item.title}。${props.item.summary}`);
   utterance.lang = "zh-CN";
-  utterance.rate = 0.9;
+  const savedRate = Number(localStorage.getItem("jianda_rate") || 1);
+  utterance.rate = SPEECH_RATES.includes(savedRate as (typeof SPEECH_RATES)[number]) ? savedRate : 1;
   window.speechSynthesis.speak(utterance);
 }
 </script>

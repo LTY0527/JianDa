@@ -146,6 +146,18 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     }
   });
 
+  test("资讯频道别名和分类关键词能命中内容", async ({ page }) => {
+    await page.goto(`${h5Url}/news`);
+    for (const channel of ["养老政策", "防诈", "社区服务", "文化学习"]) {
+      await page.getByRole("button", { name: channel, exact: true }).click();
+      await expect(page.locator(".filter-tabs span")).not.toHaveText("共 0 条");
+    }
+
+    await page.goto(`${h5Url}/search`);
+    await page.getByPlaceholder("输入您想了解的内容").fill("反诈");
+    await expect(page.locator(".result-count")).not.toHaveText("找到 0 条可靠信息");
+  });
+
   test("查看原文下载按钮会产生可保存的文本文件", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 375, height: 812 });
     const item = await currentPublishedItem(page);
@@ -210,6 +222,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
     for (const size of ["18", "20", "22", "24"]) {
       await page.getByRole("button", { name: size, exact: true }).click();
       expect(await page.evaluate(() => localStorage.getItem("jianda_font"))).toBe(size);
+      expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe(`${size}px`);
     }
     await page.getByRole("button", { name: "较快" }).click();
     await page.getByRole("checkbox").first().focus();

@@ -15,7 +15,9 @@ const loading = ref(true);
 const error = ref("");
 const title = computed(() => route.path === "/search" ? "搜索" : String(route.params.name || "全部内容"));
 const stateKey = computed(() => `jianda_list_${route.path}`);
-const filtered = computed(() => items.value.filter((item) => !query.value || item.title.includes(query.value) || item.summary.includes(query.value)));
+const filtered = computed(() => items.value.filter((item) =>
+  !query.value || `${item.title}${item.summary}${item.source_name}${item.category}`.includes(query.value),
+));
 watch(query, (value) => router.replace({ query: value ? { q: value } : {} }));
 async function load() {
   loading.value = true;

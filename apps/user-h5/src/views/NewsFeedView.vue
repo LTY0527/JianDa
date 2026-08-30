@@ -8,7 +8,12 @@ import { importanceScore, isFavorite } from "../content";
 import { activeRegion } from "../region";
 import { Newspaper, Search, RefreshCw, WifiOff } from "lucide-vue-next";
 const channels = ["推荐", "健康", "养老政策", "防诈", "社区服务", "文化学习"];
-const channelMap: Record<string,string> = {};
+const channelMap: Record<string,string[]> = {
+  养老政策: ["养老", "养老政策"],
+  防诈: ["反诈", "防诈"],
+  社区服务: ["生活服务", "社区服务", "时政"],
+  文化学习: ["文化", "文化学习"],
+};
 const items = ref<PublicItem[]>([]);
 const loading = ref(true);
 const error = ref("");
@@ -17,8 +22,8 @@ const mode = ref("最新");
 const query = ref("");
 const visible = ref(6);
 const filtered = computed(() => {
-  let result = items.value.filter((item) => channel.value === "推荐" || item.category === (channelMap[channel.value] || channel.value));
-  if (query.value.trim()) result = result.filter((item) => `${item.title}${item.summary}${item.source_name}`.includes(query.value.trim()));
+  let result = items.value.filter((item) => channel.value === "推荐" || (channelMap[channel.value] || [channel.value]).includes(item.category));
+  if (query.value.trim()) result = result.filter((item) => `${item.title}${item.summary}${item.source_name}${item.category}`.includes(query.value.trim()));
   if (mode.value === "已收藏") result = result.filter((item) => isFavorite(item.id));
   return [...result].sort((a,b) => mode.value === "重要" ? importanceScore(b) - importanceScore(a) : String(b.published_at).localeCompare(String(a.published_at)));
 });

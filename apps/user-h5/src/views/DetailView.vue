@@ -328,6 +328,7 @@ function toggleSpeech() {
 function grow() {
   font.value = font.value >= 24 ? 18 : font.value + 2;
   localStorage.setItem("jianda_font", String(font.value));
+  document.documentElement.style.setProperty("--reader-size", `${font.value}px`);
 }
 function fallbackCover(event: Event) {
   const image = event.currentTarget as HTMLImageElement;
