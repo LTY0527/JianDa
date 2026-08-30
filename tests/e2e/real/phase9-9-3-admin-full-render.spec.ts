@@ -3,7 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 const institutionUrl = process.env.JIANDA_INSTITUTION_URL ?? "http://127.0.0.1:8090";
-const artifactRoot = path.resolve("artifacts/phase9-9-3-final");
+const artifactRoot = path.resolve(
+  process.env.JIANDA_FINAL_ACCEPTANCE_ARTIFACT_DIR
+    ?? "artifacts/phase9-9-3-final",
+);
 const adminAccount = process.env.JIANDA_ADMIN_ACCOUNT ?? "platform_admin";
 const adminPassword = process.env.JIANDA_ADMIN_PASSWORD ?? "Jianda@123";
 

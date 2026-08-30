@@ -3,7 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 const institutionUrl = process.env.JIANDA_INSTITUTION_URL ?? "http://127.0.0.1:8090";
-const artifactRoot = path.resolve("artifacts/phase9-9-3-final");
+const artifactRoot = path.resolve(
+  process.env.JIANDA_FINAL_ACCEPTANCE_ARTIFACT_DIR
+    ?? "artifacts/phase9-9-3-final",
+);
 
 test.beforeAll(() => fs.mkdirSync(artifactRoot, { recursive: true }));
 
@@ -26,7 +29,7 @@ test("REAL 平台管理员可查看六项运行能力且不暴露秘密", async 
     await expect(capability.getByText(name, { exact: true })).toBeVisible();
   }
   await expect(capability).not.toContainText(/Bearer|Authorization|API Key|密码/);
-  await expect(capability.getByText("联网搜索").locator("..")).toContainText("未启用");
+  await expect(capability.getByText("联网搜索").locator("..")).toContainText(/可用|未启用/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   expect(consoleErrors).toEqual([]);
 

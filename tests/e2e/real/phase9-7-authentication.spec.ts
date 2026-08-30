@@ -8,7 +8,10 @@ const platformUsername = process.env.REAL_PLATFORM_ADMIN_USERNAME ?? "platform_a
 const platformPassword = process.env.REAL_PLATFORM_ADMIN_PASSWORD;
 const residentUsername = process.env.REAL_RESIDENT_USERNAME ?? "demo_chen";
 const residentPassword = process.env.REAL_RESIDENT_PASSWORD;
-const artifactRoot = path.resolve("artifacts/phase9-7-final-commercial-polish/real-e2e");
+const artifactRoot = path.resolve(
+  process.env.JIANDA_FINAL_ACCEPTANCE_ARTIFACT_DIR
+    ?? "artifacts/phase9-7-final-commercial-polish/real-e2e",
+);
 
 test.describe("Phase 9.7 真实浏览器认证", () => {
   test.beforeAll(() => {
@@ -24,7 +27,10 @@ test.describe("Phase 9.7 真实浏览器认证", () => {
     await page.getByRole("button", { name: "登录", exact: true }).click();
     await expect(page).toHaveURL(`${institutionUrl}/`);
     await expect(page.locator(".account")).toContainText("平台管理员");
-    await expect(page.getByRole("navigation", { name: "主导航" }).getByRole("link")).toHaveCount(5);
+    const navigation = page.getByRole("navigation", { name: "主导航" });
+    for (const label of ["工作台", "内容中心", "采集与来源", "数据概览", "商业运营", "系统记录"]) {
+      await expect(navigation.getByRole("link", { name: label, exact: true })).toBeVisible();
+    }
     await page.screenshot({ path: path.join(artifactRoot, "platform-login.png"), fullPage: false });
 
     for (const [label, route] of [
@@ -45,14 +51,17 @@ test.describe("Phase 9.7 真实浏览器认证", () => {
     test.skip(!residentPassword, "BLOCKED_BY_CREDENTIALS: 缺少居民真实验收密码");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${h5Url}/profile`);
-    await page.getByLabel("账号").fill(residentUsername);
+    await page.getByRole("button", { name: "用户名登录", exact: true }).click();
+    await page.getByLabel("用户名").fill(residentUsername);
     await page.getByLabel("密码").fill(residentPassword!);
     await page.getByRole("button", { name: "登录", exact: true }).click();
-    await expect(page.getByText("DEMO 居民账号")).toBeVisible();
-    await expect(page.locator(".resident-card p")).toHaveText("宝山区 · 大场镇");
+    await expect(page).toHaveURL(`${h5Url}/profile`);
+    await expect(page.getByRole("heading", { name: "陈阿姨", exact: true })).toBeVisible();
+    await expect(page.locator(".profile-hero small")).toContainText("账号 demo_chen");
     await page.screenshot({ path: path.join(artifactRoot, "resident-login.png"), fullPage: false });
 
     await page.getByRole("button", { name: "退出", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "居民登录" })).toBeVisible();
+    await expect(page).toHaveURL(`${h5Url}/resident/login`);
+    await expect(page.getByText("社区里的事，讲得更明白。", { exact: true })).toBeVisible();
   });
 });

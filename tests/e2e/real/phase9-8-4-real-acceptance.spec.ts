@@ -18,11 +18,29 @@ const h5Url = process.env.JIANDA_H5_PROD_URL ?? "http://127.0.0.1";
 const platformUsername = process.env.REAL_PLATFORM_ADMIN_USERNAME ?? "platform_admin";
 // 文档化演示凭据，非生产 Secret；优先读 env 以便 CI/异地复验
 const platformPassword = process.env.REAL_PLATFORM_ADMIN_PASSWORD ?? "Jianda@123";
-const artifactRoot = path.resolve("artifacts/phase9-8-4-final");
+const artifactRoot = path.resolve(
+  process.env.JIANDA_FINAL_ACCEPTANCE_ARTIFACT_DIR
+    ?? "artifacts/phase9-8-4-final",
+);
+const publishTitle = process.env.PHASE9_8_4_PUBLISH_TITLE;
 
 // 该组用例会真实改变审核与发布状态，必须由调用者显式指定一个当前
 // WAITING_REVIEW 文档。历史默认文档可能已发布或撤回，不能重复消费。
 const reviewDocumentId = Number(process.env.PHASE9_8_4_REVIEW_DOC_ID ?? 0);
+const residentUsername = process.env.REAL_RESIDENT_USERNAME ?? "demo_chen";
+const residentPassword = process.env.REAL_RESIDENT_PASSWORD ?? "Resident@123";
+
+async function authenticateResident(page: import("@playwright/test").Page) {
+  const response = await page.request.post(`${h5Url}/api/public/resident/login`, {
+    data: { username: residentUsername, password: residentPassword },
+  });
+  expect(response.ok()).toBeTruthy();
+  const payload = (await response.json()).data as { token: string; profile: unknown };
+  await page.addInitScript((session) => {
+    localStorage.setItem("jianda_resident_token", session.token);
+    localStorage.setItem("jianda_resident_profile", JSON.stringify(session.profile));
+  }, payload);
+}
 
 test.describe("Phase 9.8_4 真实 Admin 全链路", () => {
   test.skip(
@@ -196,6 +214,10 @@ test.describe("Phase 9.8_4 真实 Admin 全链路", () => {
     await page.goto(`${institutionUrl}/documents/${reviewDocumentId}/publish`);
     await page.waitForTimeout(2000);
 
+    if (publishTitle) {
+      await page.getByLabel("发布标题").fill(publishTitle);
+    }
+
     // 监听 confirm 对话框并接受
     page.on("dialog", (dialog) => dialog.accept().catch(() => {}));
 
@@ -216,12 +238,13 @@ test.describe("Phase 9.8_4 真实 Admin 全链路", () => {
 
   test("步骤10 H5 端验证已发布内容", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    // 从已发布列表找到刚发布的文章
+    await authenticateResident(page);
     await page.goto(`${h5Url}/news`);
     await page.waitForTimeout(2500);
 
-    // 在新闻列表查找刚发布的文章标题（按 doc id 对应标题片段）
-    const detailLink = page.locator(`a[href*="/news/"]`).first();
+    const detailLink = publishTitle
+      ? page.locator("a", { hasText: publishTitle }).first()
+      : page.locator('a[href*="/news/"]').first();
     await expect(detailLink).toBeVisible({ timeout: 15000 });
     await detailLink.click();
     await page.waitForTimeout(2500);
