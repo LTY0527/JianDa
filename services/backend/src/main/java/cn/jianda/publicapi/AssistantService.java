@@ -557,7 +557,8 @@ public class AssistantService {
         boolean contextual = contextSlug != null && contextSlug.equals(slug);
         int strongestAnchor = anchors.stream()
                 .filter(anchor -> title.contains(anchor) || category.contains(anchor) || summary.contains(anchor)
-                        || verifiedFacts.contains(anchor))
+                        || verifiedFacts.contains(anchor)
+                        || (anchor.length() >= 4 && hanCount(anchor) >= 3 && raw.contains(anchor)))
                 .mapToInt(String::length)
                 .max()
                 .orElse(0);
@@ -709,7 +710,7 @@ public class AssistantService {
                 "法律", "投资", "收益", "转账",
                 "哪个部门", "哪个镇", "由谁公开", "谁发布",
                 "什么时候", "何时", "哪一天", "日期", "时间",
-                "多少", "面积", "规模", "项目", "公示", "竣工", "验收", "加装电梯")
+                "多少", "面积", "规模", "项目", "公示", "竣工", "验收", "加装电梯", "开放日")
                 .stream().anyMatch(normalized::contains);
     }
 
@@ -739,6 +740,7 @@ public class AssistantService {
                 List.of("时间", "日期", "什么时候", "何时", "竣工", "验收"),
                 List.of("面积", "规模", "多少"),
                 List.of("项目", "公示", "加装电梯"),
+                List.of("开放日"),
                 List.of("适老化", "无障碍改造", "居家改造"),
                 List.of("诊断", "症状", "治疗", "用药", "吃药", "停药", "换药", "胸痛", "胸闷", "剂量"),
                 List.of("法律", "投资", "收益", "转账"));

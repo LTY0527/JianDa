@@ -308,13 +308,13 @@ class PublicImportIntegrationTest {
         org.junit.jupiter.api.Assertions.assertEquals("宝山区", stored.get("district"));
         org.junit.jupiter.api.Assertions.assertEquals("大场镇", stored.get("street_or_town"));
         org.junit.jupiter.api.Assertions.assertEquals("310113102", stored.get("region_code"));
-        org.junit.jupiter.api.Assertions.assertEquals("STREET", stored.get("local_scope"));
+        org.junit.jupiter.api.Assertions.assertEquals("LOCAL_TOWN", stored.get("local_scope"));
 
         jdbc.update("UPDATE source_document SET region_code=NULL,local_scope='UNSPECIFIED' WHERE id=?", documentId);
         mvc.perform(post("/api/web-articles/{id}/region/sync", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.regionCode").value("310113102"))
-                .andExpect(jsonPath("$.data.localScope").value("STREET"));
+                .andExpect(jsonPath("$.data.localScope").value("LOCAL_TOWN"));
         org.junit.jupiter.api.Assertions.assertEquals("310113102", jdbc.queryForObject(
                 "SELECT region_code FROM source_document WHERE id=?", String.class, documentId));
     }

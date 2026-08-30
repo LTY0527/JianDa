@@ -267,6 +267,29 @@ class AssistantIntegrationTest {
     }
 
     @Test
+    void concreteEventInRawTextOutranksGenericArrangementTitles() throws Exception {
+        long openDay = insertDocument("助手测试-政府开放日",
+                "大场镇政府开放日围绕兴业惠民、共筑大场主题开展，现场安排产业展示和民生服务交流。");
+        long generic = insertDocument("助手测试-普通参观安排",
+                "博物馆为老年观众提供普通参观安排，请按预约时间入场。");
+        insertRegionalPublished(openDay, "assistant-test-open-day", "兴业惠民 共筑大场",
+                "展示大场镇发展成果。", "310113102", "大场镇人民政府", "大场镇");
+        insertRegionalPublished(generic, "assistant-test-generic-arrangement", "老年观众参观安排",
+                "提供日常参观服务。", "310113102", "公共文化服务机构", "大场镇");
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"大场镇政府开放日有哪些安排？","regionCode":"310113102"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.citations[0].slug").value("assistant-test-open-day"))
+                .andExpect(jsonPath("$.data.citations.length()").value(1))
+                .andExpect(jsonPath("$.data.citations[*].slug",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("assistant-test-generic-arrangement"))));
+    }
+
+    @Test
     void demoCatalogContainsEnoughGuidesAndAuthorityNews() {
         Integer guides = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM published_item WHERE status='PUBLISHED' AND category IN ('养老','生活服务')",
