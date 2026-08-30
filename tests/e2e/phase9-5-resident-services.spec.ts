@@ -12,11 +12,13 @@ const detail = { ...items[1], raw_text: "办理地点：大场镇社区事务服
   { field_type: "LOCATION", field_value: "大场镇社区事务服务点" },
 ], original_file_available: false, verification_status: "VERIFIED" };
 const directory = [{ id: 32, name: "大场镇社区事务办理通知", service_type: "社区服务", address: "大场镇社区事务服务点", description: "请在截止日期前办理。", source_url: "https://example.gov.cn/guide", source_name: "大场镇权威来源", last_verified_at: "2026-08-22T10:00:00+08:00" }];
+const resident = { id: 1, username: "demo_chen", nickname: "陈阿姨", district: "宝山区", streetOrTown: "大场镇", regionCode: "310113102", demo: true };
 
 async function json(route: Route, data: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json; charset=utf-8", body: JSON.stringify({ code: 0, message: "成功", data }) });
 }
 async function mocks(page: Page, calls: string[]) {
+  await page.addInitScript(() => localStorage.setItem("jianda_resident_token", "resident-token"));
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (!url.pathname.startsWith("/api/")) return route.continue();
@@ -27,6 +29,7 @@ async function mocks(page: Page, calls: string[]) {
     if (url.pathname === "/api/public/items/32/view") return json(route, null);
     if (url.pathname === "/api/public/items/32/reminder") { calls.push(route.request().postData() || ""); return json(route, null); }
     if (url.pathname === "/api/public/reminders") return json(route, [{ id: 7, reminder_type: "DEADLINE", remind_at: "2026-08-30T01:00:00Z", published_item_id: 32, slug: "guide-test", title: "大场镇社区事务办理通知", category: "社区服务", content_kind: "SERVICE_NOTICE", content_status: "PUBLISHED" }]);
+    if (url.pathname === "/api/public/resident/me") return json(route, resident);
     return json(route, null);
   });
 }
@@ -67,4 +70,10 @@ test("详情提醒写入当前游客并可在我的提醒查看", async ({ page 
   await page.goto(`${h5Url}/reminders`);
   await expect(page.getByRole("heading", { name: "我的提醒" })).toBeVisible();
   await expect(page.getByText("大场镇社区事务办理通知")).toBeVisible();
+});
+
+test("个人中心显示服务端真实提醒数", async ({ page }) => {
+  await mocks(page, []);
+  await page.goto(`${h5Url}/profile`);
+  await expect(page.locator(".profile-stats > div").filter({ hasText: "提醒" }).locator("b")).toHaveText("1");
 });

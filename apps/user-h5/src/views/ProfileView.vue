@@ -4,14 +4,14 @@ import { useRouter } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
 import { clearLocalLibrary, favoriteItems, historyItems, listenHistoryItems } from "../library";
-import { residentLogout, residentMe, type ResidentProfile } from "../api";
+import { fetchReminders, residentLogout, residentMe, type ResidentProfile } from "../api";
 import { UserRound, Heart, Clock3, Headphones, Bell, Settings, Info, CircleHelp, ShieldCheck, ChevronRight, Trash2, LogOut, BadgeCheck } from "lucide-vue-next";
 const router = useRouter();
-const favoriteCount = ref(0); const historyCount = ref(0); const listenCount = ref(0);
+const favoriteCount = ref(0); const historyCount = ref(0); const listenCount = ref(0); const reminderCount = ref(0);
 const profile = ref<ResidentProfile|null>(null);
 function loadLibrary(){ favoriteCount.value=favoriteItems().length; historyCount.value=historyItems().length; listenCount.value=listenHistoryItems().length; }
 function clear(){ if(window.confirm("确认清除本机收藏、浏览和收听历史吗？阅读设置将保留。")){ clearLocalLibrary(); loadLibrary(); } }
-async function restoreProfile(){ if(!localStorage.getItem("jianda_resident_token")) return; try{ profile.value=await residentMe(); }catch{ localStorage.removeItem("jianda_resident_token"); localStorage.removeItem("jianda_resident_profile"); } }
+async function restoreProfile(){ if(!localStorage.getItem("jianda_resident_token")) return; try{ profile.value=await residentMe(); try{ reminderCount.value=(await fetchReminders()).length; }catch{} }catch{ localStorage.removeItem("jianda_resident_token"); localStorage.removeItem("jianda_resident_profile"); } }
 async function logout(){ await residentLogout(); profile.value=null; await router.replace("/resident/login"); }
 onMounted(()=>{loadLibrary();restoreProfile();window.addEventListener("jianda-library-change",loadLibrary)}); onUnmounted(()=>window.removeEventListener("jianda-library-change",loadLibrary));
 const links = [
@@ -59,7 +59,7 @@ const links = [
         <div><b>{{ favoriteCount }}</b><small>收藏</small></div>
         <div><b>{{ historyCount }}</b><small>浏览</small></div>
         <div><b>{{ listenCount }}</b><small>收听</small></div>
-        <div><b>{{ profile ? 3 : 0 }}</b><small>提醒</small></div>
+        <div><b>{{ reminderCount }}</b><small>提醒</small></div>
       </section>
       <section class="profile-links">
         <RouterLink v-for="link in links" :key="link[2]" :to="link[0]">
