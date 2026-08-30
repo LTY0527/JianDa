@@ -194,7 +194,7 @@ class AssistantIntegrationTest {
     void officialProjectFactsUsePublishedEvidenceAndUnknownProjectsNeverFallThroughToGeneralAi() throws Exception {
         long forest = insertDocument("助手测试-生态公益林", "顾村镇生态公益林项目于2026年7月完成竣工验收，建设面积120亩。");
         insertRegionalPublished(forest, "assistant-test-forest", "顾村镇生态公益林项目竣工验收", "项目完成竣工验收。",
-                "310113109", "顾村镇人民政府");
+                "310113109", "顾村镇人民政府", "顾村镇");
 
         mvc.perform(post("/api/public/assistant/chat")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -216,6 +216,25 @@ class AssistantIntegrationTest {
                 .andExpect(jsonPath("$.data.mode").value("retrieval"))
                 .andExpect(jsonPath("$.data.citations.length()").value(0))
                 .andExpect(jsonPath("$.data.answer").value(org.hamcrest.Matchers.containsString("不会猜测")));
+    }
+
+    @Test
+    void concreteBuildingOutranksGenericProjectAndPublisherTownIsGroundedMetadata() throws Exception {
+        long first = insertDocument("助手测试-艺康苑电梯", "艺康苑8号单元加装电梯工程设计方案进行公示。");
+        long second = insertDocument("助手测试-共康六村电梯", "共康六村130号单元加装电梯工程设计方案进行公示。");
+        insertRegionalPublished(first, "assistant-test-yikang", "艺康苑8号单元加装电梯工程设计方案公示", "加装电梯方案公示。",
+                "310113112", "宝山区政府信息公开·庙行镇", "庙行镇");
+        insertRegionalPublished(second, "assistant-test-gongkang", "共康六村130号单元加装电梯工程设计方案公示", "加装电梯方案公示。",
+                "310113112", "宝山区政府信息公开·庙行镇", "庙行镇");
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"共康六村130号加装电梯公示由哪个镇公开？","regionCode":"310113112"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
+                .andExpect(jsonPath("$.data.citations[0].slug").value("assistant-test-gongkang"));
     }
 
     @Test
@@ -243,10 +262,10 @@ class AssistantIntegrationTest {
     }
 
     private void insertRegionalPublished(long documentId, String slug, String title, String summary,
-                                         String regionCode, String sourceName) {
+                                         String regionCode, String sourceName, String streetOrTown) {
         jdbc.update("INSERT INTO published_item(document_id,slug,title,summary,category,published_by,published_at,status,source_name,source_url,province,city,district,street_or_town,region_code,local_scope) "
-                        + "VALUES (?,?,?,?, '时政',1,?,'PUBLISHED',?,'https://example.gov.cn/source','上海市','上海市','宝山区','顾村镇',?,'LOCAL_TOWN')",
+                        + "VALUES (?,?,?,?, '时政',1,?,'PUBLISHED',?,'https://example.gov.cn/source','上海市','上海市','宝山区',?,?, 'LOCAL_TOWN')",
                 documentId, slug, title, summary, Timestamp.valueOf(LocalDateTime.of(2026, 8, 30, 10, 0)),
-                sourceName, regionCode);
+                sourceName, streetOrTown, regionCode);
     }
 }

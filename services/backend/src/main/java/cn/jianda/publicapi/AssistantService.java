@@ -548,11 +548,14 @@ public class AssistantService {
         String raw = normalize(text(row, "raw_text"));
         String verifiedFacts = normalize(text(row, "verified_facts"));
         boolean contextual = contextSlug != null && contextSlug.equals(slug);
-        boolean anchorMatched = anchors.stream().anyMatch(anchor ->
-                title.contains(anchor) || category.contains(anchor) || summary.contains(anchor)
-                        || verifiedFacts.contains(anchor));
-        if (!contextual && !anchorMatched) return 0;
-        if (anchorMatched) score += 16;
+        int strongestAnchor = anchors.stream()
+                .filter(anchor -> title.contains(anchor) || category.contains(anchor) || summary.contains(anchor)
+                        || verifiedFacts.contains(anchor))
+                .mapToInt(String::length)
+                .max()
+                .orElse(0);
+        if (!contextual && strongestAnchor == 0) return 0;
+        if (strongestAnchor > 0) score += 12 + strongestAnchor * 2;
         for (String term : terms) {
             if (term.length() < 2) continue;
             if (category.contains(term) || term.contains(category)) score += 12;
@@ -704,8 +707,16 @@ public class AssistantService {
 
     private boolean supportsGroundedIntent(Map<String, Object> row, String question) {
         String normalizedQuestion = normalize(question);
+        boolean publisherQuestion = List.of("哪个部门", "哪个镇", "由谁公开", "谁发布")
+                .stream().anyMatch(normalizedQuestion::contains);
+        if (publisherQuestion
+                && normalize(text(row, "source_name") + text(row, "street_or_town")).isBlank()) {
+            return false;
+        }
         String evidence = normalize(String.join(" ",
                 text(row, "title"), text(row, "category"), text(row, "summary"),
+                text(row, "source_name"), text(row, "province"), text(row, "city"),
+                text(row, "district"), text(row, "street_or_town"),
                 text(row, "raw_text"), text(row, "verified_facts")));
         List<List<String>> intents = List.of(
                 List.of("补贴", "津贴", "补助"),
@@ -716,7 +727,6 @@ public class AssistantService {
                 List.of("时间", "日期", "什么时候", "何时", "竣工", "验收"),
                 List.of("面积", "规模", "多少"),
                 List.of("项目", "公示", "加装电梯"),
-                List.of("哪个部门", "哪个镇", "由谁公开", "谁发布", "来源"),
                 List.of("诊断", "症状", "治疗", "用药", "吃药", "剂量"),
                 List.of("法律", "投资", "收益", "转账"));
         boolean checked = false;
