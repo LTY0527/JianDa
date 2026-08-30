@@ -42,7 +42,17 @@ function formatTime(value: string) {
           <RouterLink to="/assistant"><MessageCircleQuestion />继续询问</RouterLink>
         </article>
       </section>
-      <section v-else class="state-block"><Clock3 /><h2>还没有历史会话</h2><p>从简达助手提出问题后，问答会保存在这里。</p><RouterLink to="/assistant">去问一个问题</RouterLink></section>
+      <section v-else class="state-block assistant-history-empty"><Clock3 /><h2>还没有历史会话</h2><p>从简达助手提出问题后，问答会保存在这里。</p><RouterLink to="/assistant">去问一个问题</RouterLink></section>
     </main>
   </div>
 </template>
+
+<style scoped>
+.assistant-history-empty a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 14px;
+}
+</style>

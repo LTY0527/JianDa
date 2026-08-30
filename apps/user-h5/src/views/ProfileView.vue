@@ -4,7 +4,8 @@ import { useRouter } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
 import { clearLocalLibrary, favoriteItems, historyItems, listenHistoryItems } from "../library";
-import { fetchReminders, residentLogout, residentMe, type ResidentProfile } from "../api";
+import { fetchReminders, residentMe, type ResidentProfile } from "../api";
+import { logout as logoutResident } from "../composables/useResidentAuth";
 import { UserRound, Heart, Clock3, Headphones, Bell, Settings, Info, CircleHelp, ShieldCheck, ChevronRight, Trash2, LogOut, BadgeCheck } from "lucide-vue-next";
 const router = useRouter();
 const favoriteCount = ref(0); const historyCount = ref(0); const listenCount = ref(0); const reminderCount = ref(0);
@@ -12,7 +13,7 @@ const profile = ref<ResidentProfile|null>(null);
 function loadLibrary(){ favoriteCount.value=favoriteItems().length; historyCount.value=historyItems().length; listenCount.value=listenHistoryItems().length; }
 function clear(){ if(window.confirm("确认清除本机收藏、浏览和收听历史吗？阅读设置将保留。")){ clearLocalLibrary(); loadLibrary(); } }
 async function restoreProfile(){ if(!localStorage.getItem("jianda_resident_token")) return; try{ profile.value=await residentMe(); try{ reminderCount.value=(await fetchReminders()).length; }catch{} }catch{ localStorage.removeItem("jianda_resident_token"); localStorage.removeItem("jianda_resident_profile"); } }
-async function logout(){ await residentLogout(); profile.value=null; await router.replace("/resident/login"); }
+async function logout(){ await logoutResident(router); profile.value=null; }
 onMounted(()=>{loadLibrary();restoreProfile();window.addEventListener("jianda-library-change",loadLibrary)}); onUnmounted(()=>window.removeEventListener("jianda-library-change",loadLibrary));
 const links = [
   ["/membership", BadgeCheck, "简达安心会员", "增值权益，核心公共服务永久免费", "开通", () => ""], ["/reminders", Bell, "我的提醒", "报名截止、活动与办理时间", "查看", () => ""], ["/favorites", Heart, "我的收藏", "仍在公开的资讯与办事", "查看", () => `${favoriteCount.value} 条`],
