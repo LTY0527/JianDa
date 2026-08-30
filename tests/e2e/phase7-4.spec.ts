@@ -40,12 +40,12 @@ async function installSpeechMock(context: import("@playwright/test").BrowserCont
 test.describe("Phase 7.4 H5 navigation and speech", () => {
   test("returns a cited reviewed-source answer through the H5 proxy", async ({ page }) => {
     await page.goto(`${h5Url}/assistant`);
-    await page.getByLabel("输入您想了解的问题").fill("最近有哪些健康提醒？");
+    await page.getByPlaceholder(/输入问题/).fill("最近有哪些健康提醒？");
     const responsePromise = page.waitForResponse((response) =>
       response.url().includes("/api/public/assistant/chat") &&
       response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "发送问题" }).click();
+    await page.getByRole("button", { name: "发送", exact: true }).click();
     const response = await responsePromise;
     expect(response.status()).toBe(200);
     const mode = (await response.json()).data.mode;
@@ -56,8 +56,8 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
         { exact: true },
       ),
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: "回答依据" })).toBeVisible();
-    await expect(page.locator(".assistant-citation").first()).toBeVisible();
+    await page.getByText(/查看 \d+ 个权威来源/).click();
+    await expect(page.locator(".chat-citation").first()).toBeVisible();
   });
 
   test("classifies a busy assistant response and can resend the retained question", async ({ page }) => {
@@ -71,8 +71,8 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
       }
     });
     await page.goto(`${h5Url}/assistant`);
-    await page.getByLabel("输入您想了解的问题").fill("养老服务怎么办理？");
-    await page.getByRole("button", { name: "发送问题" }).click();
+    await page.getByPlaceholder(/输入问题/).fill("养老服务怎么办理？");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
     await expect(page.getByText("助手服务繁忙，请稍后重新发送。")).toBeVisible();
     await page.getByRole("button", { name: "重新发送" }).click();
     await expect(
@@ -150,7 +150,11 @@ test.describe("Phase 7.4 H5 navigation and speech", () => {
     await page.goto(`${h5Url}/listen`);
     await page.getByRole("button", { name: "一键播放" }).click();
     const firstTitle = await page.locator(".listen-now h2").textContent();
-    await page.evaluate(() => (window as any).__lastUtterance.onend());
+    for (let index = 0; index < 12; index += 1) {
+      await page.evaluate(() => (window as any).__lastUtterance.onend());
+      if (await page.locator(".listen-now h2").textContent() !== firstTitle) break;
+      await page.waitForTimeout(50);
+    }
     await expect.poll(() => page.locator(".listen-now h2").textContent()).not.toBe(firstTitle);
   });
 

@@ -62,7 +62,7 @@ test("processing page uses real page and segment counts and shows failed retry s
   await mockDocument(page, "FAILED");
   await page.goto(`${institutionUrl}/documents/99/process`);
 
-  await expect(page.getByText("共 1 页，1 个段落")).toBeVisible();
+  await expect(page.getByText(/1 页 · 1 段 ·/)).toBeVisible();
   await expect(
     page.getByText("AI未生成可追溯的关键字段，请检查模型输出后重新处理"),
   ).toBeVisible();

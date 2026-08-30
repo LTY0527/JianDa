@@ -207,8 +207,8 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await expect(publicPage.getByText("正在询问这项内容")).toBeVisible();
     await expect(publicPage.getByText(title, { exact: true })).toBeVisible();
     const assistantQuestion = `这项内容编号${runId}需要注意什么？`;
-    await publicPage.getByLabel("输入您想了解的问题").fill(assistantQuestion);
-    await publicPage.getByRole("button", { name: "发送问题" }).click();
+    await publicPage.getByPlaceholder(/输入问题/).fill(assistantQuestion);
+    await publicPage.getByRole("button", { name: "发送", exact: true }).click();
     await expect(publicPage.getByRole("heading", { name: "回答依据" })).toBeVisible();
     await expect(publicPage.locator(".assistant-citation").filter({ hasText: title })).toBeVisible();
     await publicPage.screenshot({ path: path.join(os.tmpdir(), "jianda-h5-assistant-citation-375.png"), fullPage: true });
@@ -281,8 +281,8 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await expect(publicPage.getByText(title, { exact: true })).toHaveCount(0);
     await publicPage.evaluate(() => localStorage.removeItem("jianda_assistant_session"));
     await publicPage.goto(`${h5Url}/assistant`);
-    await publicPage.getByLabel("输入您想了解的问题").fill(`校验编号${runId}`);
-    await publicPage.getByRole("button", { name: "发送问题" }).click();
+    await publicPage.getByPlaceholder(/输入问题/).fill(`校验编号${runId}`);
+    await publicPage.getByRole("button", { name: "发送", exact: true }).click();
     await expect(publicPage.getByText(/没有找到足够可靠的依据/)).toBeVisible();
     await expect(publicPage.locator(".assistant-citation").filter({ hasText: title })).toHaveCount(0);
     expect(consoleErrors).toEqual([]);

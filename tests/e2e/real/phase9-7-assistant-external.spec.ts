@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import { authenticateResident } from "../support/residentAuth";
 
 const h5Url = process.env.JIANDA_H5_PROD_URL ?? "http://127.0.0.1";
 const authorized = process.env.JIANDA_ALLOW_EXTERNAL_SMOKE === "1";
@@ -8,8 +9,6 @@ const artifactRoot = path.resolve(
   process.env.JIANDA_FINAL_ACCEPTANCE_ARTIFACT_DIR
     ?? "artifacts/phase9-7-final-commercial-polish/real-e2e",
 );
-const residentUsername = process.env.REAL_RESIDENT_USERNAME ?? "demo_chen";
-const residentPassword = process.env.REAL_RESIDENT_PASSWORD ?? "Resident@123";
 
 type AssistantData = { answer: string; mode: string; citations: Array<{ slug: string }> };
 
@@ -27,15 +26,7 @@ async function ask(page: import("@playwright/test").Page, question: string) {
 }
 
 test.beforeEach(async ({ page }) => {
-  const response = await page.request.post(`${h5Url}/api/public/resident/login`, {
-    data: { username: residentUsername, password: residentPassword },
-  });
-  expect(response.ok()).toBeTruthy();
-  const payload = (await response.json()).data as { token: string; profile: unknown };
-  await page.addInitScript((session) => {
-    localStorage.setItem("jianda_resident_token", session.token);
-    localStorage.setItem("jianda_resident_profile", JSON.stringify(session.profile));
-  }, payload);
+  await authenticateResident(page, h5Url);
 });
 
 test("真实 DeepSeek 完成上下文问答、通用问题和高风险拒答", async ({ page, request }) => {

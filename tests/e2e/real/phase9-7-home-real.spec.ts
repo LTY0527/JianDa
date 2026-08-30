@@ -38,6 +38,7 @@ test.describe("Phase 9.7 H5 首页无 Mock 真实验收", () => {
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
       const images = page.locator("main img:visible");
       for (let index = 0; index < await images.count(); index += 1) {
+        await images.nth(index).scrollIntoViewIfNeeded();
         await expect.poll(() => images.nth(index).evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)).toBeTruthy();
       }
     }

@@ -3,7 +3,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 const h5Url = process.env.JIANDA_H5_TEST_URL ?? "http://127.0.0.1:5174";
 const items = [
   { id: 31, slug: "news-local", title: "大场镇健康服务提醒", summary: "大场镇居民可查看最新健康服务安排。", category: "健康", source_name: "宝山区权威来源", published_at: "2026-08-22T09:00:00+08:00", content_kind: "HEALTH_EDUCATION", is_local: true, region_code: "310113102", importance: 90 },
-  { id: 32, slug: "guide-test", title: "大场镇社区事务办理通知", summary: "请在截止日期前办理。", category: "社区服务", source_name: "大场镇权威来源", source_url: "https://example.gov.cn/guide", published_at: "2026-08-21T09:00:00+08:00", content_kind: "SERVICE_NOTICE", is_local: true, region_code: "310113102", deadline_at: "2026-08-30T23:59:59+08:00", importance: 80 },
+  { id: 32, slug: "guide-test", title: "大场镇社区事务办理通知", summary: "请在截止日期前办理。", category: "社区服务", source_name: "大场镇权威来源", source_url: "https://example.gov.cn/guide", published_at: "2026-08-21T09:00:00+08:00", content_kind: "SERVICE_NOTICE", is_local: true, region_code: "310113102", deadline_at: "2026-09-30T23:59:59+08:00", importance: 80 },
   { id: 33, slug: "news-fraud", title: "老年人防诈提醒", summary: "陌生来电先核实。", category: "防诈", source_name: "权威来源", published_at: "2026-08-20T09:00:00+08:00", content_kind: "ANTI_FRAUD", importance: 70 },
 ];
 const detail = { ...items[1], raw_text: "办理地点：大场镇社区事务服务点。", generated: { SUMMARY: ["请在截止日期前办理。"], STEP_CARDS: [{ title: "核对材料", description: "查看官方要求。" }] }, fields: [
@@ -28,7 +28,7 @@ async function mocks(page: Page, calls: string[]) {
     if (url.pathname === "/api/public/items/guide-test/neighbors") return json(route, { previous: null, next: null });
     if (url.pathname === "/api/public/items/32/view") return json(route, null);
     if (url.pathname === "/api/public/items/32/reminder") { calls.push(route.request().postData() || ""); return json(route, null); }
-    if (url.pathname === "/api/public/reminders") return json(route, [{ id: 7, reminder_type: "DEADLINE", remind_at: "2026-08-30T01:00:00Z", published_item_id: 32, slug: "guide-test", title: "大场镇社区事务办理通知", category: "社区服务", content_kind: "SERVICE_NOTICE", content_status: "PUBLISHED" }]);
+    if (url.pathname === "/api/public/reminders") return json(route, [{ id: 7, reminder_type: "DEADLINE", remind_at: "2026-09-30T01:00:00Z", published_item_id: 32, slug: "guide-test", title: "大场镇社区事务办理通知", category: "社区服务", content_kind: "SERVICE_NOTICE", content_status: "PUBLISHED" }]);
     if (url.pathname === "/api/public/resident/me") return json(route, resident);
     return json(route, null);
   });

@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { authenticateResident } from "./support/residentAuth";
 
 const institutionUrl = process.env.JIANDA_INSTITUTION_TEST_URL ?? "http://127.0.0.1:8090";
 const h5Url = process.env.JIANDA_H5_TEST_URL ?? "http://127.0.0.1";
@@ -71,15 +72,7 @@ test("保存 Phase 9.5 H5 关键任务视觉证据", async ({ page, request }) =
     await capture(page, file);
   }
 
-  const resident = await request.post(`${h5Url}/api/public/resident/login`, {
-    data: { username: "demo_chen", password: "Resident@123" },
-  });
-  expect(resident.ok()).toBeTruthy();
-  const session = (await resident.json()).data as { token: string; profile: unknown };
-  await page.addInitScript((value) => {
-    localStorage.setItem("jianda_resident_token", value.token);
-    localStorage.setItem("jianda_resident_profile", JSON.stringify(value.profile));
-  }, session);
+  await authenticateResident(page, h5Url);
   await page.goto(`${h5Url}/profile`);
   await expect(page.getByRole("heading", { name: "陈阿姨" })).toBeVisible();
   await capture(page, "h5-profile-390.png");

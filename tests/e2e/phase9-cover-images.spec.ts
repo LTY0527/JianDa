@@ -82,13 +82,19 @@ test("broken hero cover becomes text while category defaults stay as text feed",
   await expect(page.locator("vite-error-overlay")).toHaveCount(0);
 
   const featured = page.locator(".commercial-hero");
-  await expect(featured).toHaveClass(/commercial-hero--text/);
-  await expect(featured.locator("img")).toHaveCount(0);
+  const featuredImage = featured.locator("img");
+  await expect(featuredImage).toHaveAttribute("src", /\/images\/defaults\/health-\d+\.svg$/);
+  await expect.poll(() => featuredImage.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBeTruthy();
   await expect(featured.getByRole("heading")).toContainText("三伏天老年人健康提醒");
 
   const feedEntries = page.locator(".mixed-feed .feed-entry");
   await expect(feedEntries).toHaveCount(2);
-  await expect(feedEntries.locator("img")).toHaveCount(0);
+  const feedImages = feedEntries.locator("img");
+  await expect(feedImages).toHaveCount(2);
+  for (let index = 0; index < await feedImages.count(); index += 1) {
+    await expect(feedImages.nth(index)).toHaveAttribute("src", /\/images\/defaults\//);
+    await expect.poll(() => feedImages.nth(index).evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBeTruthy();
+  }
   const beforeReload = await feedEntries.evaluateAll((entries) =>
     entries.map((entry) => entry.className),
   );

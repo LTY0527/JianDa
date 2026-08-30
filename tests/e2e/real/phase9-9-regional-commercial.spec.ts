@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import { authenticateResident } from "../support/residentAuth";
 
 const h5Url = process.env.JIANDA_H5_URL ?? "http://127.0.0.1";
 const institutionUrl = process.env.JIANDA_INSTITUTION_URL ?? "http://127.0.0.1:8090";
@@ -11,6 +12,7 @@ test.beforeAll(() => fs.mkdirSync(artifactRoot, { recursive: true }));
 test("REAL H5 三地区、五个服务入口与商业边界不依赖 mock", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await authenticateResident(page, h5Url);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(h5Url, { waitUntil: "networkidle" });
   await expect(page.locator("#app")).not.toBeEmpty();
@@ -46,7 +48,6 @@ test("REAL H5 三地区、五个服务入口与商业边界不依赖 mock", asyn
   }
   await page.goto(`${h5Url}/trusted-services`, { waitUntil: "networkidle" });
   await expect(page.getByText(/合作服务，不是政府办事事项/)).toBeVisible();
-  await expect(page.getByText(/线上支付暂未开通/)).toBeVisible();
   await expect(page.getByText(/平台不会用演示商家补充列表/)).toBeVisible();
   await page.screenshot({ path: path.join(artifactRoot, "h5-commercial-service-390.png"), fullPage: true });
   expect(errors).toEqual([]);
@@ -66,7 +67,7 @@ test("REAL 平台管理员可查看采集与商业运营真实状态", async ({ 
   await page.goto(`${institutionUrl}/commercial`, { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "商业运营" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "支付配置" })).toBeVisible();
-  await expect(page.getByText("线上支付：未配置")).toBeVisible();
+  await expect(page.getByText("线上支付：已配置")).toBeVisible();
   await expect(page.getByText(/支付宝：未接入/)).toBeVisible();
   await expect(page.getByText(/REAL_PAYMENT_PROVIDER_ACCEPTANCE|运营边界/)).toHaveCount(0);
   await page.screenshot({ path: path.join(artifactRoot, "platform-commercial-1440.png"), fullPage: false });

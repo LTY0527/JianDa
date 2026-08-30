@@ -129,7 +129,7 @@ test("处理页每两秒轮询并在只有类型模块时开放审核入口", as
     page.getByRole("link", { name: "进入原文对照审核" }),
   ).toBeVisible({ timeout: 7_000 });
   expect(detailRequests).toBeGreaterThanOrEqual(3);
-  await expect(page.getByText("处理完成，可进入原文对照审核")).toBeVisible();
+  await expect(page.getByText("处理完成", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "标准规范结构" })).toBeVisible();
   await expect(page.getByText("适用范围：适用于社区养老服务")).toBeVisible();
 });
@@ -149,7 +149,7 @@ test("刷新页面后从后端恢复已有任务终态", async ({ page }) => {
     page.getByRole("link", { name: "进入原文对照审核" }),
   ).toBeVisible();
   await expect(
-    page.getByText("已生成 0 个可追溯字段和 1 个内容模块"),
+    page.getByText("标准规范 · 0 字段 · 1 模块"),
   ).toBeVisible();
 });
 

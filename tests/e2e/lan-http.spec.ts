@@ -34,7 +34,7 @@ test.describe("H5 LAN HTTP compatibility", () => {
 
     await page.goto(`${h5Url}/assistant`);
     await expect(page.getByRole("heading", { name: "简达助手" })).toBeVisible();
-    await expect(page.locator(".assistant-suggestions button").first()).toBeVisible();
+    await expect(page.locator(".chat-suggestions button").first()).toBeVisible();
   });
 
   test("recovers when the home retry button reloads a failed API request", async ({

@@ -112,6 +112,15 @@ test("PARTIAL_SUCCESS 错误队列只允许重试未解决的可重试项", asyn
         crawlSchedulerEnabled: false,
         dailyArticleLimit: 0,
         dailyTokenLimit: 0,
+        amap: { status: "disabled" },
+        webSearch: { status: "disabled", provider: "NONE" },
+        payment: { available: false, provider: "NONE", message: "测试环境未配置" },
+        aiService: {
+          service: { status: "ready" },
+          llm: { status: "ready", provider: "mock" },
+          ocr: { status: "ready", engine: "fixture" },
+          webCollector: { status: "ready" },
+        },
       });
     }
     return json(route, null, 404, "测试未配置该接口");

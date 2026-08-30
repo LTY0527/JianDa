@@ -1,4 +1,7 @@
 import { expect, type Page } from "@playwright/test";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 type ResidentSession = {
   token: string;
@@ -21,6 +24,24 @@ export async function authenticateResident(
   expect(response.ok(), "居民回归账号应能通过真实登录接口建立会话").toBeTruthy();
   const payload = (await response.json()) as { data: ResidentSession };
   expect(payload.data.token).toBeTruthy();
+  const origin = new URL(h5Url).origin;
+  const productionOrigin = new URL(
+    process.env.JIANDA_H5_PROD_URL ?? "http://127.0.0.1",
+  ).origin;
+  await fs.writeFile(
+    path.join(os.tmpdir(), "jianda-playwright-resident-state.json"),
+    JSON.stringify({
+      cookies: [],
+      origins: [...new Set([origin, productionOrigin])].map((storageOrigin) => ({
+        origin: storageOrigin,
+        localStorage: [
+          { name: "jianda_resident_token", value: payload.data.token },
+          { name: "jianda_resident_profile", value: JSON.stringify(payload.data.profile) },
+        ],
+      })),
+    }),
+    "utf8",
+  );
   await page.addInitScript((session: ResidentSession) => {
     localStorage.setItem("jianda_resident_token", session.token);
     localStorage.setItem(

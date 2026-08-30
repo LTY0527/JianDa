@@ -239,6 +239,15 @@ test("历史补图必须先预览再确认执行", async ({ page }) => {
         crawlSchedulerEnabled: true,
         dailyArticleLimit: 0,
         dailyTokenLimit: 0,
+        amap: { status: "disabled" },
+        webSearch: { status: "disabled", provider: "NONE" },
+        payment: { available: false, provider: "NONE", message: "测试环境未配置" },
+        aiService: {
+          service: { status: "ready" },
+          llm: { status: "ready", provider: "external", model: "deepseek-v4-flash" },
+          ocr: { status: "ready", engine: "fixture" },
+          webCollector: { status: "ready" },
+        },
       });
     }
     if (path === "/api/cover-backfill/jobs" && request.method() === "POST") {

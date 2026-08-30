@@ -60,7 +60,9 @@ test.describe("Phase 7.3 rendered acceptance", () => {
   });
 
   test("居民登录门禁支持深链回跳、刷新保持和退出保护", async ({ page }) => {
-    const guestContext = await page.context().browser()!.newContext();
+    const guestContext = await page.context().browser()!.newContext({
+      storageState: { cookies: [], origins: [] },
+    });
     const guestPage = await guestContext.newPage();
     await guestPage.goto(`${h5Url}/favorites`);
     await expect(guestPage).toHaveURL(
@@ -89,6 +91,9 @@ test.describe("Phase 7.3 rendered acceptance", () => {
       `${h5Url}/resident/login?redirect=/history`,
     );
     await guestContext.close();
+    // The backend intentionally keeps one active resident session. Restore the
+    // shared state after this test verifies that logging out invalidates it.
+    await authenticateResident(page, h5Url);
   });
 
   test("用户端五个一级页面在 375px 可阅读且固定导航不遮挡结尾", async ({ page }, testInfo) => {

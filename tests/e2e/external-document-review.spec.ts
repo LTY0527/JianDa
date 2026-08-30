@@ -22,8 +22,9 @@ test("document 16 shows real processing counts and traceable external fields", a
   await page.goto(`${institutionUrl}/documents/16/process`);
   await expect(page).toHaveTitle(/简达/);
   await expect(page.locator("vite-error-overlay")).toHaveCount(0);
-  await expect(page.getByText("共 1 页，1 个段落")).toBeVisible();
-  await expect(page.getByText("已生成 10 个可追溯字段")).toBeVisible();
+  await expect(page.getByText(/1 页 · 1 段 ·/)).toBeVisible();
+  const analysisStep = page.locator(".rail-node").filter({ hasText: "AI 分析与改写" });
+  await expect(analysisStep).toContainText("待确认 · 10 字段 · 6 模块");
   await expect(page.getByText("共 3 页，12 个段落")).toHaveCount(0);
   await expect(page.getByText("处理完成", { exact: true })).toBeVisible();
 

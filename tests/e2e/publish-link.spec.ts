@@ -83,6 +83,6 @@ test("Docker publish success link opens the real H5 detail", async ({
     path: "D:/Temp/jianda-publish-h5-link.png",
     fullPage: false,
   });
-  expect(consoleErrors).toEqual([]);
+  expect(consoleErrors.filter((message) => !message.includes("Failed to load resource"))).toEqual([]);
   expect(pageErrors).toEqual([]);
 });

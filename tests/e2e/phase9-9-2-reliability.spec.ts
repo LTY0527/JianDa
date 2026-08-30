@@ -71,6 +71,7 @@ test("异步批量加入展示进度并在刷新后可恢复任务", async ({ pa
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
     if (path === "/api/source-registries") return json(route, [source]);
     if (path === "/api/source-registries/discover-jobs/801") return json(route, {
       id: 801, status: "SUCCESS", processing_stage: "COMPLETE", discovered_count: 1,
@@ -108,6 +109,10 @@ test("异步批量加入展示进度并在刷新后可恢复任务", async ({ pa
 
 test("会员周月年套餐支持支付宝和微信正式支付会话 UI", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("jianda_resident_token", "phase992-resident-token"));
+  await page.route("**/api/public/resident/me", (route) => json(route, {
+    id: 1, username: "demo_chen", nickname: "陈阿姨", district: "宝山区",
+    streetOrTown: "大场镇", regionCode: "310113102", demo: true,
+  }));
   const methods: string[] = [];
   let sessionIndex = 0;
   await page.route("**/api/public/membership/**", async (route) => {

@@ -142,7 +142,7 @@ test("工作台和材料列表将网页文章计入待审核", async ({ page }) 
 
   await page.goto(`${institutionUrl}/documents`);
   await expect(page.getByText("三伏天老年人健康提示")).toBeVisible();
-  await expect(page.getByText("网页文章")).toBeVisible();
+  await expect(page.getByText("网页文章", { exact: true })).toBeVisible();
 });
 
 test("网页文章审核页读取快照且不会请求 PDF 原文件", async ({ page }) => {

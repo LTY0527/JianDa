@@ -49,6 +49,25 @@ const waitingBudget = {
   estimated_recovery_at: "2026-07-30T00:00:00+08:00",
 };
 
+const runtimeCapabilities = {
+  crawlAutoAiEnabled: false,
+  crawlSchedulerEnabled: false,
+  llmProvider: "mock",
+  externalModel: "",
+  assistantExternalEnabled: false,
+  dailyArticleLimit: 5,
+  dailyTokenLimit: 50000,
+  amap: { status: "disabled", message: "测试环境未配置" },
+  webSearch: { status: "disabled", provider: "NONE", message: "测试环境未配置" },
+  payment: { available: false, provider: "NONE", message: "测试环境未配置" },
+  aiService: {
+    service: { status: "ready" },
+    llm: { status: "ready", provider: "mock", model: "" },
+    ocr: { status: "ready", engine: "fixture" },
+    webCollector: { status: "ready" },
+  },
+};
+
 async function fulfill(route: Route, data: unknown, status = 200, message = "成功") {
   await route.fulfill({
     status,
@@ -96,7 +115,7 @@ test("来源默认安全配置、调度预算请求和等待预算状态清晰",
     }
     if (path === "/api/crawl-tasks") return fulfill(route, []);
     if (path === "/api/ai-queue") return fulfill(route, [waitingBudget]);
-    if (path === "/api/runtime-capabilities") return fulfill(route, { crawlAutoAiEnabled: false, crawlSchedulerEnabled: false, llmProvider: "mock", externalModel: "", dailyArticleLimit: 5, dailyTokenLimit: 50000 });
+    if (path === "/api/runtime-capabilities") return fulfill(route, runtimeCapabilities);
     return fulfill(route, null, 404, "测试未配置该接口");
   });
 
@@ -161,7 +180,7 @@ test("来源、调度和预算页面在 375px 与 1440px 均不横向溢出视�
     if (path === "/api/source-registries") return fulfill(route, [registry]);
     if (path === "/api/crawl-tasks") return fulfill(route, []);
     if (path === "/api/ai-queue") return fulfill(route, [waitingBudget]);
-    if (path === "/api/runtime-capabilities") return fulfill(route, { crawlAutoAiEnabled: false, crawlSchedulerEnabled: false, llmProvider: "mock", externalModel: "", dailyArticleLimit: 5, dailyTokenLimit: 50000 });
+    if (path === "/api/runtime-capabilities") return fulfill(route, runtimeCapabilities);
     return fulfill(route, null, 404, "测试未配置该接口");
   });
   for (const viewport of [
@@ -221,7 +240,7 @@ test("立即检查进入独立进度页并引导加入内容中心", async ({ pa
     }
     if (path === "/api/crawl-tasks") return fulfill(route, []);
     if (path === "/api/ai-queue") return fulfill(route, []);
-    if (path === "/api/runtime-capabilities") return fulfill(route, { crawlAutoAiEnabled: false, crawlSchedulerEnabled: false, llmProvider: "mock", externalModel: "", dailyArticleLimit: 5, dailyTokenLimit: 50000 });
+    if (path === "/api/runtime-capabilities") return fulfill(route, runtimeCapabilities);
     if (path === "/api/source-registries/31/discover-jobs" && request.method() === "POST") {
       calls.push("start");
       return fulfill(route, {
@@ -275,7 +294,7 @@ test("立即检查进入独立进度页并引导加入内容中心", async ({ pa
 
   await page.getByRole("button", { name: "加入内容中心", exact: true }).click();
   await expect(page.getByText(/材料 #601 已加入内容中心/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "立即处理" })).toHaveAttribute("href", "/documents/601/process");
+  await expect(page.getByRole("button", { name: "立即处理" })).toBeVisible();
   await expect(page.getByRole("link", { name: "返回来源" }).last()).toHaveAttribute("href", "/public-sources");
   expect(calls).toEqual(["start", "collect"]);
 });

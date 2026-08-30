@@ -111,6 +111,6 @@ test.describe("Phase 9.6 无 Mock 公开内容真实验收", () => {
     await expect(page.getByText("平台资料暂未命中")).toBeVisible();
     await page.getByRole("link", { name: "带关键词问简达" }).click();
     await expect(page).toHaveURL(new RegExp(`/assistant\\?q=${encodeURIComponent(keyword)}`));
-    await expect(page.getByLabel("输入您想了解的问题")).toHaveValue(keyword);
+    await expect(page.getByPlaceholder(/输入问题/)).toHaveValue(keyword);
   });
 });
