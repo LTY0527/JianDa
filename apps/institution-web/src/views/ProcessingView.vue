@@ -410,13 +410,14 @@ function updateElapsed() {
     elapsedSeconds.value = 0;
     return;
   }
-  const end = latestJob.value?.finished_at
-    ? new Date(latestJob.value.finished_at).getTime()
-    : Date.now();
-  elapsedSeconds.value = Math.max(
-    0,
-    Math.floor((end - new Date(started).getTime()) / 1000),
-  );
+  if (!latestJob.value?.finished_at) {
+    // The polling snapshot calculates elapsed time inside MySQL so JVM/DB
+    // timezone differences cannot inflate a fresh task by several hours.
+    elapsedSeconds.value += 1;
+    return;
+  }
+  const end = new Date(latestJob.value.finished_at).getTime();
+  elapsedSeconds.value = Math.max(0, Math.floor((end - new Date(started).getTime()) / 1000));
 }
 
 async function startNow() {
@@ -499,7 +500,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section v-else class="process-summary-card">
+    <section v-else-if="latestJob" class="process-summary-card">
       <div class="process-summary-card__title">
         <h1>{{ document?.title || `文档 #${documentId}` }}</h1>
         <span v-if="latestJob?.status === 'WAITING_BUDGET'" class="pill pill--warning">等待预算恢复</span>
@@ -514,14 +515,14 @@ onUnmounted(() => {
           <Workflow :size="18" />
           <div>
             <small>当前阶段</small>
-            <b>{{ stageText[latestJob.stage || ""] || "正在处理" }}</b>
+            <b>{{ stageText[latestJob?.stage || ""] || "正在处理" }}</b>
           </div>
         </div>
         <div class="process-metric">
           <Gauge :size="18" />
           <div>
             <small>处理进度</small>
-            <b>{{ latestJob.progress || 0 }}%</b>
+            <b>{{ latestJob?.progress || 0 }}%</b>
           </div>
         </div>
         <div class="process-metric">
@@ -555,17 +556,17 @@ onUnmounted(() => {
       </div>
 
       <div class="process-progress">
-        <div class="process-progress__bar"><i :style="{ width: `${Math.min(100, latestJob.progress || 0)}%` }" /></div>
+        <div class="process-progress__bar"><i :style="{ width: `${Math.min(100, latestJob?.progress || 0)}%` }" /></div>
         <div class="process-progress__meta">
           <span v-if="lastUpdatedAt">最近更新：{{ lastUpdatedAt.toLocaleTimeString("zh-CN", { hour12: false }) }}</span>
-          <span v-if="latestJob.cache_hit">· 已复用相同文件的验证结果</span>
-          <span v-if="latestJob.total_tokens">· {{ latestJob.total_tokens }} Token</span>
-          <span v-if="latestJob.provider_request_id">· 请求编号 {{ latestJob.provider_request_id }}</span>
+          <span v-if="latestJob?.cache_hit">· 已复用相同文件的验证结果</span>
+          <span v-if="latestJob?.total_tokens">· {{ latestJob.total_tokens }} Token</span>
+          <span v-if="latestJob?.provider_request_id">· 请求编号 {{ latestJob.provider_request_id }}</span>
         </div>
       </div>
     </section>
 
-    <template v-if="!notStarted">
+    <template v-if="latestJob && !notStarted">
       <div class="process-actions">
         <RouterLink class="btn secondary" to="/documents">返回材料列表，后台继续处理</RouterLink>
         <button class="btn secondary" :disabled="refreshing" @click="load(true)">

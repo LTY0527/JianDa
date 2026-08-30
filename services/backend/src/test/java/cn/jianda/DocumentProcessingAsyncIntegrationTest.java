@@ -4,6 +4,8 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.lessThan;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -91,7 +93,9 @@ class DocumentProcessingAsyncIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PROCESSING"))
                 .andExpect(jsonPath("$.data.jobStatus").value("PROCESSING"))
-                .andExpect(jsonPath("$.data.stage").value("EXTRACTING_FACTS"));
+                .andExpect(jsonPath("$.data.stage").value("EXTRACTING_FACTS"))
+                .andExpect(jsonPath("$.data.elapsed", greaterThanOrEqualTo(0)))
+                .andExpect(jsonPath("$.data.elapsed", lessThan(60)));
 
         mvc.perform(post("/api/documents/{id}/process", documentId)
                         .header("Authorization", auth))

@@ -1061,6 +1061,7 @@ public class DocumentService {
                 "SELECT processing_status,updated_at FROM source_document WHERE id=?", id);
         List<Map<String, Object>> rows = jdbc.queryForList(
                 "SELECT id,status,stage,progress,error_message,started_at,finished_at,updated_at,total_ms,"
+                        + "GREATEST(0,TIMESTAMPDIFF(SECOND,started_at,COALESCE(finished_at,CURRENT_TIMESTAMP))) AS elapsed_seconds,"
                         + "CASE WHEN updated_at < TIMESTAMPADD(SECOND,-600,CURRENT_TIMESTAMP) "
                         + "THEN 1 ELSE 0 END AS heartbeat_stale,"
                         + "provider_id,model_id,reason_code,retry_count FROM processing_job "
@@ -1078,6 +1079,7 @@ public class DocumentService {
                     + "WHERE id=? AND processing_status='PROCESSING'", id);
             rows = jdbc.queryForList(
                     "SELECT id,status,stage,progress,error_message,started_at,finished_at,updated_at,total_ms,"
+                            + "GREATEST(0,TIMESTAMPDIFF(SECOND,started_at,COALESCE(finished_at,CURRENT_TIMESTAMP))) AS elapsed_seconds,"
                             + "CASE WHEN updated_at < TIMESTAMPADD(SECOND,-600,CURRENT_TIMESTAMP) "
                             + "THEN 1 ELSE 0 END AS heartbeat_stale,"
                             + "provider_id,model_id,reason_code,retry_count FROM processing_job WHERE id=?", jobId);
@@ -1129,7 +1131,7 @@ public class DocumentService {
         result.put("status", document.get("processing_status"));
         result.put("stage", job.getOrDefault("stage", "PREPARING"));
         result.put("progress", job.getOrDefault("progress", 0));
-        result.put("elapsed", elapsedSeconds(job));
+        result.put("elapsed", toInt(job.get("elapsed_seconds")));
         result.put("estimatedMs", estimatedMs);
         result.put("queuePosition", queuePosition);
         result.put("activeProcessing", activeCount);
@@ -1156,13 +1158,6 @@ public class DocumentService {
     private static double toDouble(Object value) {
         if (value instanceof Number n) return n.doubleValue();
         return 0.0;
-    }
-
-    private static long elapsedSeconds(Map<String, Object> job) {
-        if (!(job.get("started_at") instanceof java.util.Date started)) return 0;
-        long end = job.get("finished_at") instanceof java.util.Date finished
-                ? finished.getTime() : System.currentTimeMillis();
-        return Math.max(0, (end - started.getTime()) / 1000L);
     }
 
     public List<Map<String, Object>> fields(long id, AuthUser user) {
