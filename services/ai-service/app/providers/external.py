@@ -360,7 +360,10 @@ class ExternalLlmProvider(LlmProvider):
         completion: CompletionResult | None = None
         answer_quality: Literal["normal", "short", "safety", "rich"] = "normal"
         client = self.client or self._shared_client()
-        max_attempts = 3
+        # One repair request is enough: repeated retries increase cost and can
+        # turn a deterministic citation failure into an unrelated transport
+        # error when the upstream has already returned a complete answer.
+        max_attempts = 2
         for attempt in range(max_attempts):
             attempt_messages = list(messages)
             if attempt == 1:
@@ -368,8 +371,8 @@ class ExternalLlmProvider(LlmProvider):
                 attempt_messages.append({
                     "role": "user",
                     "content": (
-                        "上次回答长度不足，老年居民无法照着做。请重新回答同一问题。"
-                        "补充必要背景和可执行步骤，严格基于给定证据，不得新增无依据事实。"
+                        "上次输出缺少可验证的引用。请重新回答同一问题，"
+                        "严格基于给定证据，不得新增无依据事实。"
                         "answer中的每个事实性短句末尾必须包含给定证据编号，例如[1]；"
                         "used_citation_indexes必须列出正文实际使用的编号。"
                         "只输出一个合法JSON对象。"
@@ -420,13 +423,10 @@ class ExternalLlmProvider(LlmProvider):
                 answer_quality = "rich"
             elif answer_chars < 100 and not is_high_risk:
                 answer_quality = "short"
-            if valid and answer_quality == "rich":
+            if valid:
+                # Richness is metadata, not a validity condition. A concise
+                # grounded answer must not trigger another billable request.
                 break
-            if valid and (answer_chars >= 80 or is_high_risk):
-                if answer_quality != "rich" and answer_quality != "safety":
-                    answer_quality = "normal"
-                if not (attempt == 0 and answer_quality == "short"):
-                    break
             LOGGER.warning(
                 "provider=external model=%s stage=assistant_rag "
                 "citation_validation_failed=true answer_present=%s "
@@ -570,9 +570,10 @@ class ExternalLlmProvider(LlmProvider):
             elif answer_chars >= 200 and len(actions) >= 3:
                 answer_quality = "rich"
                 break
-            elif answer_chars < 100 and not is_high_risk and attempt == 0:
+            elif answer_chars < 100 and not is_high_risk:
                 answer_quality = "short"
-                continue
+                if answer:
+                    break
             else:
                 if answer_quality != "rich" and answer_quality != "safety":
                     answer_quality = "normal"
