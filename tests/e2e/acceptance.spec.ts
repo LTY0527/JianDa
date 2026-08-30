@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { acceptanceArtifactPath } from "./support/acceptanceArtifacts";
+import { authenticateResident } from "./support/residentAuth";
 
 const institutionUrl =
   process.env.JIANDA_INSTITUTION_TEST_URL ?? "http://127.0.0.1:5173";
@@ -54,6 +55,42 @@ async function screenshot(page: Page, testInfo: TestInfo, name: string) {
 }
 
 test.describe("Phase 7.3 rendered acceptance", () => {
+  test.beforeEach(async ({ page }) => {
+    await authenticateResident(page, h5Url);
+  });
+
+  test("居民登录门禁支持深链回跳、刷新保持和退出保护", async ({ page }) => {
+    const guestContext = await page.context().browser()!.newContext();
+    const guestPage = await guestContext.newPage();
+    await guestPage.goto(`${h5Url}/favorites`);
+    await expect(guestPage).toHaveURL(
+      `${h5Url}/resident/login?redirect=/favorites`,
+    );
+
+    await guestPage
+      .getByRole("button", { name: "用户名登录", exact: true })
+      .click();
+    await guestPage.getByLabel("用户名").fill(
+      process.env.REAL_RESIDENT_USERNAME ?? "demo_chen",
+    );
+    await guestPage.getByLabel("密码").fill(
+      process.env.REAL_RESIDENT_PASSWORD ?? "Resident@123",
+    );
+    await guestPage.getByRole("button", { name: "登录", exact: true }).click();
+    await expect(guestPage).toHaveURL(`${h5Url}/favorites`);
+    await guestPage.reload();
+    await expect(guestPage).toHaveURL(`${h5Url}/favorites`);
+
+    await guestPage.goto(`${h5Url}/profile`);
+    await guestPage.getByRole("button", { name: "退出", exact: true }).click();
+    await expect(guestPage).toHaveURL(`${h5Url}/resident/login`);
+    await guestPage.goto(`${h5Url}/history`);
+    await expect(guestPage).toHaveURL(
+      `${h5Url}/resident/login?redirect=/history`,
+    );
+    await guestContext.close();
+  });
+
   test("用户端五个一级页面在 375px 可阅读且固定导航不遮挡结尾", async ({ page }, testInfo) => {
     const consoleErrors: string[] = [];
     page.on("console", (message) => {
@@ -65,7 +102,7 @@ test.describe("Phase 7.3 rendered acceptance", () => {
       ["/news", "权威资讯", "h5-news-375.png"],
       ["/assistant", "简达助手", "h5-assistant-375.png"],
       ["/services", "办事行动中心", "h5-services-375.png"],
-      ["/profile", "游客浏览", "h5-profile-375.png"],
+      ["/profile", "陈阿姨", "h5-profile-375.png"],
     ] as const;
 
     for (const [route, heading, file] of pages) {
@@ -282,8 +319,10 @@ test.describe("Phase 7.3 rendered acceptance", () => {
 
     await page.goto(`${h5Url}/assistant`);
     await page.route("**/api/public/assistant/chat", (route) => route.abort("timedout"));
-    await page.getByLabel("输入您想了解的问题").fill("网络超时验收问题");
-    await page.getByRole("button", { name: "发送问题" }).click();
+    await page
+      .getByRole("textbox", { name: "输入问题，Ctrl/⌘ + Enter 发送" })
+      .fill("网络超时验收问题");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
     await expect(page.getByText(/网络连接失败，请检查当前网络后重新发送/)).toBeVisible();
   });
 

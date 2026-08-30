@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
 import { acceptanceArtifactPath } from "./support/acceptanceArtifacts";
+import { authenticateResident } from "./support/residentAuth";
 
 const institutionUrl =
   process.env.JIANDA_INSTITUTION_TEST_URL ?? "http://127.0.0.1:5173";
@@ -18,6 +19,10 @@ async function login(page: Page, username: string) {
 test.describe.serial("Phase 7 navigation and public information flow", () => {
   const ownedDocumentIds = new Set<number>();
   let ownedToken = "";
+
+  test.beforeEach(async ({ page }) => {
+    await authenticateResident(page, h5Url);
+  });
 
   test.afterEach(async ({ request }) => {
     if (!ownedToken || ownedDocumentIds.size === 0) return;
@@ -60,8 +65,8 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await navigation.getByRole("link", { name: "简达助手", exact: true }).click();
     await expect(page.getByRole("heading", { name: "简达助手" })).toBeVisible();
     await navigation.getByRole("link", { name: "我的", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "游客浏览" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "居民登录" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "陈阿姨" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "退出", exact: true })).toBeVisible();
   });
 
   test("用户端在 375、768 和 1440 宽度无横向溢出", async ({ page }) => {
@@ -88,7 +93,9 @@ test.describe.serial("Phase 7 navigation and public information flow", () => {
     await login(page, "platform_admin");
     await page.goto(`${institutionUrl}/documents`);
     await expect(page.getByRole("button", { name: "返回" })).toHaveCount(0);
-    const search = page.getByPlaceholder("搜索材料标题或文件名");
+    const search = page.getByRole("textbox", {
+      name: "搜索材料标题或文件名",
+    });
     await search.fill("养老");
     await page.goto(`${institutionUrl}/`);
     await page.goto(`${institutionUrl}/documents`);
