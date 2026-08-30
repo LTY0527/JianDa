@@ -1,0 +1,51 @@
+{
+  "runAt": "2026-08-30T17:12:00.000Z",
+  "timezone": "Asia/Shanghai",
+  "browser": "149.0.7827.55",
+  "browserPlugin": "absent; repository Playwright Chromium used",
+  "mockRoutes": 0,
+  "resident": {
+    "accountRole": "demo resident",
+    "regionCode": "310113102",
+    "homeUrl": "http://127.0.0.1/",
+    "homeBrokenImages": [],
+    "readerSizeAfterRealSwitch": "24px",
+    "detailUrl": "http://127.0.0.1/guide/guide-60",
+    "detailReaderFont": "24px",
+    "detailBrokenImages": [],
+    "profileUrl": "http://127.0.0.1/profile",
+    "assistantUrl": "http://127.0.0.1/assistant",
+    "assistantMode": "reviewed content + AI synthesis",
+    "assistantCitationCount": 2,
+    "assistantProvider": "external",
+    "assistantModel": "deepseek-v4-flash",
+    "assistantHttp": 200,
+    "assistantPromptTokens": 1211,
+    "assistantCompletionTokens": 268,
+    "assistantTotalTokens": 1479,
+    "assistantDurationMs": 3193
+  },
+  "institution": {
+    "accountRole": "platform administrator",
+    "loginUrl": "http://127.0.0.1:8090/",
+    "processing": {
+      "documentId": 102,
+      "jobId": 128,
+      "startHttp": 200,
+      "elapsedAtCapture": 1,
+      "progressAtCapture": 35,
+      "finalStatus": "SUCCEEDED",
+      "provider": "external",
+      "model": "deepseek-v4-flash",
+      "cacheReused": true,
+      "totalTokens": 0,
+      "totalMs": 218,
+      "screenshot": "智能处理进度_1440x900_20260831_doc-102_job-128.png"
+    },
+    "reviewUrl": "http://127.0.0.1:8090/documents/67/review",
+    "reviewFieldCardsVisible": 1,
+    "reviewSourceMode": "extracted-text",
+    "reviewBrokenImages": []
+  },
+  "console": []
+}
