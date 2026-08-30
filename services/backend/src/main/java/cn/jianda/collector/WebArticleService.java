@@ -609,7 +609,8 @@ public class WebArticleService {
         if (rows.isEmpty()) throw new BusinessException(404, "网页文章不存在");
         Map<String, Object> current = rows.get(0);
         String originalUrl = text(current.get("original_url"));
-        previews.remove(originalUrl);
+        previews.keySet().removeIf(key -> key.equals(originalUrl)
+                || key.startsWith(originalUrl + "#registry="));
         Map<String, Object> refreshed = preview(originalUrl);
         String refreshedCanonical = text(refreshed.get("canonical_url"));
         if (!refreshedCanonical.equals(text(current.get("canonical_url")))) {

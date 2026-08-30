@@ -51,7 +51,9 @@ public class ResidentCommunityController {
     @GetMapping("/api/public/resident/registration-capabilities")
     public ApiResponse<Map<String, Object>> registrationCapabilities() {
         return ApiResponse.ok(Map.of("usernamePassword", true,
-                "sms", Map.of("enabled", false, "provider", "NONE", "message", ""), "phonePassword", true));
+                "sms", Map.of("enabled", false, "provider", "NONE",
+                        "message", "短信注册尚未启用，请使用用户名和密码注册"),
+                "phonePassword", true));
     }
 
     @PostMapping("/api/public/resident/register")

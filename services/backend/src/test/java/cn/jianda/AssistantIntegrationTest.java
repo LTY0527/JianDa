@@ -104,6 +104,14 @@ class AssistantIntegrationTest {
                 .andExpect(jsonPath("$.data.citations.length()").value(0))
                 .andExpect(jsonPath("$.data.answer")
                         .value(org.hamcrest.Matchers.containsString("已审核内容检索可用")));
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"简达助手现在运行正常吗？"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("status"));
     }
 
     @Test

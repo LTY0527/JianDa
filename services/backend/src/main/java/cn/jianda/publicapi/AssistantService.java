@@ -133,6 +133,8 @@ public class AssistantService {
         List<RankedItem> ranked = rows.stream()
                 .map(row -> new RankedItem(row, score(row, terms, anchors, contextSlug)))
                 .filter(item -> item.score() > 0)
+                .filter(item -> !requiresGroundedEvidence(question)
+                        || supportsGroundedIntent(item.row(), question))
                 .sorted(Comparator.comparingInt(RankedItem::score).reversed()
                         .thenComparing(item -> String.valueOf(item.row().get("published_at")), Comparator.reverseOrder())
                         .thenComparing(item -> String.valueOf(item.row().get("slug"))))
@@ -147,13 +149,6 @@ public class AssistantService {
                     if (webAnswer != null) return webAnswer;
                 }
                 return generalAiResponse(question, contextSlug, residentUserId, visitorId);
-            }
-            // 即使属于 grounded 问题，只要 web 搜索 ready 就再给一次官方联网来源的机会
-            // （相比"没有可靠依据"的拒绝，至少引用 .gov.cn 官方原文更有帮助）
-            if (requiresGroundedEvidence(question) && webSearchProvider.status().ready()) {
-                Map<String, Object> webAnswer = webAiResponse(
-                        question, contextSlug, residentUserId, visitorId);
-                if (webAnswer != null) return webAnswer;
             }
             String grounded = requiresGroundedEvidence(question) ? "NO_EVIDENCE" : (externalEnabled ? "AI_DISABLED" : "NO_EVIDENCE");
             recordEvent(question, contextSlug, "retrieval", 0, 0, true,
@@ -666,7 +661,7 @@ public class AssistantService {
 
     private boolean isStatusQuestion(String question) {
         String normalized = normalize(question);
-        return List.of("运行状态", "服务状态", "助手状态", "系统正常吗", "能用吗")
+        return List.of("运行状态", "服务状态", "助手状态", "运行正常吗", "助手正常吗", "系统正常吗", "能用吗")
                 .stream().anyMatch(normalized::contains);
     }
 
@@ -680,6 +675,28 @@ public class AssistantService {
                 "办理材料", "申请材料", "需要什么材料", "带什么证件",
                 "法律", "投资", "收益", "转账")
                 .stream().anyMatch(normalized::contains);
+    }
+
+    private boolean supportsGroundedIntent(Map<String, Object> row, String question) {
+        String normalizedQuestion = normalize(question);
+        String evidence = normalize(String.join(" ",
+                text(row, "title"), text(row, "category"), text(row, "summary"),
+                text(row, "raw_text"), text(row, "verified_facts")));
+        List<List<String>> intents = List.of(
+                List.of("补贴", "津贴", "补助"),
+                List.of("资格", "条件", "符合"),
+                List.of("材料", "证件"),
+                List.of("金额", "费用", "收费"),
+                List.of("电话", "联系方式", "咨询电话"),
+                List.of("诊断", "症状", "治疗", "用药", "吃药", "剂量"),
+                List.of("法律", "投资", "收益", "转账"));
+        boolean checked = false;
+        for (List<String> intent : intents) {
+            if (intent.stream().noneMatch(normalizedQuestion::contains)) continue;
+            checked = true;
+            if (intent.stream().noneMatch(evidence::contains)) return false;
+        }
+        return !checked || !evidence.isBlank();
     }
 
     private String normalize(String value) {

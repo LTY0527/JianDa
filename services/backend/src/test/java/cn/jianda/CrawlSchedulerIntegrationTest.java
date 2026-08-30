@@ -14,6 +14,7 @@ import cn.jianda.collector.CrawlScheduler;
 import cn.jianda.common.BusinessException;
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,7 +51,7 @@ class CrawlSchedulerIntegrationTest {
         when(aiClient.discoverArticles(anyLong(), anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(Map.of("candidates", List.of(Map.of(
                         "canonical_url", article, "discovered_url", article, "title", "社区服务通知",
-                        "published_time", "2026-08-23", "discovery_method", "SECTION",
+                        "published_time", LocalDate.now().minusDays(1).toString(), "discovery_method", "SECTION",
                         "discovery_page", "https://scheduler-fixture.example/list", "dedup_key", "scheduler-1")),
                         "errors", List.of()));
         when(aiClient.previewWebArticle(anyString(), anyBoolean(), anyBoolean())).thenReturn(Map.ofEntries(
