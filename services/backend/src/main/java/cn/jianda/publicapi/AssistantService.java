@@ -130,7 +130,7 @@ public class AssistantService {
         List<Map<String, Object>> rows = retriever.publishedContent(evidenceRegion);
         Set<String> terms = terms(question);
         Set<String> anchors = queryAnchors(question);
-        List<RankedItem> ranked = rows.stream()
+        List<RankedItem> candidates = rows.stream()
                 .map(row -> new RankedItem(row, score(row, terms, anchors, contextSlug)))
                 .filter(item -> item.score() > 0)
                 .filter(item -> !requiresGroundedEvidence(question)
@@ -138,6 +138,13 @@ public class AssistantService {
                 .sorted(Comparator.comparingInt(RankedItem::score).reversed()
                         .thenComparing(item -> String.valueOf(item.row().get("published_at")), Comparator.reverseOrder())
                         .thenComparing(item -> String.valueOf(item.row().get("slug"))))
+                .toList();
+        int bestScore = candidates.isEmpty() ? 0 : candidates.get(0).score();
+        List<RankedItem> ranked = candidates.stream()
+                // Do not pad citations with weak, generic matches. Keeping only
+                // candidates close to the best entity match prevents an answer
+                // about one named project from borrowing unrelated facts.
+                .filter(item -> item.score() * 100 >= bestScore * 60)
                 .limit(MAX_CITATIONS)
                 .toList();
 
@@ -653,7 +660,8 @@ public class AssistantService {
         int maxWindow = Math.min(12, entityText.length());
         for (int length = maxWindow; length >= 4; length--) {
             for (int start = 0; start + length <= entityText.length(); start++) {
-                result.add(entityText.substring(start, start + length));
+                String candidate = entityText.substring(start, start + length);
+                if (hanCount(candidate) >= 2) result.add(candidate);
             }
         }
         if (normalized.contains("生态林")) {
@@ -693,7 +701,7 @@ public class AssistantService {
     private boolean requiresGroundedEvidence(String question) {
         String normalized = normalize(question);
         return List.of(
-                "诊断", "症状", "治疗", "用药", "吃药", "剂量",
+                "诊断", "症状", "治疗", "用药", "吃药", "停药", "换药", "剂量",
                 "资格", "符合条件", "能不能申请", "可以申请吗",
                 "金额", "补贴多少", "费用多少", "收费多少",
                 "补贴", "电话", "联系方式", "咨询电话",
@@ -718,6 +726,10 @@ public class AssistantService {
                 text(row, "source_name"), text(row, "province"), text(row, "city"),
                 text(row, "district"), text(row, "street_or_town"),
                 text(row, "raw_text"), text(row, "verified_facts")));
+        boolean specificSubjectMatched = queryAnchors(question).stream()
+                .filter(anchor -> anchor.length() >= 5 && hanCount(anchor) >= 3)
+                .anyMatch(evidence::contains);
+        if (normalizedQuestion.length() >= 10 && !specificSubjectMatched) return false;
         List<List<String>> intents = List.of(
                 List.of("补贴", "津贴", "补助"),
                 List.of("资格", "条件", "符合"),
@@ -727,7 +739,8 @@ public class AssistantService {
                 List.of("时间", "日期", "什么时候", "何时", "竣工", "验收"),
                 List.of("面积", "规模", "多少"),
                 List.of("项目", "公示", "加装电梯"),
-                List.of("诊断", "症状", "治疗", "用药", "吃药", "剂量"),
+                List.of("适老化", "无障碍改造", "居家改造"),
+                List.of("诊断", "症状", "治疗", "用药", "吃药", "停药", "换药", "胸痛", "胸闷", "剂量"),
                 List.of("法律", "投资", "收益", "转账"));
         boolean checked = false;
         for (List<String> intent : intents) {
@@ -736,6 +749,12 @@ public class AssistantService {
             if (intent.stream().noneMatch(evidence::contains)) return false;
         }
         return !checked || !evidence.isBlank();
+    }
+
+    private static long hanCount(String value) {
+        return value == null ? 0 : value.codePoints()
+                .filter(codePoint -> Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN)
+                .count();
     }
 
     private String normalize(String value) {

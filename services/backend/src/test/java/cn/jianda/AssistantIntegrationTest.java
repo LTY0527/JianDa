@@ -238,6 +238,35 @@ class AssistantIntegrationTest {
     }
 
     @Test
+    void groundedLongQuestionsRequireTheirSpecificSubjectInsteadOfGenericIntentWords() throws Exception {
+        long renovation = insertDocument("助手测试-适老化改造", "宝山区居家适老化改造面向符合条件的老年人家庭开放申请。");
+        long meals = insertDocument("助手测试-助餐", "老年助餐服务面向符合条件的居民，按时服药人员可由家属陪同就餐。");
+        insertRegionalPublished(renovation, "assistant-test-renovation", "宝山区居家适老化改造申请指南", "符合条件的家庭可申请。",
+                "310113102", "宝山区民政服务中心", "大场镇");
+        insertRegionalPublished(meals, "assistant-test-meals", "老年助餐服务指南", "符合条件的居民可申请。",
+                "310113102", "宝山区民政服务中心", "大场镇");
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"宝山区居家适老化改造需要符合什么条件？","regionCode":"310113102"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.citations[0].slug").value("assistant-test-renovation"))
+                .andExpect(jsonPath("$.data.citations[*].slug",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("assistant-test-meals"))));
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"老人胸口疼，能不能自己停药？","regionCode":"310113102"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
+                .andExpect(jsonPath("$.data.citations.length()").value(0));
+    }
+
+    @Test
     void demoCatalogContainsEnoughGuidesAndAuthorityNews() {
         Integer guides = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM published_item WHERE status='PUBLISHED' AND category IN ('养老','生活服务')",
