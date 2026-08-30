@@ -272,20 +272,24 @@ onMounted(async () => {
             <div v-if="message.citations?.length" class="chat-citations">
               <details>
                 <summary>查看 <b>{{ message.citations.length }}</b> 个权威来源 <ChevronRight /></summary>
-                <component
-                  :is="citation.kind === 'external' ? 'a' : RouterLink"
-                  v-for="citation in message.citations"
-                  :key="citation.slug || citation.url"
-                  :to="citation.kind === 'external' ? undefined : detailPath(citation)"
-                  :href="citation.kind === 'external' ? detailPath(citation) : undefined"
-                  :target="citation.kind === 'external' ? '_blank' : undefined"
-                  :rel="citation.kind === 'external' ? 'noopener noreferrer' : undefined"
-                  class="chat-citation"
-                >
-                  <header><span>{{ citation.category }}</span><small>{{ citation.sourceName }} · {{ formatDate(citation.publishedAt) }}</small></header>
-                  <b>{{ citation.title }}</b>
-                  <blockquote>"{{ citation.quote }}"</blockquote>
-                </component>
+                <template v-for="citation in message.citations" :key="citation.slug || citation.url">
+                  <a
+                    v-if="citation.kind === 'external'"
+                    :href="detailPath(citation)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="chat-citation"
+                  >
+                    <header><span>{{ citation.category }}</span><small>{{ citation.sourceName }} · {{ formatDate(citation.publishedAt) }}</small></header>
+                    <b>{{ citation.title }}</b>
+                    <blockquote>"{{ citation.quote }}"</blockquote>
+                  </a>
+                  <RouterLink v-else :to="detailPath(citation)" class="chat-citation">
+                    <header><span>{{ citation.category }}</span><small>{{ citation.sourceName }} · {{ formatDate(citation.publishedAt) }}</small></header>
+                    <b>{{ citation.title }}</b>
+                    <blockquote>"{{ citation.quote }}"</blockquote>
+                  </RouterLink>
+                </template>
               </details>
             </div>
 
