@@ -5,6 +5,8 @@ import { setFavorite } from "../api";
 import { normalizeTitle, truncateSummary, contentKind, isFavorite, isRead } from "../content";
 import { saveFavorite } from "../library";
 import { articleCover, categoryDefaultCover } from "../utils/coverImage";
+import { regionScopeLabel } from "../utils/regionScope";
+import { activeRegion } from "../region";
 import { SPEECH_RATES } from "../composables/useSpeechPlayer";
 const props = withDefaults(defineProps<{ item: any; kind?: "guide" | "news"; actions?: boolean }>(), { actions: false });
 const kind = computed(() => props.kind || contentKind(props.item));
@@ -39,7 +41,7 @@ function listen() {
       <img :src="articleCover(item)" :alt="item.image_alt_text || `${item.title}配图`" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="fallbackCover" />
     </RouterLink>
     <RouterLink class="content-row__body" :to="`/${kind}/${item.slug}`">
-      <span class="category-text">{{ item.category }} · {{ kind === "news" ? "权威资讯" : "办事指南" }} <template v-if="item.is_local">· <MapPin/>本地</template></span>
+      <span class="category-text">{{ item.category }} · {{ kind === "news" ? "权威资讯" : "办事指南" }} · <MapPin/>{{ regionScopeLabel(item, activeRegion.region_code) }}</span>
       <h3>{{ normalizeTitle(item.title) }}</h3>
       <p>{{ truncateSummary(item.summary) }}</p>
       <footer><ShieldCheck />{{ item.source || item.source_name }}<span>· {{ String(item.date || item.published_at).slice(0, 10) }}</span><span>· {{ item.reading_minutes || 1 }}分钟</span><span v-if="read">· 已读</span></footer>

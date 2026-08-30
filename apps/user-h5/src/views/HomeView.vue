@@ -12,7 +12,8 @@ import {
 import { contentKind, importanceScore, normalizeTitle, truncateSummary } from "../content";
 import { readerPreferences } from "../library";
 import { activeRegion } from "../region";
-import { articleCover, hasRealCover, realCoverScore } from "../utils/coverImage";
+import { articleCover, categoryDefaultCover, realCoverScore } from "../utils/coverImage";
+import { regionPriority, regionScopeLabel } from "../utils/regionScope";
 import {
   ArrowRight,
   BellRing,
@@ -71,12 +72,6 @@ function preferredScore(item: PublicItem) {
   );
   return importanceScore(item) + (preferred.includes(item.category) ? 12 : 0);
 }
-function includesText(item: PublicItem, pattern: RegExp) {
-  return pattern.test(`${item.title} ${item.summary} ${item.category}`);
-}
-function isLocal(item: PublicItem) {
-  return Boolean(item.is_local || item.region_code === activeRegion.value.region_code);
-}
 function channelMatches(item: PublicItem, channel: ChannelKey) {
   if (channel === "recommend") return true;
   const expected: Record<Exclude<ChannelKey, "recommend">, PublicItem["publish_channel"]> = {
@@ -87,8 +82,8 @@ function channelMatches(item: PublicItem, channel: ChannelKey) {
 }
 function rank(item: PublicItem) {
   const deadlineBoost = item.deadline_at ? 18 : 0;
-  const localBoost = isLocal(item) ? 16 : 0;
-  return preferredScore(item) + deadlineBoost + localBoost + realCoverScore(item);
+  return preferredScore(item) + deadlineBoost
+    + regionPriority(item, activeRegion.value.region_code) + realCoverScore(item);
 }
 const channelItems = computed(() =>
   [...items.value]
@@ -96,18 +91,13 @@ const channelItems = computed(() =>
     .sort((a, b) => rank(b) - rank(a)),
 );
 const featured = computed(() => channelItems.value[0]);
-const featuredHasVisual = computed(() =>
-  Boolean(featured.value && hasRealCover(featured.value) && !featuredCoverFailed.value),
-);
+const featuredHasVisual = computed(() => Boolean(featured.value && !featuredCoverFailed.value));
 const feedItems = computed(() => channelItems.value.filter((item) => item.id !== featured.value?.id).slice(0, 12));
 const selectedChannelLabel = computed(() => channels.find((channel) => channel.key === selectedChannel.value)?.label || "推荐");
 
 function feedKind(item: PublicItem): FeedKind {
-  if (hasRealCover(item)) return "image";
-  if (includesText(item, /活动|报名|开放日|讲座|辅导|场次/)) return "activity";
-  if (contentKind(item) === "guide") return "service";
   if (/紧急|重要提醒|反诈|诈骗|截止|暂停|风险提示/.test(item.title)) return "alert";
-  return "text";
+  return "image";
 }
 function detailPath(item: PublicItem) {
   return `/${contentKind(item)}/${item.slug}`;
@@ -115,8 +105,18 @@ function detailPath(item: PublicItem) {
 function shortDate(value?: string) {
   return value ? String(value).slice(0, 10) : "";
 }
-function hideBrokenImage(event: Event) {
-  (event.currentTarget as HTMLImageElement).hidden = true;
+function fallbackCover(event: Event, item: PublicItem) {
+  const image = event.currentTarget as HTMLImageElement;
+  const fallback = categoryDefaultCover(item);
+  if (!image.src.endsWith(fallback)) image.src = fallback;
+  else image.hidden = true;
+}
+function fallbackFeaturedCover(event: Event) {
+  if (!featured.value) return;
+  const image = event.currentTarget as HTMLImageElement;
+  const fallback = categoryDefaultCover(featured.value);
+  if (!image.src.endsWith(fallback)) image.src = fallback;
+  else featuredCoverFailed.value = true;
 }
 function selectChannel(key: ChannelKey) {
   featuredCoverFailed.value = false;
@@ -183,10 +183,10 @@ watch(() => activeRegion.value.region_code, load);
             fetchpriority="high"
             decoding="async"
             referrerpolicy="no-referrer"
-            @error="featuredCoverFailed = true"
+            @error="fallbackFeaturedCover"
           />
           <div class="commercial-hero__body">
-            <span>{{ featured.category }}<template v-if="isLocal(featured)"> · {{ activeRegion.street_or_town }}</template></span>
+            <span>{{ featured.category }} · {{ regionScopeLabel(featured, activeRegion.region_code) }}</span>
             <h1>{{ normalizeTitle(featured.title) }}</h1>
             <p>{{ truncateSummary(featured.summary, 126) }}</p>
             <small>{{ featured.source_name }} · {{ shortDate(featured.published_at) }}</small>
@@ -237,7 +237,7 @@ watch(() => activeRegion.value.region_code, load);
               loading="lazy"
               decoding="async"
               referrerpolicy="no-referrer"
-              @error="hideBrokenImage"
+              @error="fallbackCover($event, item)"
             />
             <span v-else-if="feedKind(item) === 'alert'" class="feed-entry__icon"><BellRing /></span>
             <span v-else-if="feedKind(item) === 'activity'" class="feed-entry__date">
@@ -246,7 +246,7 @@ watch(() => activeRegion.value.region_code, load);
             </span>
             <span v-else-if="feedKind(item) === 'service'" class="feed-entry__icon"><Building2 /></span>
             <div class="feed-entry__body">
-              <small>{{ item.category }}<template v-if="isLocal(item)"> · {{ activeRegion.street_or_town }}</template></small>
+              <small>{{ item.category }} · {{ regionScopeLabel(item, activeRegion.region_code) }}</small>
               <h3>{{ normalizeTitle(item.title) }}</h3>
               <p>{{ truncateSummary(item.summary, feedKind(item) === "image" ? 72 : 110) }}</p>
               <footer>{{ item.source_name }} · {{ shortDate(item.published_at) }}</footer>
