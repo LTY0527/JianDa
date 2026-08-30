@@ -1,0 +1,52 @@
+[
+  {
+    "case": "grounded-1",
+    "mode": "ai",
+    "citations": 1
+  },
+  {
+    "case": "grounded-2",
+    "mode": "ai",
+    "citations": 2
+  },
+  {
+    "case": "grounded-3",
+    "mode": "ai",
+    "citations": 1
+  },
+  {
+    "case": "grounded-4",
+    "mode": "ai",
+    "citations": 1
+  },
+  {
+    "case": "grounded-5",
+    "mode": "ai",
+    "citations": 1
+  },
+  {
+    "case": "grounded-6",
+    "mode": "ai",
+    "citations": 1
+  },
+  {
+    "case": "general-low-risk",
+    "mode": "web_ai",
+    "citations": 2
+  },
+  {
+    "case": "fake-phone",
+    "mode": "retrieval",
+    "citations": 0
+  },
+  {
+    "case": "fake-amount",
+    "mode": "retrieval",
+    "citations": 0
+  },
+  {
+    "case": "runtime-status",
+    "mode": "status",
+    "citations": 0
+  }
+]

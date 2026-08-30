@@ -1,0 +1,31 @@
+gate,module,scenario,real_or_mock,input,expected,actual,result,evidence
+0,Git基线,当前HEAD包含origin/main,REAL,origin/main与HEAD,祖先检查成功,origin/main为HEAD祖先且当前分支领先6个提交,PASS,git merge-base与git rev-list
+1,根构建,npm install/typecheck/build,AUTOMATED,当前工作区,命令成功,install/typecheck/build均exit 0,PASS,命令日志摘要见FINAL_ACCEPTANCE_REPORT.md
+1,AI回归,AI pytest,AUTOMATED,services/ai-service/tests,全部通过,127 passed且5 warnings,PASS,命令日志摘要见FINAL_ACCEPTANCE_REPORT.md
+1,后端回归,Maven test,AUTOMATED,services/backend,全部通过,102 tests且0 failures/0 errors,PASS,命令日志摘要见FINAL_ACCEPTANCE_REPORT.md
+1,Playwright全量回归,旧根E2E套件,AUTOMATED,125个根spec启动,全部适配当前登录门禁,旧Phase 7.3用例仍假设受保护H5路由公开并出现陈旧选择器失败,PARTIAL,FINAL_ACCEPTANCE_REPORT.md自动回归章节
+2,Docker,四服务健康,REAL,Docker Compose,四服务healthy,MySQL/AI/Backend/Frontend均healthy且四个健康地址HTTP 200,PASS,docker compose ps与健康检查
+3,居民身份,注册登录刷新退出再登录,REAL,真实居民账号,完整认证闭环,登录门禁/重定向/退出状态清除均验证,PASS,screenshots/resident-login.png
+3,机构权限,平台/机构/审核员后端权限,REAL,三类真实账号,platformOnly由后端拒绝越权,platform_admin为200；org_admin/reviewer按权限返回403,PASS,真实API权限检查
+4,PDF接入,文档60真实PDF,REAL,老年人健康管理服务指南,提取和追溯成功,4/4字段可追溯并最终发布,PASS,External持久化记录doc 60
+4,图片接入,文档75真实图片,REAL,HPV接种通知,OCR/审核/发布闭环,3/3字段可追溯并最终发布,PASS,screenshots/admin-review-1440.png
+4,网页采集,文档88权威网页,REAL,普陀区老年助餐优惠政策,正文及来源进入处理,8/8字段可追溯并最终发布,PASS,screenshots/admin-source-success-1440.png
+4,采集安全,SSRF与重复抓取,AUTOMATED,私有地址/重复URL,拒绝危险地址并正确刷新缓存,Maven安全测试通过且registry缓存键修复,PASS,commit 2f9bc23
+5,External AI,三类材料真实处理,REAL,doc 60/75/88,真实External且无Mock替代,3/3成功；20080 tokens；模型deepseek-v4-flash,PASS,data/final_metrics.json
+5,事实追溯,字段引用回到原文,REAL,15个事实字段,source quote和segment一致,15/15可追溯,PASS,data/final_metrics.json
+6,审核发布,图片材料审核发布,REAL,document 75,WAITING_REVIEW到PUBLISHED再到居民可见,经真实机构页面审核发布且H5详情可见,PASS,screenshots/h5-published-result-390.png
+7,H5主要路由,20条受保护路由真实浏览,REAL,390x844真实账号,无白屏/无横向滚动/图片有效,20条路由通过且console error为0,PASS,screenshots/h5-touch-targets.json
+7,阅读字号,18/20/22/24px设置,REAL,真实浏览器localStorage及刷新,计算样式变化并持久化,四档字号均验证通过,PASS,screenshots/h5-touch-targets.json
+7,搜索联动,无结果转问简达,REAL,无匹配关键词,显示带关键词问简达入口,入口可见且可进入助手,PASS,screenshots/h5-final-news-390.png
+7,触控热区,主要可点击控件,REAL,390x844的20条路由,至少44x44 CSS px,438/438达标且无未达标项,PASS,screenshots/h5-touch-targets.json
+8,助手RAG,已发布内容问题,REAL,6个有依据问题,External仅据证据回答并引用,6个mode=ai且每题至少1条引用,PASS,screenshots/assistant-eval-summary.json
+8,助手低风险问题,通用知识问题,REAL,1个低风险问题,明确标注通用AI参考,mode=web_ai且2条引用,PASS,screenshots/assistant-eval-summary.json
+8,助手高风险边界,虚假电话与金额,REAL,2个无可靠证据问题,不得猜测,均mode=retrieval并明确不会猜测,PASS,screenshots/assistant-eval-summary.json
+8,助手运行状态,平台能力状态问题,REAL,简达助手现在运行正常吗,直接依据运行状态回答,mode=status,PASS,screenshots/assistant-eval-summary.json
+9,机构端,内容中心至发布主要页面,REAL,真实平台账号,页面加载真实数据且关键操作可用,文档/上传/处理/审核/发布/来源/能力页验证通过,PASS,screenshots/admin-documents-1440.png
+9,机构端权限,platformOnly页面,REAL,org_admin/reviewer,无权访问返回403,后端真实接口返回403,PASS,真实API权限检查
+10,可靠性,AI异常与重试逻辑,AUTOMATED,失败/超时/结构异常测试,安全失败且不静默Mock,自动化相关测试通过,PASS,AI pytest与Maven测试
+10,可靠性,停止AI容器故障注入,FAULT_INJECTION,本地Docker AI服务,注入后已发布内容仍可浏览,停止命令被执行策略拒绝因此未实施,PARTIAL,FINAL_ACCEPTANCE_REPORT.md风险章节
+11,密钥安全,.env与前端bundle检查,REAL,Git索引及生产bundle,无密钥进入版本库和前端,env tracked=0且bundle敏感标记命中=0,PASS,安全检查记录
+11,服务端安全,SSRF/CORS/后端权限,AUTOMATED,后端安全测试,安全断言通过,Maven 102项测试全部通过,PASS,Maven测试结果
+12,最终指标,重新统计而非沿用旧报告,REAL,本轮真实记录,保存可核验JSON/CSV,Token/耗时/触控/问答/健康指标已重算,PASS,data/final_metrics.json

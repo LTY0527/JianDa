@@ -1,0 +1,84 @@
+{
+  "acceptance_date": "2026-08-31",
+  "code_baseline": "3b6fcdd",
+  "branch": "docs/report-final-artifacts-20260831",
+  "overall_result": "PARTIAL",
+  "gates": {
+    "total": 13,
+    "pass": 11,
+    "partial": 2,
+    "fail": 0,
+    "blocked": 0,
+    "partial_gate_ids": [1, 10]
+  },
+  "external_ai": {
+    "provider": "external",
+    "model": "deepseek-v4-flash",
+    "material_count": 3,
+    "success_count": 3,
+    "failure_count": 0,
+    "waiting_review_reached_count": 3,
+    "mock_substitution_count": 0,
+    "total_tokens": 20080,
+    "average_tokens": 6693.33,
+    "minimum_tokens": 4657,
+    "maximum_tokens": 10727,
+    "average_duration_ms": 16102.33,
+    "minimum_duration_ms": 10391,
+    "maximum_duration_ms": 26385,
+    "materials": [
+      {
+        "document_id": 60,
+        "title": "老年人健康管理服务指南",
+        "source_type": "PDF",
+        "final_status": "PUBLISHED",
+        "total_tokens": 4657,
+        "duration_ms": 10391,
+        "traceable_fields": 4,
+        "field_count": 4
+      },
+      {
+        "document_id": 75,
+        "title": "13岁女孩免费接种HPV疫苗通知",
+        "source_type": "IMAGE",
+        "final_status": "PUBLISHED",
+        "total_tokens": 4696,
+        "duration_ms": 11531,
+        "traceable_fields": 3,
+        "field_count": 3
+      },
+      {
+        "document_id": 88,
+        "title": "普陀区老年助餐优惠政策",
+        "source_type": "WEB_ARTICLE",
+        "final_status": "PUBLISHED",
+        "total_tokens": 10727,
+        "duration_ms": 26385,
+        "traceable_fields": 8,
+        "field_count": 8
+      }
+    ]
+  },
+  "assistant": {
+    "evaluated_questions": 10,
+    "grounded_ai_answers": 6,
+    "general_web_ai_answers": 1,
+    "safe_no_evidence_refusals": 2,
+    "runtime_status_answers": 1
+  },
+  "touch_targets": {
+    "viewport": "390x844",
+    "route_count": 20,
+    "total": 438,
+    "compliant": 438,
+    "compliance_rate_percent": 100,
+    "undersized": 0,
+    "console_errors": 0
+  },
+  "docker": {
+    "healthy_services": 4,
+    "health_endpoints_http_200": 4
+  },
+  "lighthouse_accessibility": null,
+  "lighthouse_note": "本轮未运行 Lighthouse，不记录推测分数。"
+}

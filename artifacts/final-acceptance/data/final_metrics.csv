@@ -1,0 +1,32 @@
+metric,value,unit,note
+acceptance_date,2026-08-31,date,Asia/Shanghai
+code_baseline,3b6fcdd,commit,验收代码基线
+gate_total,13,count,Gate 0至Gate 12
+gate_pass,11,count,真实通过
+gate_partial,2,count,Gate 1和Gate 10
+gate_fail,0,count,
+gate_blocked,0,count,
+external_material_count,3,count,PDF/IMAGE/WEB_ARTICLE
+external_success_count,3,count,
+external_failure_count,0,count,
+external_mock_substitution_count,0,count,最终真实验收
+external_total_tokens,20080,tokens,
+external_average_tokens,6693.33,tokens,
+external_minimum_tokens,4657,tokens,
+external_maximum_tokens,10727,tokens,
+external_average_duration,16102.33,ms,
+external_minimum_duration,10391,ms,
+external_maximum_duration,26385,ms,
+assistant_evaluated_questions,10,count,
+assistant_grounded_ai_answers,6,count,均带引用
+assistant_general_web_ai_answers,1,count,明确标注通用参考
+assistant_safe_refusals,2,count,无可靠证据的电话和金额
+assistant_runtime_status_answers,1,count,
+h5_verified_routes,20,count,390x844
+touch_target_total,438,count,
+touch_target_compliant,438,count,至少44x44 CSS px
+touch_target_compliance_rate,100,percent,
+browser_console_errors,0,count,最终20路由真实检查
+docker_healthy_services,4,count,MySQL/AI/Backend/Frontend
+health_endpoints_http_200,4,count,
+lighthouse_accessibility,,score,本轮未运行不得填写推测值
