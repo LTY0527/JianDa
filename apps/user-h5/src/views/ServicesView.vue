@@ -99,7 +99,7 @@ watch(() => activeRegion.value.region_code, load);
         <span v-if="item.favorite_count"><Heart />{{ item.favorite_count }}</span>
         <span v-if="item.reminder_count"><Bell />{{ item.reminder_count }}</span>
       </div>
-      <footer><RouterLink :to="{ path: '/assistant', query: { about: item.slug } }"><MessageCircleQuestion />问问这个事项</RouterLink><RouterLink :to="`/guide/${item.slug}`">查看办理指南<ChevronRight /></RouterLink></footer>
+      <footer><RouterLink :to="{ path: '/assistant', query: { mode: 'context', slug: item.slug } }"><MessageCircleQuestion />询问这个事项</RouterLink><RouterLink :to="`/guide/${item.slug}`">查看办理指南<ChevronRight /></RouterLink></footer>
     </article>
     <div v-if="!filtered.length" class="empty"><Search /><b>没有符合条件的事项</b><p>请减少筛选条件后再试。</p></div>
   </template></section>

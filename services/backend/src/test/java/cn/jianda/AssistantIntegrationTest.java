@@ -191,6 +191,51 @@ class AssistantIntegrationTest {
     }
 
     @Test
+    void contextQuestionUsesOnlyTheVisiblePublishedItem() throws Exception {
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"这篇内容提醒我不要提供什么？", "contextSlug":"assistant-test-published", "regionCode":"310113102"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.citations.length()").value(1))
+                .andExpect(jsonPath("$.data.citations[0].slug").value("assistant-test-published"))
+                .andExpect(jsonPath("$.data.citations[0].quote")
+                        .value(org.hamcrest.Matchers.containsString("验证码")));
+    }
+
+    @Test
+    void unavailableOrWithdrawnContextCannotFallThroughToGeneralAnswer() throws Exception {
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"需要准备什么？", "contextSlug":"assistant-test-missing", "regionCode":"310113102"}
+                                """))
+                .andExpect(status().isNotFound());
+
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"需要准备什么？", "contextSlug":"assistant-test-withdrawn", "regionCode":"310113102"}
+                                """))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void contextModeStillReturnsNoEvidenceForUnsupportedHighRiskFacts() throws Exception {
+        mvc.perform(post("/api/public/assistant/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"这项服务需要缴纳多少钱？", "contextSlug":"assistant-test-published", "regionCode":"310113102"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("retrieval"))
+                .andExpect(jsonPath("$.data.citations.length()").value(0))
+                .andExpect(jsonPath("$.data.answer")
+                        .value(org.hamcrest.Matchers.containsString("不会猜测")));
+    }
+
+    @Test
     void officialProjectFactsUsePublishedEvidenceAndUnknownProjectsNeverFallThroughToGeneralAi() throws Exception {
         long forest = insertDocument("助手测试-生态公益林", "顾村镇生态公益林项目于2026年7月完成竣工验收，建设面积120亩。");
         insertRegionalPublished(forest, "assistant-test-forest", "顾村镇生态公益林项目竣工验收", "项目完成竣工验收。",

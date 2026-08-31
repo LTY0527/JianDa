@@ -95,8 +95,8 @@ const links = [
   grid-template-columns: auto 1fr auto;
   gap: 14px;
   align-items: center;
-  padding: 20px 22px;
-  margin: 18px 0 16px;
+  padding: 16px 18px;
+  margin: 14px 0 12px;
   border-radius: 14px;
   background: linear-gradient(135deg, #0E5A55 0%, #1A6F69 60%, #D58B32 160%);
   color: #fff;
@@ -129,7 +129,7 @@ const links = [
   grid-template-columns: 68px 1fr auto;
   gap: 16px;
   align-items: center;
-  padding: 24px 22px;
+  padding: 18px 20px;
   background: #fff;
   border: 1px solid #E7ECE9;
   border-radius: 14px;
@@ -203,7 +203,8 @@ const links = [
   grid-template-columns: repeat(4, 1fr);
   gap: 10px;
   margin: 14px 0;
-  padding: 18px;
+  min-height: 96px;
+  padding: 12px;
   background: #fff;
   border: 1px solid #E7ECE9;
   border-radius: 14px;
@@ -237,7 +238,8 @@ const links = [
   grid-template-columns: 44px 1fr auto;
   gap: 14px;
   align-items: center;
-  padding: 18px 20px;
+  min-height: 64px;
+  padding: 10px 16px;
   border-bottom: 1px solid #F0F3F1;
   text-decoration: none;
 }
@@ -248,7 +250,7 @@ const links = [
   display: grid;
   place-items: center;
   border-radius: 11px;
-  background: #F7F4EE;
+  background: #E8F3F1;
   color: #0E5A55;
 }
 .li-icon svg { width: 22px; }
@@ -281,7 +283,7 @@ const links = [
   text-decoration: none;
   padding: 4px 9px;
   border-radius: 7px;
-  background: #F7F4EE;
+  background: #E8F3F1;
   color: #0E5A55;
   font-weight: 700;
   font-size: 12px;
@@ -338,16 +340,16 @@ const links = [
 
 @media (max-width: 768px) {
   .profile-page-new { padding-inline: 16px; }
-  .member-banner { margin: 0 0 14px; padding: 18px; }
+  .member-banner { margin: 0 0 12px; padding: 15px 16px; }
   .profile-page-new .profile-hero {
     border-radius: 0;
     margin-inline: -16px;
     border-left: 0;
     border-right: 0;
   }
-  .profile-page-new .profile-stats { padding: 14px; }
+  .profile-page-new .profile-stats { padding: 10px; }
   .profile-stats b { font-size: 19px; }
-  .profile-links a { padding: 16px; }
+  .profile-links a { min-height: 64px; padding: 9px 12px; }
   .profile-page-new .profile-foot {
     grid-template-columns: 1fr;
     gap: 8px;

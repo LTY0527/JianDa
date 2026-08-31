@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { useRoute, RouterLink } from "vue-router";
+import { useRoute, useRouter, RouterLink } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
 import { AssistantApiError, askAssistant, fetchAssistantStatus, fetchAssistantSuggestions, fetchDetail, type AssistantCitation, type AssistantCommunityPost, type AssistantFactCard, type AssistantRuntimeStatus } from "../api";
@@ -26,18 +26,28 @@ interface ConversationMessage {
 
 const SESSION_KEY = "jianda_assistant_session";
 const route = useRoute();
+const router = useRouter();
 const question = ref("");
 const suggestions = ref<string[]>([]);
 const messages = ref<ConversationMessage[]>(readSession());
 const busy = ref(false);
 const error = ref("");
 const failedQuestion = ref("");
-const conversation = ref<HTMLElement>();
+const inputSection = ref<HTMLElement>();
+const messagesEnd = ref<HTMLElement>();
 const contextTitle = ref("");
+const contextCategory = ref("");
+const contextRegion = ref("");
+const contextKind = ref<"news" | "guide">("guide");
+const contextUnavailable = ref(false);
 const assistantStatus = ref<AssistantRuntimeStatus>("unreachable");
 const spokenMessageId = ref("");
 const speech = useSpeechPlayer(() => { spokenMessageId.value = ""; });
-const contextSlug = computed(() => String(route.query.about || ""));
+const contextSlug = computed(() => String(
+  route.query.mode === "context" ? route.query.slug || "" : route.query.about || "",
+).trim());
+const contextActive = computed(() => Boolean(contextSlug.value && contextTitle.value && !contextUnavailable.value));
+const contextQuestions = ["需要准备什么？", "什么时候办理？", "在哪里办理？"];
 const speechSupported = "SpeechRecognition" in window || "webkitSpeechRecognition" in window;
 
 function readSession(): ConversationMessage[] {
@@ -49,7 +59,7 @@ function saveSession() {
 }
 async function scrollToLatest() {
   await nextTick();
-  conversation.value?.scrollTo({ top: conversation.value.scrollHeight, behavior: "smooth" });
+  messagesEnd.value?.scrollIntoView({ behavior: "smooth", block: "end" });
 }
 function assistantErrorMessage(reason: AssistantApiError["reason"]) {
   const messages: Record<AssistantApiError["reason"], string> = {
@@ -74,7 +84,7 @@ async function submit(value = question.value, recordUser = true) {
   busy.value = true;
   await scrollToLatest();
   try {
-    const reply = await askAssistant(text, contextSlug.value, activeRegion.value.region_code);
+    const reply = await askAssistant(text, contextActive.value ? contextSlug.value : undefined, activeRegion.value.region_code);
     messages.value.push({
       id: createUuid(),
       role: "assistant",
@@ -169,20 +179,45 @@ function statusLabel(status: AssistantRuntimeStatus) {
   } as const)[status];
 }
 
+async function loadContext() {
+  contextTitle.value = "";
+  contextCategory.value = "";
+  contextRegion.value = "";
+  contextUnavailable.value = false;
+  if (!contextSlug.value) return;
+  try {
+    const detail = await fetchDetail(contextSlug.value);
+    contextTitle.value = String(detail.title || "");
+    contextCategory.value = String(detail.category || "已审核内容");
+    contextRegion.value = String(detail.street_or_town || "当前地区");
+    contextKind.value = String(detail.content_kind || "").toUpperCase() === "WEB_ARTICLE" ? "news" : "guide";
+    if (!contextTitle.value) throw new Error("missing context title");
+  } catch {
+    contextUnavailable.value = true;
+  }
+  await nextTick();
+  if (contextActive.value || contextUnavailable.value) {
+    inputSection.value?.scrollIntoView({ behavior: "auto", block: "end" });
+  }
+}
+
+async function exitContext() {
+  contextTitle.value = "";
+  contextCategory.value = "";
+  contextRegion.value = "";
+  contextUnavailable.value = false;
+  await router.replace({ path: "/assistant" });
+}
+
 onMounted(async () => {
   question.value = String(route.query.q || "").trim().slice(0, 500);
   try { suggestions.value = await fetchAssistantSuggestions(); }
   catch { suggestions.value = []; }
   try { assistantStatus.value = (await fetchAssistantStatus()).status; }
   catch { assistantStatus.value = "unreachable"; }
-  if (contextSlug.value) {
-    try {
-      const detail = await fetchDetail(contextSlug.value);
-      contextTitle.value = String(detail.title || "");
-    } catch { contextTitle.value = ""; }
-  }
-  await scrollToLatest();
+  await loadContext();
 });
+watch(() => `${route.query.mode || ""}|${route.query.slug || ""}|${route.query.about || ""}`, loadContext);
 </script>
 
 <template>
@@ -203,12 +238,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <section v-if="contextTitle" class="chat-context">
-        <BookOpenCheck /><span>围绕这项内容讨论</span><b>{{ contextTitle }}</b>
-        <RouterLink :to="`/guide/${contextSlug}`">原文<ChevronRight /></RouterLink>
-      </section>
-
-      <div ref="conversation" class="assistant-chat-body" aria-live="polite" aria-label="问答记录">
+      <div class="assistant-chat-body" aria-live="polite" aria-label="问答记录">
         <section v-if="!messages.length" class="chat-welcome">
           <div class="chat-welcome__hero">
             <div class="chat-welcome__avatar"><MessageCircleQuestion /></div>
@@ -316,14 +346,26 @@ onMounted(async () => {
           <button v-if="failedQuestion" type="button" :disabled="busy" @click="retryFailedQuestion">重新发送</button>
         </div>
         <p v-if="speech.error.value" class="chat-error" role="status">{{ speech.error.value }}</p>
+        <div ref="messagesEnd" class="messages-end" aria-hidden="true"></div>
       </div>
 
-      <section class="assistant-composer-new">
-        <small v-if="!messages.length" class="chat-input__tip">问答记录仅保存在本机浏览器</small>
+      <section ref="inputSection" class="assistant-composer-new">
+        <section v-if="contextActive" class="chat-context" aria-label="帖子提问上下文">
+          <BookOpenCheck />
+          <div><span>正在基于这篇内容提问</span><b>{{ contextTitle }}</b><small>{{ contextCategory }} · {{ contextRegion }}</small></div>
+          <nav><RouterLink :to="`/${contextKind}/${contextSlug}`">查看原内容<ChevronRight /></RouterLink><button type="button" @click="exitContext">退出此事项</button></nav>
+        </section>
+        <section v-else-if="contextUnavailable" class="chat-context chat-context--error" role="alert">
+          <CircleAlert /><div><span>该内容当前不可用于提问</span><small>内容可能已撤回，或不属于当前地区。</small></div><button type="button" @click="exitContext">切换为普通提问</button>
+        </section>
+        <div v-if="contextActive && !messages.length" class="context-quick-questions" aria-label="帖子快捷问题">
+          <button v-for="item in contextQuestions" :key="item" type="button" @click="submit(item)">{{ item }}</button>
+        </div>
+        <small v-if="!messages.length && !contextActive" class="chat-input__tip">问答记录仅保存在本机浏览器</small>
         <form @submit.prevent="submit()">
-          <textarea v-model="question" maxlength="500" rows="1" placeholder="输入问题，Ctrl/⌘ + Enter 发送" @keydown.ctrl.enter.prevent="submit()" @keydown.meta.enter.prevent="submit()" />
+          <textarea v-model="question" maxlength="500" rows="1" :placeholder="contextActive ? '继续问这篇内容，例如：需要准备什么材料？' : '输入问题，例如：最近有哪些健康提醒？'" @keydown.ctrl.enter.prevent="submit()" @keydown.meta.enter.prevent="submit()" />
           <button class="chat-input__mic" type="button" :disabled="!speechSupported" @click="startSpeechInput" :aria-label="speechSupported ? '语音输入' : '当前浏览器不支持语音输入'"><Mic /></button>
-          <button class="chat-input__send" type="submit" :disabled="busy || !question.trim()" aria-label="发送"><Send /></button>
+          <button class="chat-input__send" type="submit" :disabled="busy || !question.trim() || contextUnavailable" aria-label="发送"><Send /></button>
         </form>
       </section>
     </main>
@@ -337,7 +379,7 @@ onMounted(async () => {
   --at-soft: #E7F1EE;
   --ink: #172326;
   --muted: #667378;
-  --bg: #F7F4EE;
+  --bg: #FFFFFF;
   --surface: #fff;
   --warn: #D58B32;
   --err: #B84A42;
@@ -397,34 +439,66 @@ onMounted(async () => {
 
 .chat-context {
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
-  gap: 10px;
-  align-items: center;
-  padding: 12px 20px;
-  background: #FFF6E9;
-  color: #7A4A15;
-  margin: 0 0 14px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: start;
+  padding: 12px 14px;
+  background: #E8F3F1;
+  color: #172326;
+  margin: 0 0 8px;
   border-radius: 12px;
-  border: 1px solid #F1E2C7;
+  border: 1px solid #C9DFDA;
 }
-.chat-context svg { color: #D58B32; width: 18px; }
-.chat-context span { font-size: 13px; font-weight: 700; }
+.chat-context > svg { color: #0E5A55; width: 20px; margin-top: 2px; }
+.chat-context div { min-width: 0; }
+.chat-context span { display: block; color: #0E5A55; font-size: 12px; font-weight: 800; }
 .chat-context b {
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   font-size: 14px;
+  line-height: 1.45;
+  margin-top: 2px;
 }
-.chat-context a {
+.chat-context small { display: block; margin-top: 3px; color: #667378; font-size: 11px; }
+.chat-context nav {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.chat-context a,
+.chat-context button {
+  min-height: 36px;
   font-weight: 700;
   color: #0E5A55;
+  background: transparent;
+  border: 0;
   text-decoration: none;
-  justify-self: end;
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  padding: 0;
+  font-size: 12px;
 }
 .chat-context a svg { color: #0E5A55; width: 15px; }
+.chat-context--error { background: #FFF6F4; border-color: #EBCBC6; }
+.chat-context--error > svg,
+.chat-context--error span { color: #B84A42; }
+.chat-context--error > button { grid-column: 2; justify-self: start; }
+.context-quick-questions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 7px; }
+.context-quick-questions button {
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid #C9DFDA;
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: #2F7771;
+  font-size: 12px;
+  font-weight: 700;
+}
 
 .assistant-chat-body { padding: 14px 4px 8px; }
 .chat-welcome { padding: 12px 4px 22px; }
@@ -854,6 +928,11 @@ onMounted(async () => {
   font-size: 13px;
 }
 
+.messages-end {
+  height: 1px;
+  scroll-margin-bottom: 350px;
+}
+
 .assistant-composer-new {
   position: fixed;
   left: 50%;
@@ -863,7 +942,7 @@ onMounted(async () => {
   z-index: 11;
   width: min(100%, 760px);
   padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, rgba(247,244,238,0) 0%, #F7F4EE 28%);
+  background: linear-gradient(180deg, rgba(255,255,255,0) 0%, #FFFFFF 28%);
   backdrop-filter: saturate(1.2);
 }
 .chat-input__tip {

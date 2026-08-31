@@ -593,7 +593,7 @@ function openOfficial() {
           <dd>{{ explanation }}</dd>
         </dl>
       </section>
-      <RouterLink v-if="!isNews" class="ask-assistant-link" :to="{ path: '/assistant', query: { about: item.slug } }"><MessageCircleQuestion /><span><b>问问这个事项</b><small>助手将根据这份已审核材料回答</small></span><ChevronRight /></RouterLink>
+      <RouterLink v-if="!isNews" class="ask-assistant-link" :to="{ path: '/assistant', query: { mode: 'context', slug: item.slug } }"><MessageCircleQuestion /><span><b>询问这个事项</b><small>助手将只根据这份已审核材料和明确引用回答</small></span><ChevronRight /></RouterLink>
       <RouterLink class="original-link" :to="{ path: `/original/${item.slug}`, query: { from: isNews ? 'news' : 'guide' } }"
         ><FileText /><span
           ><b>查看提取文本</b

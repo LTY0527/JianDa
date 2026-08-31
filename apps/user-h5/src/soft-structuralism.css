@@ -10,13 +10,14 @@
   --jianda-green-deep: #083d3a;
   --jianda-green-soft: #e7f1ee;
   --jianda-green-soft-2: #f0f6f4;
-  --jianda-bg: #f7f4ee;
+  --jianda-bg: #ffffff;
+  --jianda-surface-soft: #f7faf9;
   --jianda-surface: #ffffff;
   --jianda-text: #172326;
   --jianda-muted: #667378;
   --jianda-border: #dce5e2;
-  --jianda-blue: #0b63c8;
-  --jianda-blue-soft: #eaf2fb;
+  --jianda-blue: #2f7771;
+  --jianda-blue-soft: #e8f3f1;
   --jianda-amber: #d58b32;
   --jianda-danger: #b84a42;
 
@@ -32,23 +33,23 @@
   --resident-shadow: 0 8px 24px rgba(26, 26, 26, 0.08);
 
   /* Normalize the legacy H5 variables without affecting the institution app. */
-  --brand-deep-teal: #0057b8;
+  --brand-deep-teal: #0e5a55;
   --brand-deep-teal-contrast: #ffffff;
   --ink: #1a1a1a;
   --warm-ivory: #ffffff;
-  --surface: #f7f8fa;
+  --surface: #f7faf9;
   --muted: #4a4a4a;
   --soft-teal: #f7f8fa;
-  --warm-amber: #0057b8;
+  --warm-amber: #2f7771;
   --alert-red: #1a1a1a;
-  --color-primary: #0057b8;
-  --color-primary-dark: #004494;
-  --color-primary-light: #f7f8fa;
+  --color-primary: #0e5a55;
+  --color-primary-dark: #0a4642;
+  --color-primary-light: #e8f3f1;
   --color-text: #1a1a1a;
   --color-muted: #4a4a4a;
   --color-border: #d1d5db;
   --color-bg: #ffffff;
-  --color-surface: #f7f8fa;
+  --color-surface: #f7faf9;
   --radius-card: 8px;
   --radius-button: 8px;
 }
@@ -137,7 +138,7 @@ body,
 }
 
 #app a {
-  color: #0057b8;
+  color: #2f7771;
 }
 
 #app span {
@@ -147,7 +148,7 @@ body,
 }
 
 #app svg {
-  color: #0057b8 !important;
+  color: #2f7771 !important;
 }
 
 #app button svg {
@@ -155,11 +156,11 @@ body,
 }
 
 #app a:hover {
-  color: #004494;
+  color: #0a4642;
 }
 
 #app :focus-visible {
-  outline: 3px solid #0057b8 !important;
+  outline: 3px solid #2f7771 !important;
   outline-offset: 2px;
 }
 
@@ -197,13 +198,13 @@ body,
 }
 
 #app :is(.h5-brand__mark, .h5-header svg, .app-top-bar svg) {
-  color: #0057b8 !important;
+  color: #2f7771 !important;
 }
 
 #app .h5-brand > span {
-  border: 1px solid #0057b8 !important;
+  border: 1px solid #2f7771 !important;
   border-radius: 8px !important;
-  background: #0057b8 !important;
+  background: #2f7771 !important;
 }
 
 #app .h5-brand > span svg {
@@ -216,7 +217,7 @@ body,
 }
 
 #app .login-logo rect {
-  fill: #0057b8 !important;
+  fill: #2f7771 !important;
 }
 
 #app .login-logo path {
@@ -226,7 +227,7 @@ body,
 #app :is(.h5-header__region, .h5-header__nav a, .app-top-bar a, .app-top-bar button) {
   min-width: 48px;
   min-height: 48px;
-  color: #0057b8 !important;
+  color: #2f7771 !important;
   font-size: 14px !important;
   font-weight: 600;
 }
@@ -280,7 +281,7 @@ body,
   min-height: 48px;
   padding: 0;
   border: 2px solid #9ca3af !important;
-  accent-color: #0057b8;
+  accent-color: #2f7771;
 }
 
 #app input[type="range"] {
@@ -288,7 +289,7 @@ body,
   padding: 0;
   border: 0 !important;
   background: transparent !important;
-  accent-color: #0057b8;
+  accent-color: #2f7771;
 }
 
 #app textarea {
@@ -310,7 +311,7 @@ body,
   border: 1px solid #d1d5db !important;
   border-radius: 8px !important;
   background: #ffffff !important;
-  color: #0057b8 !important;
+  color: #2f7771 !important;
   font-size: 18px !important;
   font-weight: 600 !important;
   line-height: 1.4;
@@ -341,9 +342,9 @@ body,
 ) {
   min-height: 52px;
   padding: 0 28px;
-  border: 1px solid #0057b8 !important;
+  border: 1px solid #2f7771 !important;
   border-radius: 8px !important;
-  background: #0057b8 !important;
+  background: #2f7771 !important;
   color: #ffffff !important;
   font-size: 18px !important;
   font-weight: 600 !important;
@@ -361,13 +362,13 @@ body,
   .button-primary,
   button[type="submit"]
 ):hover {
-  background: #004494 !important;
+  background: #0a4642 !important;
   color: #ffffff !important;
 }
 
 #app :is(.reader-tools button.active, .settings button[aria-pressed="true"]) {
-  border-color: #0057b8 !important;
-  background: #0057b8 !important;
+  border-color: #2f7771 !important;
+  background: #2f7771 !important;
   color: #ffffff !important;
 }
 
@@ -384,7 +385,7 @@ body,
   border: 1px solid #d1d5db !important;
   border-radius: 8px !important;
   background: #ffffff !important;
-  color: #0057b8 !important;
+  color: #2f7771 !important;
   font-size: 18px !important;
   font-weight: 600 !important;
   box-shadow: none !important;
@@ -412,7 +413,7 @@ body,
 #app .login-tab.is-active {
   border-color: #d1d5db !important;
   background: #f7f8fa !important;
-  color: #0057b8 !important;
+  color: #2f7771 !important;
 }
 
 #app :is(.login-footer__register, .login-footer__legal) {
@@ -421,11 +422,11 @@ body,
 }
 
 #app .login-footer__legal svg {
-  color: #0057b8 !important;
+  color: #2f7771 !important;
 }
 
 #app .login-field svg {
-  color: #0057b8 !important;
+  color: #2f7771 !important;
 }
 
 #app :is(
@@ -473,9 +474,9 @@ body,
 #app :is(.welcome, .assistant-hero, .membership-hero, .member-banner) {
   overflow: hidden;
   padding: 24px;
-  border: 1px solid #0057b8 !important;
+  border: 1px solid #2f7771 !important;
   border-radius: 8px !important;
-  background: #0057b8 !important;
+  background: #2f7771 !important;
   color: #ffffff !important;
   box-shadow: var(--resident-shadow) !important;
 }
@@ -486,32 +487,32 @@ body,
 
 #app .member-badge {
   border-radius: 8px !important;
-  background: #004494 !important;
+  background: #0a4642 !important;
 }
 
 #app .channel-empty a {
   min-height: 52px;
   padding: 0 28px;
-  border: 1px solid #0057b8 !important;
+  border: 1px solid #2f7771 !important;
   border-radius: 8px !important;
-  background: #0057b8 !important;
+  background: #2f7771 !important;
   color: #ffffff !important;
   font-size: 18px !important;
   font-weight: 600 !important;
 }
 
 #app .channel-empty a:hover {
-  background: #004494 !important;
+  background: #0a4642 !important;
   color: #ffffff !important;
 }
 
 #app .home-search b {
-  background: #0057b8 !important;
+  background: #2f7771 !important;
   color: #ffffff !important;
 }
 
 #app .home-search:hover b {
-  background: #004494 !important;
+  background: #0a4642 !important;
 }
 
 #app .home-channels {
@@ -523,7 +524,7 @@ body,
 #app .feed-entry__date,
 #app .bottom-nav__icon {
   background: #f7f8fa !important;
-  color: #0057b8 !important;
+  color: #2f7771 !important;
 }
 
 #app .feed-entry {
@@ -568,7 +569,7 @@ body,
 
 #app .neighborhood-feed header i,
 #app .profile-links em {
-  color: #0057b8 !important;
+  color: #2f7771 !important;
 }
 
 #app .st i,
@@ -578,7 +579,7 @@ body,
 }
 
 #app .chat-msg__avatar--user {
-  background: #0057b8 !important;
+  background: #2f7771 !important;
   color: #ffffff !important;
 }
 
@@ -599,18 +600,18 @@ body,
 }
 
 #app .profile-links .li-trail u {
-  color: #0057b8 !important;
+  color: #2f7771 !important;
 }
 
 #app .summary-block li > span {
-  background: #0057b8 !important;
+  background: #2f7771 !important;
   color: #ffffff !important;
 }
 
 #app .services-page a.trusted-service-entry,
 #app .services-page .service-action-card footer a {
   background: #f7f8fa !important;
-  color: #0057b8 !important;
+  color: #2f7771 !important;
 }
 
 #app :is(.commercial-disclosure, .payment-unavailable, .payment-note) {
@@ -700,7 +701,7 @@ body,
 #app .bottom-nav a:hover,
 #app .bottom-nav a.router-link-active {
   background: #f7f8fa !important;
-  color: #0057b8 !important;
+  color: #2f7771 !important;
 }
 
 #app .bottom-nav__primary {
@@ -857,7 +858,7 @@ body,
   border-radius: 50% !important;
   background: #0e5a55 !important;
   color: #ffffff !important;
-  box-shadow: 0 7px 18px rgba(14, 90, 85, 0.25), 0 0 0 1px rgba(11, 99, 200, 0.1) !important;
+  box-shadow: 0 7px 18px rgba(14, 90, 85, 0.25), 0 0 0 1px rgba(47, 119, 113, 0.1) !important;
 }
 
 #app .bottom-nav__primary .bottom-nav__icon::before {
@@ -883,6 +884,9 @@ body,
   color: #0a4642 !important;
   font-size: 11px !important;
   font-weight: 800 !important;
+  line-height: 1.15 !important;
+  margin-top: 0 !important;
+  transform: translateY(-5px);
 }
 
 /* 2026-08-31 secondary urgent acceptance: one resident-facing green design system. */
@@ -1001,6 +1005,11 @@ body,
   width: 30px;
   height: 30px;
   color: #ffffff !important;
+}
+
+#app .login-logo svg path {
+  fill: none !important;
+  stroke: currentColor !important;
 }
 
 #app .login-hero__name {
@@ -1164,6 +1173,7 @@ body,
 #app .feed-entry {
   border-color: var(--jianda-border) !important;
   background: var(--jianda-surface) !important;
+  color: var(--jianda-text) !important;
 }
 
 #app .feed-entry h3 {
@@ -1178,6 +1188,30 @@ body,
 #app .feed-entry > img {
   border-radius: 8px !important;
   background: var(--jianda-green-soft-2) !important;
+}
+
+/* Final resident theme guard: legacy structural rules used a saturated blue
+   for every link, icon and focus ring. Keep content text neutral and reserve
+   the teal family for real interaction affordances. */
+#app a {
+  color: var(--jianda-green);
+}
+
+#app button {
+  color: var(--jianda-green) !important;
+}
+
+#app svg {
+  color: currentColor !important;
+}
+
+#app .assistant-composer-new textarea {
+  min-height: 44px !important;
+  max-height: 120px;
+}
+
+#app :focus-visible {
+  outline-color: var(--jianda-teal) !important;
 }
 
 #app .bottom-nav a:hover,
@@ -1201,7 +1235,45 @@ body,
   background: var(--jianda-green-dark) !important;
 }
 
+#app .services-page .search-input {
+  display: flex;
+  align-items: center;
+  height: 52px;
+  gap: 10px;
+  padding-inline: 14px;
+  border: 1px solid #cbd8d4 !important;
+  background: #ffffff !important;
+}
+
+#app .services-page .search-input:focus-within {
+  border-color: #2f7771 !important;
+  box-shadow: 0 0 0 3px rgba(47, 119, 113, 0.1) !important;
+}
+
+#app .services-page .search-input > svg {
+  flex: 0 0 21px;
+  width: 21px;
+  height: 21px;
+  color: #2f7771 !important;
+}
+
+#app .services-page .search-input > input,
+#app .services-page .search-input > input:focus,
+#app .services-page .search-input > input:focus-visible {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+
 @media (max-width: 767px) {
+  #app .h5-main > * + * {
+    margin-top: 20px;
+  }
+
   #app .commercial-home {
     padding-top: 0;
   }
@@ -1257,6 +1329,91 @@ body,
     min-height: 124px;
     padding-top: 16px;
     padding-bottom: 16px;
+  }
+
+  #app .mixed-feed {
+    margin-inline: -16px;
+    padding-inline: 20px;
+  }
+
+  #app .services-page {
+    padding-top: 16px;
+  }
+
+  #app .assistant-shell {
+    padding: 0 14px 360px !important;
+  }
+
+  #app .services-page > .app-section-head {
+    padding-bottom: 16px;
+  }
+
+  #app .services-page > .trusted-service-entry,
+  #app .services-page > .search-input,
+  #app .services-page > .local-service-directory {
+    margin-top: 16px;
+    margin-bottom: 16px;
+  }
+
+  #app .profile-page-new .member-banner {
+    margin: 0 0 12px;
+    padding: 15px 16px !important;
+    border-color: var(--jianda-green) !important;
+    background: linear-gradient(135deg, var(--jianda-green), #2f7771) !important;
+  }
+
+  #app .profile-page-new .member-banner .member-badge {
+    background: rgba(255, 255, 255, 0.16) !important;
+    color: #ffffff !important;
+  }
+
+  #app .profile-page-new .profile-hero {
+    margin: 0;
+    padding: 16px !important;
+    background: var(--jianda-surface) !important;
+  }
+
+  #app .profile-page-new .profile-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 0;
+    min-height: 96px;
+    margin: 12px 0;
+    padding: 10px !important;
+    border-color: var(--jianda-border) !important;
+    background: var(--jianda-surface) !important;
+    box-shadow: none !important;
+  }
+
+  #app .profile-page-new .profile-links {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0;
+    margin: 12px 0;
+    padding: 0 !important;
+    background: var(--jianda-surface) !important;
+    box-shadow: none !important;
+  }
+
+  #app .profile-page-new .profile-links > a {
+    height: 64px;
+    min-height: 64px;
+    overflow: hidden;
+    padding: 6px 12px;
+  }
+
+  #app .profile-page-new .profile-links .li-main b {
+    font-size: 16px !important;
+    line-height: 1.25 !important;
+  }
+
+  #app .profile-page-new .profile-links .li-main small {
+    display: block;
+    overflow: hidden;
+    margin-top: 2px;
+    color: var(--jianda-muted) !important;
+    font-size: 13px !important;
+    line-height: 1.3 !important;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   #app .feed-entry > img {

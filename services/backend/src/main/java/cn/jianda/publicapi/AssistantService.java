@@ -1,6 +1,7 @@
 package cn.jianda.publicapi;
 
 import cn.jianda.ai.AiClient;
+import cn.jianda.common.BusinessException;
 import java.text.BreakIterator;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -104,13 +105,26 @@ public class AssistantService {
         if (question.isBlank()) {
             return retrievalResponse("请先输入您想了解的问题。", List.of(), null);
         }
+        String contextId = blankToNull(contextSlug == null ? null : contextSlug.trim());
+        String evidenceRegion = SupportedRegions.mentionedIn(question)
+                .map(SupportedRegions.Region::code)
+                .orElse(SupportedRegions.require(regionCode).code());
+        List<Map<String, Object>> rows = retriever.publishedContent(evidenceRegion);
+        if (contextId != null) {
+            String requestedContext = contextId;
+            boolean contextVisible = rows.stream()
+                    .anyMatch(row -> requestedContext.equals(text(row, "slug")));
+            if (!contextVisible) {
+                throw new BusinessException(404, "该内容当前不可用于提问");
+            }
+        }
         if (isCommunityQuestion(question)) {
             return communityResponse(question, regionCode, residentUserId, visitorId);
         }
         if (isStatusQuestion(question)) {
             Map<String, Object> runtime = status();
             String runtimeStatus = text(runtime, "status");
-            recordEvent(question, contextSlug, "status", 0, 0, true,
+            recordEvent(question, contextId, "status", 0, 0, true,
                     null, null, 0, 0, 0, 0, null, residentUserId, visitorId);
             String detail = switch (runtimeStatus) {
                 case "ready" -> "AI 整理能力可用。";
@@ -124,14 +138,10 @@ public class AssistantService {
             return response;
         }
 
-        String evidenceRegion = SupportedRegions.mentionedIn(question)
-                .map(SupportedRegions.Region::code)
-                .orElse(SupportedRegions.require(regionCode).code());
-        List<Map<String, Object>> rows = retriever.publishedContent(evidenceRegion);
         Set<String> terms = terms(question);
         Set<String> anchors = queryAnchors(question);
         List<RankedItem> candidates = rows.stream()
-                .map(row -> new RankedItem(row, score(row, terms, anchors, contextSlug)))
+                .map(row -> new RankedItem(row, score(row, terms, anchors, contextId)))
                 .filter(item -> item.score() > 0)
                 .filter(item -> !requiresGroundedEvidence(question)
                         || supportsGroundedIntent(item.row(), question))
@@ -152,13 +162,13 @@ public class AssistantService {
             if (!requiresGroundedEvidence(question) && externalEnabled) {
                 if (webSearchProvider.status().ready()) {
                     Map<String, Object> webAnswer = webAiResponse(
-                            question, contextSlug, residentUserId, visitorId);
+                            question, contextId, residentUserId, visitorId);
                     if (webAnswer != null) return webAnswer;
                 }
-                return generalAiResponse(question, contextSlug, residentUserId, visitorId);
+                return generalAiResponse(question, contextId, residentUserId, visitorId);
             }
             String grounded = requiresGroundedEvidence(question) ? "NO_EVIDENCE" : (externalEnabled ? "AI_DISABLED" : "NO_EVIDENCE");
-            recordEvent(question, contextSlug, "retrieval", 0, 0, true,
+            recordEvent(question, contextId, "retrieval", 0, 0, true,
                     null, null, 0, 0, 0, 0, grounded, residentUserId, visitorId);
             String fallbackText = requiresGroundedEvidence(question)
                     ? "当前已审核发布内容中没有可靠依据。这个问题涉及资格、金额、材料、医疗或其他重要决定，简达不会猜测，请查阅主管部门原文或向工作人员核实。"
@@ -176,7 +186,7 @@ public class AssistantService {
         String answer = "根据平台已审核发布的内容，您可以先查看" + titles
                 + "。下方列出了与问题最相关的原文片段，请结合完整原文确认适用条件、材料和时限。";
         if (!externalEnabled) {
-            recordEvent(question, contextSlug, "retrieval", citations.size(), citations.size(),
+            recordEvent(question, contextId, "retrieval", citations.size(), citations.size(),
                     true, null, null, 0, 0, 0, 0, "AI_DISABLED",
                     residentUserId, visitorId);
             return retrievalResponse(answer, citations, "AI_DISABLED");
@@ -205,7 +215,7 @@ public class AssistantService {
             // ====== 弱回答兜底 web_ai（本地RAG弱命中时，再试官方联网来源） ======
             if (webSearchProvider.status().ready() && isWeakRagAnswer(generatedAnswer)) {
                 Map<String, Object> webAnswer = webAiResponse(
-                        question, contextSlug, residentUserId, visitorId);
+                        question, contextId, residentUserId, visitorId);
                 if (webAnswer != null) return webAnswer;
             }
             if (generatedAnswer.isBlank() || usedCitations.isEmpty()) {
@@ -219,7 +229,7 @@ public class AssistantService {
             int totalTokens = number(generated.get("total_tokens"));
             long elapsed = number(generated.get("elapsed_ms"));
             if (elapsed <= 0) elapsed = elapsedMs(started);
-            recordEvent(question, contextSlug, "ai", citations.size(), usedCitations.size(),
+            recordEvent(question, contextId, "ai", citations.size(), usedCitations.size(),
                     true, text(generated, "model"), text(generated, "request_id"),
                     promptTokens, completionTokens, totalTokens, elapsed, null, residentUserId, visitorId);
             Map<String, Object> response = response(generatedAnswer, usedCitations, "ai");
@@ -233,10 +243,10 @@ public class AssistantService {
             // ====== RAG AI 异常时也兜底 web_ai ======
             if (webSearchProvider.status().ready()) {
                 Map<String, Object> webAnswer = webAiResponse(
-                        question, contextSlug, residentUserId, visitorId);
+                        question, contextId, residentUserId, visitorId);
                 if (webAnswer != null) return webAnswer;
             }
-            recordEvent(question, contextSlug, "retrieval", citations.size(), citations.size(),
+            recordEvent(question, contextId, "retrieval", citations.size(), citations.size(),
                     false, null, null, 0, 0, 0, elapsed, "EXTERNAL_FALLBACK", residentUserId, visitorId);
             LOGGER.warn("assistant_rag_fallback category={} evidence_count={} elapsed_ms={} error_type={}",
                     questionCategory(question), citations.size(), elapsed,
