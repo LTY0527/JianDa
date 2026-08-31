@@ -3,16 +3,19 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
 import WebArticleImportPanel from "../components/WebArticleImportPanel.vue";
+import RegionTownSelector from "../components/RegionTownSelector.vue";
 import { documentApi, type MetadataPreview } from "../api/documents";
 import { apiMessage } from "../api/http";
 import { currentUser } from "../auth";
 import { cleanFilenameTitle } from "../utils/metadata";
+import { townRegionScope } from "../utils/regions";
 import { UploadCloud, FileText, X, ShieldCheck, RefreshCw, SearchCheck } from "lucide-vue-next";
 const canImportWeb = computed(() => currentUser()?.role !== "REVIEWER");
 const mode = ref<"file" | "web">("file");
 const file = ref<File | null>(null),
   title = ref(""),
   sourceName = ref("");
+const selectedRegionCode = ref("");
 const submitting = ref(false),
   previewing = ref(false),
   error = ref(""),
@@ -62,12 +65,13 @@ function removeFile() {
   error.value = "";
 }
 async function submit() {
-  if (!file.value || !title.value) return;
+  if (!file.value || !title.value || !selectedRegionCode.value) return;
   submitting.value = true;
   error.value = "";
   try {
     const created = await documentApi.create(title.value, sourceName.value, metadata.value);
     const id = created.data.data.id;
+    await documentApi.updateRegionScope(id, townRegionScope(selectedRegionCode.value));
     await documentApi.upload(id, file.value);
     const processing = await documentApi.process(id);
     await router.push({
@@ -144,6 +148,7 @@ async function submit() {
       <label class="field"
         >内容来源<input v-model="sourceName" placeholder="请填写材料发布机构" @input="sourceDirty = true"
       /></label>
+      <RegionTownSelector v-model="selectedRegionCode" :disabled="submitting" />
       <div class="safe-note">
         <ShieldCheck /><span
           ><b>原始材料将被完整保留</b>AI
@@ -156,7 +161,7 @@ async function submit() {
         <RouterLink class="btn secondary" to="/documents">取消</RouterLink
         ><button
           class="btn primary"
-          :disabled="!file || !title || submitting"
+          :disabled="!file || !title || !selectedRegionCode || submitting"
           @click="submit"
         >
           {{ submitting ? "正在上传并处理…" : "上传并开始处理" }}

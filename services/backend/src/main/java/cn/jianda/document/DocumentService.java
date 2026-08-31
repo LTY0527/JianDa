@@ -4,6 +4,7 @@ import cn.jianda.ai.AiClient;
 import cn.jianda.ai.AiQueueService;
 import cn.jianda.ai.AiServiceException;
 import cn.jianda.common.BusinessException;
+import cn.jianda.publicapi.SupportedRegions;
 import cn.jianda.security.AuthUser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1008,7 +1009,6 @@ public class DocumentService {
     @Transactional
     public Map<String, Object> updateRegionScope(
             long id, DocumentController.RegionScopeRequest request, AuthUser user) {
-        if (!user.isPlatformAdmin()) throw new BusinessException(403, "仅平台管理员可以修正地域归属");
         detail(id, user);
         String scope = request.localScope().trim().toUpperCase(java.util.Locale.ROOT);
         if (!Set.of("LOCAL_TOWN", "DISTRICT_SHARED", "CITY_SHARED", "NATIONAL_SHARED", "UNCLASSIFIED")
@@ -1019,7 +1019,9 @@ public class DocumentService {
         String town = nullableString(request.streetOrTown());
         String code = nullableString(request.regionCode());
         if ("LOCAL_TOWN".equals(scope)) {
-            if (!"宝山区".equals(district) || !Set.of("310113102", "310113109", "310113112").contains(code)) {
+            SupportedRegions.Region region = SupportedRegions.require(code);
+            if (!"上海市".equals(province) || !"上海市".equals(city)
+                    || !region.district().equals(district) || !region.townName().equals(town)) {
                 throw new BusinessException(400, "本地镇内容必须归属已开通的宝山区镇");
             }
         } else if ("DISTRICT_SHARED".equals(scope)) {

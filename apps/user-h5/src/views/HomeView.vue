@@ -12,7 +12,7 @@ import {
 import { contentKind, importanceScore, normalizeTitle, truncateSummary } from "../content";
 import { readerPreferences } from "../library";
 import { activeRegion } from "../region";
-import { articleCover, categoryDefaultCover, realCoverScore } from "../utils/coverImage";
+import { articleCover, categoryDefaultCover, hasRealCover, realCoverScore } from "../utils/coverImage";
 import { regionPriority, regionScopeLabel } from "../utils/regionScope";
 import {
   ArrowRight,
@@ -41,7 +41,7 @@ const items = ref<PublicItem[]>([]);
 const directory = ref<ServiceDirectoryItem[]>([]);
 const loading = ref(true);
 const error = ref("");
-const featuredCoverFailed = ref(false);
+const failedFeaturedIds = ref(new Set<string>());
 
 const channels: Array<{ key: ChannelKey; label: string }> = [
   { key: "recommend", label: "推荐" },
@@ -90,8 +90,14 @@ const channelItems = computed(() =>
     .filter((item) => channelMatches(item, selectedChannel.value))
     .sort((a, b) => rank(b) - rank(a)),
 );
-const featured = computed(() => channelItems.value[0]);
-const featuredHasVisual = computed(() => Boolean(featured.value && !featuredCoverFailed.value));
+const featured = computed(() => {
+  const availableRealCovers = channelItems.value.filter(
+    (item) => hasRealCover(item) && !failedFeaturedIds.value.has(String(item.id)),
+  );
+  return availableRealCovers[0] || channelItems.value[0];
+});
+const featuredHasVisual = computed(() => Boolean(featured.value && hasRealCover(featured.value)
+  && !failedFeaturedIds.value.has(String(featured.value.id))));
 const feedItems = computed(() => channelItems.value.filter((item) => item.id !== featured.value?.id).slice(0, 12));
 const selectedChannelLabel = computed(() => channels.find((channel) => channel.key === selectedChannel.value)?.label || "推荐");
 
@@ -113,19 +119,16 @@ function fallbackCover(event: Event, item: PublicItem) {
 }
 function fallbackFeaturedCover(event: Event) {
   if (!featured.value) return;
-  const image = event.currentTarget as HTMLImageElement;
-  const fallback = categoryDefaultCover(featured.value);
-  if (!image.src.endsWith(fallback)) image.src = fallback;
-  else featuredCoverFailed.value = true;
+  failedFeaturedIds.value = new Set([...failedFeaturedIds.value, String(featured.value.id)]);
 }
 function selectChannel(key: ChannelKey) {
-  featuredCoverFailed.value = false;
+  failedFeaturedIds.value = new Set();
   void router.replace({ path: "/", query: key === "recommend" ? {} : { channel: key } });
 }
 async function load() {
   loading.value = true;
   error.value = "";
-  featuredCoverFailed.value = false;
+  failedFeaturedIds.value = new Set();
   try {
     const [published, services] = await Promise.all([
       fetchItems(undefined, activeRegion.value.region_code),
@@ -175,7 +178,7 @@ watch(() => activeRegion.value.region_code, load);
       </div>
 
       <template v-else>
-        <section v-if="featured" class="commercial-hero" :class="{ 'commercial-hero--text': !featuredHasVisual }">
+        <section v-if="featured" :key="featured.id" class="commercial-hero" :class="{ 'commercial-hero--text': !featuredHasVisual }">
           <img
             v-if="featuredHasVisual"
             :src="articleCover(featured)"

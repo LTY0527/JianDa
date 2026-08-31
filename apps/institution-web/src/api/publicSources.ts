@@ -81,7 +81,7 @@ export interface WebArticlePreview {
   canonical_confirmation_required?: boolean;
   trust_status?: "VERIFIED" | "UNVERIFIED";
   external_source_verified?: boolean;
-  registered_source?: Pick<WebSourceRegistry, "id" | "source_name" | "source_type" | "enabled">;
+  registered_source?: Pick<WebSourceRegistry, "id" | "source_name" | "source_type" | "enabled" | "region_code" | "street_or_town">;
   source_type_suggestion?: string;
   images?: Array<Record<string, unknown>>;
 }
@@ -147,6 +147,8 @@ export interface WebSourceRegistry {
   last_status: string;
   next_run_at?: string;
   last_error?: string;
+  street_or_town?: string;
+  region_code?: string;
 }
 
 export interface AiQueueItem {

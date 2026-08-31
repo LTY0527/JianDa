@@ -255,7 +255,7 @@ async function navigateTo(target: PublicItemNeighbor | null) {
   if (!target || loading.value) return;
   if (preferences.stopSpeechOnNavigation) speech.stop();
   navigationAnnouncement.value = `正在打开：${cleanDisplayTitle(target.title)}`;
-  await router.push(neighborPath(target));
+  await router.replace(neighborPath(target));
   window.scrollTo({ top: 0, behavior: "auto" });
 }
 const interactiveSelector = "a,button,input,textarea,select,label,audio,video,details,summary,[contenteditable],[role='button'],[role='link']";

@@ -8,12 +8,14 @@ import {
   type WebArticlePreview,
 } from "../api/publicSources";
 import { documentApi } from "../api/documents";
+import RegionTownSelector from "./RegionTownSelector.vue";
 import { currentUser } from "../auth";
 import {
   contentKindLabel,
   coverTypeLabel,
   formatDisplayDate,
 } from "../utils/display";
+import { supportedTownCode, townRegionScope } from "../utils/regions";
 
 const emit = defineEmits<{
   imported: [documentId: number];
@@ -30,6 +32,7 @@ const pastedTitle = ref("");
 const pastedSourceName = ref("");
 const pastedBody = ref("");
 const pastedContentKind = ref("SERVICE_NOTICE");
+const selectedRegionCode = ref("");
 const isPlatformAdmin = computed(
   () => currentUser()?.role === "PLATFORM_ADMIN",
 );
@@ -49,6 +52,9 @@ async function previewArticle() {
     preview.value = (
       await publicSourceApi.previewWebArticle(webUrl.value.trim())
     ).data.data;
+    selectedRegionCode.value = supportedTownCode(
+      preview.value.registered_source?.region_code,
+    );
   } catch (cause) {
     error.value = apiMessage(cause);
   } finally {
@@ -57,7 +63,7 @@ async function previewArticle() {
 }
 
 async function importArticle() {
-  if (!preview.value) return;
+  if (!preview.value || !selectedRegionCode.value) return;
   busy.value = "import";
   error.value = "";
   try {
@@ -68,6 +74,7 @@ async function importArticle() {
           canonicalConfirmed.value,
         );
     const documentId = response.data.data.documentId;
+    await documentApi.updateRegionScope(documentId, townRegionScope(selectedRegionCode.value));
     const processing = await documentApi.process(documentId);
     emit("imported", documentId);
     await router.push({
@@ -82,7 +89,7 @@ async function importArticle() {
 }
 
 async function verifyAndImport() {
-  if (!preview.value || !isPlatformAdmin.value) return;
+  if (!preview.value || !isPlatformAdmin.value || !selectedRegionCode.value) return;
   if (
     preview.value.canonical_confirmation_required &&
     !canonicalConfirmed.value
@@ -115,6 +122,7 @@ async function verifyAndImport() {
     });
     const documentId = response.data.data.imported?.documentId;
     if (!documentId) throw new Error("可信来源已保存，但本次网页未创建材料");
+    await documentApi.updateRegionScope(documentId, townRegionScope(selectedRegionCode.value));
     const processing = await documentApi.process(documentId);
     emit("imported", documentId);
     await router.push({
@@ -129,6 +137,7 @@ async function verifyAndImport() {
 }
 
 async function importPastedArticle() {
+  if (!selectedRegionCode.value) return;
   busy.value = "import";
   error.value = "";
   try {
@@ -140,6 +149,7 @@ async function importPastedArticle() {
       contentKind: pastedContentKind.value,
     });
     const documentId = response.data.data.documentId;
+    await documentApi.updateRegionScope(documentId, townRegionScope(selectedRegionCode.value));
     const processing = await documentApi.process(documentId);
     emit("imported", documentId);
     await router.push({
@@ -209,8 +219,9 @@ async function importPastedArticle() {
         >公开正文
         <textarea v-model="pastedBody" required maxlength="200000" rows="10"></textarea>
       </label>
+      <RegionTownSelector v-model="selectedRegionCode" :disabled="busy === 'import'" />
       <div class="form-actions">
-        <button class="btn primary" :disabled="busy === 'import'">导入粘贴正文</button>
+        <button class="btn primary" :disabled="busy === 'import' || !selectedRegionCode">导入粘贴正文</button>
         <button class="btn secondary" type="button" @click="showPasteFallback = false">取消</button>
       </div>
     </form>
@@ -248,6 +259,7 @@ async function importPastedArticle() {
           <div><dt>封面类型</dt><dd>{{ coverTypeLabel(preview.cover_image_type) }}</dd></div>
           <div><dt>图片候选</dt><dd>{{ preview.images?.length || 0 }} 张</dd></div>
         </dl>
+        <RegionTownSelector v-model="selectedRegionCode" :disabled="busy === 'import'" />
         <label
           v-if="preview.canonical_confirmation_required"
           class="canonical-confirm"
@@ -281,6 +293,7 @@ async function importPastedArticle() {
             class="btn primary"
             :disabled="
               busy === 'import' ||
+              !selectedRegionCode ||
               (!!preview.canonical_confirmation_required &&
                 !canonicalConfirmed)
             "
@@ -299,6 +312,7 @@ async function importPastedArticle() {
             class="btn secondary"
             :disabled="
               busy === 'import' ||
+              !selectedRegionCode ||
               (!!preview.canonical_confirmation_required &&
                 !canonicalConfirmed)
             "

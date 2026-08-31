@@ -64,7 +64,7 @@ const h5Url = computed(() =>
         isDev: import.meta.env.DEV,
         protocol: window.location.protocol,
         hostname: window.location.hostname,
-      }, document.value?.source_type === "WEB_ARTICLE" ? "news" : "guide")
+      }, document.value?.source_type === "WEB_ARTICLE" ? "news" : "guide", document.value?.region_code)
     : "",
 );
 

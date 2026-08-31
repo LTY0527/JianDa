@@ -787,3 +787,85 @@ body,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* 2026-08-31 urgent acceptance: platform teal leads; blue remains a utility accent. */
+#app .h5-brand > span {
+  border-color: #0e5a55 !important;
+  background: #0e5a55 !important;
+}
+
+#app .home-channels button.active {
+  border-color: #0e5a55 !important;
+  background: #0e5a55 !important;
+  color: #ffffff !important;
+}
+
+#app .commercial-hero,
+#app .commercial-hero h1 {
+  color: #ffffff !important;
+}
+
+#app .commercial-hero__body > span {
+  color: #b8ddd7 !important;
+}
+
+#app .commercial-hero p {
+  color: #d5e4e1 !important;
+}
+
+#app .commercial-hero small {
+  color: #abc5c0 !important;
+}
+
+#app .bottom-nav {
+  min-height: calc(76px + env(safe-area-inset-bottom));
+  height: calc(76px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  overflow: visible;
+}
+
+#app .bottom-nav a.router-link-active:not(.bottom-nav__primary) {
+  background: #e7f1ee !important;
+  color: #0e5a55 !important;
+}
+
+#app .bottom-nav__primary {
+  margin-top: -24px;
+}
+
+#app .bottom-nav__primary .bottom-nav__icon {
+  position: relative;
+  flex: 0 0 60px;
+  width: 60px;
+  height: 60px;
+  border: 4px solid #ffffff !important;
+  border-radius: 50% !important;
+  background: #0e5a55 !important;
+  color: #ffffff !important;
+  box-shadow: 0 7px 18px rgba(14, 90, 85, 0.25), 0 0 0 1px rgba(11, 99, 200, 0.1) !important;
+}
+
+#app .bottom-nav__primary .bottom-nav__icon::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  width: 17px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  transform: rotate(-24deg);
+}
+
+#app .bottom-nav__primary .bottom-nav__icon svg {
+  position: relative;
+  width: 27px;
+  height: 27px;
+  color: #ffffff !important;
+}
+
+#app .bottom-nav__primary > span:last-child {
+  color: #0a4642 !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+}

@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-final class SupportedRegions {
-    static final String DEFAULT_CODE = "310113102";
+public final class SupportedRegions {
+    public static final String DEFAULT_CODE = "310113102";
     private static final Map<String, Region> REGIONS = new LinkedHashMap<>();
 
     static {
@@ -18,26 +18,26 @@ final class SupportedRegions {
 
     private SupportedRegions() {}
 
-    static Region require(String code) {
+    public static Region require(String code) {
         Region region = REGIONS.get(normalize(code));
         if (region == null) throw new BusinessException(403, "当前地区尚未开放此功能");
         return region;
     }
 
-    static boolean contains(String code) {
+    public static boolean contains(String code) {
         return REGIONS.containsKey(normalize(code));
     }
 
-    static String normalize(String code) {
+    public static String normalize(String code) {
         return code == null || code.isBlank() ? DEFAULT_CODE : code.trim();
     }
 
-    static Optional<Region> mentionedIn(String text) {
+    public static Optional<Region> mentionedIn(String text) {
         if (text == null) return Optional.empty();
         return REGIONS.values().stream().filter(region -> text.contains(region.townName())).findFirst();
     }
 
-    static List<Region> all() {
+    public static List<Region> all() {
         return List.copyOf(REGIONS.values());
     }
 
@@ -45,5 +45,5 @@ final class SupportedRegions {
         REGIONS.put(code, new Region(code, "宝山区", townName));
     }
 
-    record Region(String code, String district, String townName) {}
+    public record Region(String code, String district, String townName) {}
 }

@@ -37,7 +37,7 @@ function h5GuideUrl(documentId: number): string {
     isDev: import.meta.env.DEV,
     protocol: window.location.protocol,
     hostname: window.location.hostname,
-  });
+  }, row?.source_type === "WEB_ARTICLE" ? "news" : "guide", row?.region_code);
 }
 
 async function load() {

@@ -32,6 +32,26 @@ test.describe("institution publish H5 URL", () => {
       }),
     ).toBe("https://service.example.gov.cn:8443/guide/guide-14");
   });
+
+  test("published town context is carried to the H5", () => {
+    expect(
+      buildH5GuideUrl("guide-14", {
+        isDev: false,
+        protocol: "http:",
+        hostname: "127.0.0.1",
+      }, "guide", "310113109"),
+    ).toBe("http://127.0.0.1/guide/guide-14?region=310113109");
+  });
+
+  test("unsupported shared-region codes are not carried to the H5", () => {
+    expect(
+      buildH5GuideUrl("guide-14", {
+        isDev: false,
+        protocol: "http:",
+        hostname: "127.0.0.1",
+      }, "guide", "100000"),
+    ).toBe("http://127.0.0.1/guide/guide-14");
+  });
 });
 
 test("Docker publish success link opens the real H5 detail", async ({
@@ -64,7 +84,12 @@ test("Docker publish success link opens the real H5 detail", async ({
   await expect(publishedRow).toBeVisible();
   const publicLink = publishedRow.getByRole("link", { name: "查看" });
   const expectedH5Url = await publicLink.getAttribute("href");
-  expect(expectedH5Url).toMatch(/^http:\/\/127\.0\.0\.1\/(guide|news)\/[a-z]+-\d+$/);
+  const parsedH5Url = new URL(expectedH5Url!);
+  expect(parsedH5Url.origin).toBe("http://127.0.0.1");
+  expect(parsedH5Url.pathname).toMatch(/^\/(guide|news)\/[a-z]+-\d+$/);
+  if (parsedH5Url.searchParams.has("region")) {
+    expect(["310113102", "310113109", "310113112"]).toContain(parsedH5Url.searchParams.get("region"));
+  }
   await page.screenshot({
     path: "D:/Temp/jianda-publish-success-link.png",
     fullPage: false,

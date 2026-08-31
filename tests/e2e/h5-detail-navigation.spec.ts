@@ -105,6 +105,7 @@ test.beforeEach(async ({ context }) => {
 
 test("desktop buttons, keyboard, history and text selection keep article state isolated", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${h5Url}/settings`);
   await page.goto(`${h5Url}/news/${articles.a.slug}`);
   await expectArticle(page, articles.a);
   await expect(page.getByRole("button", { name: /上一篇/ }).last()).toBeDisabled();
@@ -126,7 +127,7 @@ test("desktop buttons, keyboard, history and text selection keep article state i
   await expect(page.getByRole("button", { name: /下一篇/ }).last()).toBeDisabled();
 
   await page.goBack();
-  await expectArticle(page, articles.a);
+  await expect(page).toHaveURL(`${h5Url}/settings`);
   await page.goForward();
   await expectArticle(page, articles.b);
   await page.keyboard.press("ArrowLeft");

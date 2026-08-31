@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { bootstrap, setRouter, useResidentAuth } from "./composables/useResidentAuth";
+import { selectRegion, supportedRegions } from "./region";
 
 const PUBLIC_PATHS = new Set([
   "/resident/login",
@@ -42,6 +43,10 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
+  const requestedRegion = typeof to.query.region === "string" ? to.query.region : "";
+  if (supportedRegions.some((region) => region.region_code === requestedRegion)) {
+    selectRegion(requestedRegion);
+  }
   setRouter(router);
   await bootstrap();
   const { status: authStatus } = useResidentAuth();

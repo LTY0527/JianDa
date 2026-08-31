@@ -78,6 +78,12 @@ export interface DocumentDetail {
   new_content_hash?: string;
   content_change_summary?: string;
   processing_status: string;
+  local_scope?: string;
+  province?: string;
+  city?: string;
+  district?: string;
+  street_or_town?: string;
+  region_code?: string;
 }
 
 export interface MetadataPreview {
@@ -205,6 +211,14 @@ export const documentApi = {
     }>>(
       `/documents/${id}/process`,
     ),
+  updateRegionScope: (id: number, payload: {
+    localScope: "LOCAL_TOWN" | "DISTRICT_SHARED" | "CITY_SHARED" | "NATIONAL_SHARED" | "UNCLASSIFIED";
+    province?: string;
+    city?: string;
+    district?: string;
+    streetOrTown?: string;
+    regionCode?: string;
+  }) => http.put<ApiResponse<DocumentDetail>>(`/documents/${id}/region-scope`, payload),
   retryRewrite: (id: number) =>
     http.post<ApiResponse<{ status: string; progress: number }>>(
       `/documents/${id}/retry-rewrite`,

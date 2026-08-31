@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -86,6 +87,81 @@ class Phase992RegionMembershipIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[?(@.region_code == '310113109')].street_or_town", hasItem("顾村镇")))
                 .andExpect(jsonPath("$.data[?(@.region_code == '310113112')].street_or_town", hasItem("庙行镇")));
+    }
+
+    @Test
+    void organizationCanAssignTownAndPublicationKeepsStrictRegionScope() throws Exception {
+        String organizationAuth = "Bearer " + login("org_admin");
+        String created = mvc.perform(post("/api/documents")
+                        .header("Authorization", organizationAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Phase992顾村发布链路\",\"sourceName\":\"顾村镇测试来源\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+
+        mvc.perform(put("/api/documents/{id}/region-scope", documentId)
+                        .header("Authorization", organizationAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "localScope":"LOCAL_TOWN",
+                                  "province":"上海市",
+                                  "city":"上海市",
+                                  "district":"宝山区",
+                                  "streetOrTown":"顾村镇",
+                                  "regionCode":"310113109"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.local_scope").value("LOCAL_TOWN"))
+                .andExpect(jsonPath("$.data.region_code").value("310113109"))
+                .andExpect(jsonPath("$.data.street_or_town").value("顾村镇"));
+
+        mvc.perform(put("/api/documents/{id}/region-scope", documentId)
+                        .header("Authorization", organizationAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "localScope":"LOCAL_TOWN",
+                                  "province":"上海市",
+                                  "city":"上海市",
+                                  "district":"宝山区",
+                                  "streetOrTown":"庙行镇",
+                                  "regionCode":"310113109"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+
+        long reviewerId = jdbc.queryForObject("SELECT id FROM staff_user WHERE username='org_admin'", Long.class);
+        jdbc.update("INSERT INTO generated_content(document_id,content_type,title,content_json,plain_text) "
+                + "VALUES (?,'SUMMARY','通俗摘要','[\"顾村测试摘要\"]','顾村测试摘要')", documentId);
+        jdbc.update("INSERT INTO review_record(document_id,reviewer_id,action,comment) VALUES (?,?,'APPROVE','地区链路测试')",
+                documentId, reviewerId);
+
+        mvc.perform(post("/api/documents/{id}/publish", documentId)
+                        .header("Authorization", organizationAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"顾村发布链路验收材料",
+                                  "category":"社区服务",
+                                  "sourceName":"顾村镇测试来源",
+                                  "publishChannel":"COMMUNITY",
+                                  "importanceLevel":"NORMAL"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/api/public/items").param("regionCode", "310113109"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].slug", hasItem("guide-" + documentId)));
+        mvc.perform(get("/api/public/items").param("regionCode", "310113102"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].slug", not(hasItem("guide-" + documentId))));
+        mvc.perform(get("/api/public/items").param("regionCode", "310113112"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].slug", not(hasItem("guide-" + documentId))));
     }
 
     @Test
