@@ -111,6 +111,10 @@ function detailPath(item: PublicItem) {
 function shortDate(value?: string) {
   return value ? String(value).slice(0, 10) : "";
 }
+function sourceLabel(value?: string) {
+  const normalized = String(value || "").trim();
+  return normalized && !/^[?？�\s]+$/.test(normalized) ? normalized : "权威来源";
+}
 function fallbackCover(event: Event, item: PublicItem) {
   const image = event.currentTarget as HTMLImageElement;
   const fallback = categoryDefaultCover(item);
@@ -192,7 +196,7 @@ watch(() => activeRegion.value.region_code, load);
             <span>{{ featured.category }} · {{ regionScopeLabel(featured, activeRegion.region_code) }}</span>
             <h1>{{ normalizeTitle(featured.title) }}</h1>
             <p>{{ truncateSummary(featured.summary, 126) }}</p>
-            <small>{{ featured.source_name }} · {{ shortDate(featured.published_at) }}</small>
+            <small>{{ sourceLabel(featured.source_name) }} · {{ shortDate(featured.published_at) }}</small>
             <RouterLink :to="detailPath(featured)">立即查看<ArrowRight /></RouterLink>
           </div>
         </section>
@@ -252,7 +256,7 @@ watch(() => activeRegion.value.region_code, load);
               <small>{{ item.category }} · {{ regionScopeLabel(item, activeRegion.region_code) }}</small>
               <h3>{{ normalizeTitle(item.title) }}</h3>
               <p>{{ truncateSummary(item.summary, feedKind(item) === "image" ? 72 : 110) }}</p>
-              <footer>{{ item.source_name }} · {{ shortDate(item.published_at) }}</footer>
+              <footer>{{ sourceLabel(item.source_name) }} · {{ shortDate(item.published_at) }}</footer>
             </div>
             <ChevronRight class="feed-entry__arrow" />
           </RouterLink>

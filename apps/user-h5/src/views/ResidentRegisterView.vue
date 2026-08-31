@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import axios from "axios";
-import { Phone, UserRound, Lock, UserCircle2, MapPin } from "lucide-vue-next";
+import { HeartHandshake, Phone, UserRound, Lock, UserCircle2, MapPin } from "lucide-vue-next";
 import { residentRegister, residentRegistrationCapabilities } from "../api";
 import { completeLogin } from "../composables/useResidentAuth";
 import { dachangRegion } from "../region";
@@ -96,10 +96,7 @@ async function submit() {
       <section class="login-hero">
         <div class="login-hero__brand">
           <div class="login-logo" aria-hidden="true">
-            <svg viewBox="0 0 48 48" width="48" height="48" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="48" height="48" rx="8" fill="#0057B8"/>
-              <path d="M15 34V18h8c4.4 0 8 3.1 8 7.6S27.4 33.2 23 33.2h-2.9V34H15Zm4.4-4.1h3c2.2 0 3.8-1.4 3.8-3.5s-1.6-3.5-3.8-3.5h-3V29.9Z" fill="#FFFFFF"/>
-            </svg>
+            <HeartHandshake />
           </div>
           <h1 class="login-hero__name">注册简达</h1>
         </div>
