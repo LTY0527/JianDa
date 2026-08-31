@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
 import BottomNav from "../components/BottomNav.vue";
 import ContentCard from "../components/ContentCard.vue";
@@ -27,8 +27,31 @@ const filtered = computed(() => {
   if (mode.value === "已收藏") result = result.filter((item) => isFavorite(item.id));
   return [...result].sort((a,b) => mode.value === "重要" ? importanceScore(b) - importanceScore(a) : String(b.published_at).localeCompare(String(a.published_at)));
 });
-async function load() { loading.value = true; error.value = ""; try { items.value = await fetchItems(undefined, activeRegion.value.region_code); } catch { error.value = "无法连接权威内容服务，请稍后重试。"; } finally { loading.value = false; } }
-onMounted(load);
+let lastLoadedAt = 0;
+let loadPromise: Promise<void> | null = null;
+function load(): Promise<void> {
+  if (loadPromise) return loadPromise;
+  loadPromise = (async () => {
+    loading.value = true; error.value = "";
+    try { items.value = await fetchItems(undefined, activeRegion.value.region_code); }
+    catch { error.value = "无法连接权威内容服务，请稍后重试。"; }
+    finally { loading.value = false; lastLoadedAt = Date.now(); }
+  })();
+  void loadPromise.finally(() => { loadPromise = null; });
+  return loadPromise;
+}
+function refreshWhenResumed() {
+  if (document.visibilityState === "visible" && Date.now() - lastLoadedAt >= 5_000) void load();
+}
+onMounted(() => {
+  window.addEventListener("focus", refreshWhenResumed);
+  document.addEventListener("visibilitychange", refreshWhenResumed);
+  void load();
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("focus", refreshWhenResumed);
+  document.removeEventListener("visibilitychange", refreshWhenResumed);
+});
 watch(() => activeRegion.value.region_code, load);
 </script>
 <template>

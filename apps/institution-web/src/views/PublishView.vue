@@ -53,6 +53,18 @@ const imageReviewBlocked = computed(
     document.value?.source_type === "WEB_ARTICLE" &&
     document.value?.image_reviewed !== true,
 );
+const regionScopeBlocked = computed(() =>
+  !document.value?.local_scope || ["UNSPECIFIED", "UNCLASSIFIED"].includes(document.value.local_scope),
+);
+const publishedRegionLabel = computed(() => {
+  const current = document.value;
+  if (!current) return "未设置";
+  if (current.local_scope === "LOCAL_TOWN") return [current.district, current.street_or_town].filter(Boolean).join(" · ");
+  if (["DISTRICT_SHARED", "DISTRICT"].includes(current.local_scope || "")) return `${current.district || "宝山区"}（全区）`;
+  if (["CITY_SHARED", "CITY"].includes(current.local_scope || "")) return current.city || "上海市";
+  if (["NATIONAL_SHARED", "NATIONAL", "PROVINCE"].includes(current.local_scope || "")) return "全国";
+  return "未设置";
+});
 onBeforeRouteLeave(() => {
   if (allowLeave.value || publishedSlug.value || !isDirty.value) return true;
   return window.confirm("发布信息尚未保存，确定离开吗？");
@@ -127,6 +139,10 @@ async function publish() {
     error.value = "网页文章图片尚未完成人工审核，请返回审核页确认候选图片或使用分类默认图。";
     return;
   }
+  if (regionScopeBlocked.value) {
+    error.value = "发布前必须明确内容适用地区，请返回材料页设置街镇、宝山区、上海市或全国范围。";
+    return;
+  }
   if (!window.confirm("确认审核通过并发布到用户端吗？发布后公众即可查看。")) return;
   submitting.value = true;
   error.value = "";
@@ -171,6 +187,7 @@ async function publish() {
       <CheckCircle2 />
       <h2>内容已成功发布</h2>
       <p>“{{ form.title }}”已出现在用户端公开内容中。</p>
+      <p><b>已发布到：</b>{{ publishedRegionLabel }}　<b>栏目：</b>{{ selectedChannelLabel }}</p>
       <div>
         <RouterLink class="btn primary" to="/published"
           >查看已发布内容</RouterLink
@@ -252,10 +269,11 @@ async function publish() {
       >
       <p v-if="error" class="form-error">{{ error }}</p>
       <p v-if="imageReviewBlocked" class="inline-error">发布已阻止：网页文章图片尚未完成人工审核。请返回审核页确认图片来源与许可，或改用分类默认图。</p>
+      <p v-if="regionScopeBlocked" class="inline-error">发布已阻止：尚未明确居民可见地区，请先设置发布范围。</p>
       <div class="form-actions">
         <button
           class="btn primary"
-          :disabled="submitting || !agreed || !form.title || !form.sourceName || imageReviewBlocked"
+          :disabled="submitting || !agreed || !form.title || !form.sourceName || imageReviewBlocked || regionScopeBlocked"
           @click="publish"
         >
           <Send :size="17" />{{ submitting ? "正在发布…" : "审核通过并发布" }}

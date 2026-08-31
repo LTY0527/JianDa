@@ -105,7 +105,8 @@ public class PublicController {
         String sql = "SELECT p.id,p.slug,p.title,p.summary,p.category,p.source_name,"
                 + "p.source_url,p.published_at,p.content_kind,p.cover_image_url,p.is_local,p.reading_minutes,"
                 + "p.pinned,p.importance,p.publish_channel,p.promote_to_recommend,p.importance_level,p.effective_from,p.deadline_at,p.expires_at,p.last_verified_at,"
-                + "p.source_updated_at,p.verification_status,d.cover_image_type,d.image_source_name,d.image_source_url,"
+                + "p.source_updated_at,p.verification_status,p.province,p.city,p.district,p.street_or_town,p.community,p.region_code,p.local_scope,"
+                + "d.cover_image_type,d.image_source_name,d.image_source_url,"
                 + "d.image_alt_text,d.image_cached,d.image_license_note,"
                 + "COALESCE(ev.view_count,0) view_count,COALESCE(el.like_count,0) like_count,"
                 + "COALESCE(f.favorite_count,0) favorite_count,COALESCE(r.reminder_count,0) reminder_count,"
@@ -118,8 +119,12 @@ public class PublicController {
                 + "LEFT JOIN (SELECT published_item_id,COUNT(*) favorite_count FROM favorite GROUP BY published_item_id) f ON f.published_item_id=p.id "
                 + "LEFT JOIN (SELECT published_item_id,COUNT(*) reminder_count FROM resident_reminder GROUP BY published_item_id) r ON r.published_item_id=p.id "
                 + "WHERE p.status='PUBLISHED' AND (p.expires_at IS NULL OR p.expires_at>=CURRENT_TIMESTAMP) "
-                + "AND (p.title LIKE ? OR p.summary LIKE ? OR p.category LIKE ?) ";
-        List<Object> parameters = new ArrayList<>(List.of(like, like, like));
+                + "AND (p.title LIKE ? OR p.summary LIKE ? OR p.category LIKE ? OR p.source_name LIKE ? "
+                + "OR EXISTS (SELECT 1 FROM generated_content g WHERE g.document_id=p.document_id "
+                + "AND g.status='PUBLISHED' AND (g.plain_text LIKE ? OR g.content_json LIKE ?)) "
+                + "OR EXISTS (SELECT 1 FROM extracted_field ef WHERE ef.document_id=p.document_id "
+                + "AND ef.review_status<>'REJECTED' AND ef.field_value LIKE ?)) ";
+        List<Object> parameters = new ArrayList<>(List.of(like, like, like, like, like, like, like));
         if (regionCode != null && !regionCode.isBlank()) {
             sql += "AND " + PublishedRegionScope.predicate("p") + " ";
             parameters.addAll(PublishedRegionScope.parameters(regionCode));
@@ -248,13 +253,23 @@ public class PublicController {
     }
 
     @GetMapping("/items/{slug}")
-    public ApiResponse<Map<String, Object>> detail(@PathVariable String slug) {
-        List<Map<String, Object>> rows = jdbc.queryForList("SELECT p.*,d.raw_text,d.page_count,d.allow_public_original,d.mime_type,d.storage_path,"
+    public ApiResponse<Map<String, Object>> detail(
+            @PathVariable String slug,
+            @RequestParam(required = false) String regionCode) {
+        String sql = "SELECT p.*,d.raw_text,d.page_count,d.allow_public_original,d.mime_type,d.storage_path,"
                 + "d.source_type,d.original_url,d.canonical_url,d.original_published_at,d.crawl_time,"
                 + "d.cover_image_type,d.image_source_name,d.image_source_url,d.image_alt_text,d.image_cached,"
                 + "d.image_license_note,d.image_width,d.image_height,d.original_page_available "
                 + "FROM published_item p "
-                + "JOIN source_document d ON d.id=p.document_id WHERE p.slug=? AND p.status='PUBLISHED'", slug);
+                + "JOIN source_document d ON d.id=p.document_id WHERE p.slug=? AND p.status='PUBLISHED' "
+                + "AND (p.expires_at IS NULL OR p.expires_at>=CURRENT_TIMESTAMP) ";
+        List<Object> parameters = new ArrayList<>();
+        parameters.add(slug);
+        if (regionCode != null && !regionCode.isBlank()) {
+            sql += "AND " + PublishedRegionScope.predicate("p") + " ";
+            parameters.addAll(PublishedRegionScope.parameters(regionCode));
+        }
+        List<Map<String, Object>> rows = jdbc.queryForList(sql, parameters.toArray());
         if (rows.isEmpty()) throw new BusinessException(404, "内容不存在或已撤回");
         Map<String, Object> result = new LinkedHashMap<>(rows.get(0));
         long documentId = ((Number) result.get("document_id")).longValue();

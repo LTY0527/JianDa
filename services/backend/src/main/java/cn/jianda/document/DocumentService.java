@@ -1394,6 +1394,44 @@ public class DocumentService {
         return compactPublicationSummary(contentJson, nullableString(row.get("plain_text")));
     }
 
+    private String validatedPublicationScope(Map<String, Object> document) {
+        String rawScope = nullableString(document.get("local_scope")).trim().toUpperCase(java.util.Locale.ROOT);
+        String regionCode = nullableString(document.get("region_code"));
+        String province = nullableString(document.get("province"));
+        String city = nullableString(document.get("city"));
+        String district = nullableString(document.get("district"));
+        String town = nullableString(document.get("street_or_town"));
+        String scope = switch (rawScope) {
+            case "LOCAL_TOWN", "LOCAL", "TOWN", "STREET" -> "LOCAL_TOWN";
+            case "DISTRICT_SHARED", "DISTRICT" -> "DISTRICT_SHARED";
+            case "CITY_SHARED", "CITY" -> "CITY_SHARED";
+            case "NATIONAL_SHARED", "NATIONAL" -> "NATIONAL_SHARED";
+            case "PROVINCE" -> {
+                if ("100000".equals(regionCode)) yield "NATIONAL_SHARED";
+                throw new BusinessException(400, "省级内容尚未配置可公开的居民地区范围");
+            }
+            default -> throw new BusinessException(400, "发布前必须明确内容适用地区，未分类内容不能直接公开");
+        };
+        if ("LOCAL_TOWN".equals(scope)) {
+            SupportedRegions.Region region = SupportedRegions.require(regionCode);
+            if (!"上海市".equals(province) || !"上海市".equals(city)
+                    || !region.district().equals(district) || !region.townName().equals(town)) {
+                throw new BusinessException(400, "本地镇内容的地区信息不完整，请重新选择发布地区");
+            }
+        } else if ("DISTRICT_SHARED".equals(scope)) {
+            if (!"宝山区".equals(district) || !town.isBlank()) {
+                throw new BusinessException(400, "区级共享内容必须明确归属宝山区且不能绑定具体街镇");
+            }
+        } else if ("CITY_SHARED".equals(scope)) {
+            if (!"上海市".equals(city) || !district.isBlank() || !town.isBlank()) {
+                throw new BusinessException(400, "市级共享内容必须明确归属上海市且不能绑定区或街镇");
+            }
+        } else if (!"全国".equals(province) || !city.isBlank() || !district.isBlank() || !town.isBlank()) {
+            throw new BusinessException(400, "全国共享内容必须使用全国范围且不能绑定地方行政区");
+        }
+        return scope;
+    }
+
     @Transactional
     public Map<String, Object> publish(long id, String title, String category, String sourceName,
                                        String sourceUrl, boolean allowPublicOriginal, String publishChannel,
@@ -1405,6 +1443,7 @@ public class DocumentService {
         if (webArticle && !Boolean.TRUE.equals(document.get("image_reviewed"))) {
             throw new BusinessException(400, "第三方文章封面尚未人工确认，请确认图片来源或改用分类默认图");
         }
+        String publicationScope = validatedPublicationScope(document);
         String summary = publicationSummary(id);
         String slug = (webArticle ? "news-" : "guide-") + id;
         String contentKind = nullableString(document.get("content_kind"));
@@ -1446,7 +1485,7 @@ public class DocumentService {
                 contentKind.isBlank() ? null : contentKind, cover.isBlank() ? null : cover,
                 local, readingMinutes, importance, document.get("province"), document.get("city"),
                 document.get("district"), document.get("street_or_town"), document.get("community"),
-                document.get("region_code"), document.getOrDefault("local_scope", "UNSPECIFIED"),
+                document.get("region_code"), publicationScope,
                 effectiveFrom, deadlineAt, expiresAt, Timestamp.valueOf(LocalDateTime.now()), "VERIFIED",
                 channel, promoteToRecommend, level, promoteToRecommend);
         if (document.get("previous_version_id") instanceof Number previous) {

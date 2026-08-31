@@ -3,6 +3,7 @@ package cn.jianda;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -75,6 +76,48 @@ class Phase992RegionMembershipIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[*].slug", hasItem("phase992-gucun")))
                 .andExpect(jsonPath("$.data[*].slug", not(hasItem("phase992-dachang"))));
+
+        mvc.perform(get("/api/public/items/{slug}", "phase992-dachang").param("regionCode", "310113102"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/public/items/{slug}", "phase992-dachang").param("regionCode", "310113109"))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/public/items/{slug}", "phase992-unclassified").param("regionCode", "310113102"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void publicSearchCoversSourcePublishedGeneratedTextAndReviewedFieldsWithoutDuplicates() throws Exception {
+        long documentId = jdbc.queryForObject(
+                "SELECT document_id FROM published_item WHERE slug='phase992-dachang'", Long.class);
+        jdbc.update("UPDATE published_item SET summary='大场办理摘要',source_name='宝山区大场权威来源' WHERE document_id=?", documentId);
+        jdbc.update("INSERT INTO generated_content(document_id,content_type,title,plain_text,content_json,status) "
+                + "VALUES (?,'SUMMARY','居民易读内容','请携带银龄服务登记表办理','[\"服务窗口在社区中心\"]','PUBLISHED')", documentId);
+        jdbc.update("INSERT INTO extracted_field(document_id,field_type,field_label,field_value,page_no,source_quote,confidence,review_status) "
+                + "VALUES (?,'MATERIAL','所需材料','银龄服务登记表',1,'请携带银龄服务登记表',0.99,'CONFIRMED')", documentId);
+
+        for (String keyword : java.util.List.of("大场本地服务", "办理摘要", "大场权威来源", "社区中心", "银龄服务登记表")) {
+            mvc.perform(get("/api/public/search").param("keyword", keyword).param("regionCode", "310113102"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[*].slug", hasItem("phase992-dachang")))
+                    .andExpect(jsonPath("$.data[?(@.slug == 'phase992-dachang')]", hasSize(1)));
+        }
+        mvc.perform(get("/api/public/search").param("keyword", "银龄服务登记表").param("regionCode", "310113109"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].slug", not(hasItem("phase992-dachang"))));
+    }
+
+    @Test
+    void expiredContentIsConsistentlyHiddenFromListSearchAndDetail() throws Exception {
+        jdbc.update("UPDATE published_item SET expires_at=DATEADD('DAY',-1,CURRENT_TIMESTAMP) "
+                + "WHERE slug='phase992-dachang'");
+        mvc.perform(get("/api/public/items").param("regionCode", "310113102"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].slug", not(hasItem("phase992-dachang"))));
+        mvc.perform(get("/api/public/search").param("keyword", "大场本地服务").param("regionCode", "310113102"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].slug", not(hasItem("phase992-dachang"))));
+        mvc.perform(get("/api/public/items/{slug}", "phase992-dachang").param("regionCode", "310113102"))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -162,6 +205,47 @@ class Phase992RegionMembershipIntegrationTest {
         mvc.perform(get("/api/public/items").param("regionCode", "310113112"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[*].slug", not(hasItem("guide-" + documentId))));
+        mvc.perform(get("/api/public/search").param("keyword", "顾村测试摘要").param("regionCode", "310113109"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].slug", hasItem("guide-" + documentId)));
+        mvc.perform(get("/api/public/items/{slug}", "guide-" + documentId).param("regionCode", "310113109"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/public/items/{slug}", "guide-" + documentId).param("regionCode", "310113102"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void publicationRejectsUnclassifiedScopeInsteadOfCreatingAHiddenPublicItem() throws Exception {
+        String organizationAuth = "Bearer " + login("org_admin");
+        String created = mvc.perform(post("/api/documents")
+                        .header("Authorization", organizationAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Phase992未分类发布阻断\",\"sourceName\":\"测试来源\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
+        long reviewerId = jdbc.queryForObject("SELECT id FROM staff_user WHERE username='org_admin'", Long.class);
+        jdbc.update("INSERT INTO generated_content(document_id,content_type,title,content_json,plain_text) "
+                + "VALUES (?,'SUMMARY','通俗摘要','[\"未分类摘要\"]','未分类摘要')", documentId);
+        jdbc.update("INSERT INTO review_record(document_id,reviewer_id,action,comment) VALUES (?,?,'APPROVE','仅验证发布阻断')",
+                documentId, reviewerId);
+
+        mvc.perform(post("/api/documents/{id}/publish", documentId)
+                        .header("Authorization", organizationAuth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"未分类内容不得发布",
+                                  "category":"社区服务",
+                                  "sourceName":"测试来源",
+                                  "publishChannel":"COMMUNITY",
+                                  "importanceLevel":"NORMAL"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("适用地区")));
+        org.junit.jupiter.api.Assertions.assertEquals(0L,
+                jdbc.queryForObject("SELECT COUNT(*) FROM published_item WHERE document_id=?", Long.class, documentId));
     }
 
     @Test

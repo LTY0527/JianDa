@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
 import BottomNav from "../components/BottomNav.vue";
 import ContentCard from "../components/ContentCard.vue";
-import { fetchItems } from "../api";
+import { fetchItems, searchPublicItems } from "../api";
 import { activeRegion } from "../region";
 import { MessageCircleQuestion, Search, WifiOff } from "lucide-vue-next";
 const route = useRoute();
@@ -14,33 +14,56 @@ const items = ref<any[]>([]);
 const loading = ref(true);
 const error = ref("");
 const title = computed(() => route.path === "/search" ? "搜索" : String(route.params.name || "全部内容"));
+const isSearch = computed(() => route.path === "/search");
 const stateKey = computed(() => `jianda_list_${route.path}`);
-const filtered = computed(() => items.value.filter((item) =>
+const filtered = computed(() => isSearch.value ? items.value : items.value.filter((item) =>
   !query.value || `${item.title}${item.summary}${item.source_name}${item.category}`.includes(query.value),
 ));
-watch(query, (value) => router.replace({ query: value ? { q: value } : {} }));
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+let loadVersion = 0;
+let initialized = false;
 async function load() {
+  const version = ++loadVersion;
   loading.value = true;
   error.value = "";
   try {
-    items.value = await fetchItems(
-      title.value === "搜索" || title.value === "全部内容" ? undefined : title.value,
-      activeRegion.value.region_code,
-    );
+    const keyword = query.value.trim();
+    const result = isSearch.value && keyword
+      ? await searchPublicItems(keyword, activeRegion.value.region_code)
+      : await fetchItems(title.value === "全部内容" || isSearch.value ? undefined : title.value, activeRegion.value.region_code);
+    if (version === loadVersion) items.value = result;
   } catch {
-    error.value = "网络连接失败，请检查服务后重试";
+    if (version === loadVersion) error.value = "网络连接失败，请检查服务后重试";
   } finally {
-    loading.value = false;
+    if (version === loadVersion) loading.value = false;
   }
 }
+function scheduleSearch() {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => void load(), 250);
+}
+watch(query, (value) => {
+  const normalized = value.trim();
+  const current = String(route.query.q || "");
+  if (normalized !== current) void router.replace({ query: normalized ? { ...route.query, q: normalized } : {} });
+  if (initialized && isSearch.value) scheduleSearch();
+});
+watch(() => route.query.q, (value) => {
+  const next = String(value || "");
+  if (next !== query.value) query.value = next;
+});
 onMounted(async () => {
   const saved = sessionStorage.getItem(stateKey.value);
   if (saved && !route.query.q) query.value = JSON.parse(saved).query || "";
+  initialized = true;
   await load();
   requestAnimationFrame(() => window.scrollTo(0, Number(saved ? JSON.parse(saved).scroll : 0)));
 });
 watch(() => activeRegion.value.region_code, load);
-onUnmounted(() => sessionStorage.setItem(stateKey.value, JSON.stringify({ query: query.value, scroll: window.scrollY })));
+onUnmounted(() => {
+  if (searchTimer) clearTimeout(searchTimer);
+  sessionStorage.setItem(stateKey.value, JSON.stringify({ query: query.value, scroll: window.scrollY }));
+});
 </script>
 <template>
   <div class="h5-page">

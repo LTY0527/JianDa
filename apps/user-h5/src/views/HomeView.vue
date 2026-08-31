@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import H5Header from "../components/H5Header.vue";
 import BottomNav from "../components/BottomNav.vue";
@@ -98,7 +98,15 @@ const featured = computed(() => {
 });
 const featuredHasVisual = computed(() => Boolean(featured.value && hasRealCover(featured.value)
   && !failedFeaturedIds.value.has(String(featured.value.id))));
-const feedItems = computed(() => channelItems.value.filter((item) => item.id !== featured.value?.id).slice(0, 12));
+const feedItems = computed(() => {
+  const ranked = channelItems.value.filter((item) => item.id !== featured.value?.id);
+  const latest = [...ranked].sort((a, b) =>
+    new Date(b.published_at).getTime() - new Date(a.published_at).getTime(),
+  )[0];
+  const latestAge = latest ? Math.max(0, Date.now() - new Date(latest.published_at).getTime()) : Infinity;
+  const guaranteed = latest && latestAge <= 72 * 60 * 60 * 1000 ? [latest] : [];
+  return [...guaranteed, ...ranked.filter((item) => item.id !== latest?.id)].slice(0, 12);
+});
 const selectedChannelLabel = computed(() => channels.find((channel) => channel.key === selectedChannel.value)?.label || "推荐");
 
 function feedKind(item: PublicItem): FeedKind {
@@ -129,7 +137,11 @@ function selectChannel(key: ChannelKey) {
   failedFeaturedIds.value = new Set();
   void router.replace({ path: "/", query: key === "recommend" ? {} : { channel: key } });
 }
-async function load() {
+let lastLoadedAt = 0;
+let loadPromise: Promise<void> | null = null;
+function load(): Promise<void> {
+  if (loadPromise) return loadPromise;
+  loadPromise = (async () => {
   loading.value = true;
   error.value = "";
   failedFeaturedIds.value = new Set();
@@ -144,9 +156,24 @@ async function load() {
     error.value = "暂时无法读取权威内容，请稍后再试";
   } finally {
     loading.value = false;
+    lastLoadedAt = Date.now();
   }
+  })();
+  void loadPromise.finally(() => { loadPromise = null; });
+  return loadPromise;
 }
-onMounted(load);
+function refreshWhenResumed() {
+  if (document.visibilityState === "visible" && Date.now() - lastLoadedAt >= 5_000) void load();
+}
+onMounted(() => {
+  window.addEventListener("focus", refreshWhenResumed);
+  document.addEventListener("visibilitychange", refreshWhenResumed);
+  void load();
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("focus", refreshWhenResumed);
+  document.removeEventListener("visibilitychange", refreshWhenResumed);
+});
 watch(() => activeRegion.value.region_code, load);
 </script>
 

@@ -168,6 +168,18 @@ class CoreFlowIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
         long documentId = objectMapper.readTree(created).path("data").path("id").asLong();
 
+        mvc.perform(put("/api/documents/{id}/region-scope", documentId).header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "localScope":"CITY_SHARED",
+                                  "province":"上海市",
+                                  "city":"上海市",
+                                  "regionCode":"310000"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
         MockMultipartFile file = new MockMultipartFile("file", "补贴通知.pdf", "application/pdf", "%PDF-demo".getBytes());
         mvc.perform(multipart("/api/documents/{id}/upload", documentId).file(file).header("Authorization", auth)
                         .param("manualText", "补贴对象为年满八十周岁的本市户籍老人。\n申请材料包括身份证、户口簿和银行卡。"))
@@ -215,7 +227,7 @@ class CoreFlowIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.slug").exists())
                 .andReturn().getResponse().getContentAsString();
         String slug = objectMapper.readTree(publish).path("data").path("slug").asText();
-        mvc.perform(get("/api/public/items/{slug}", slug)).andExpect(status().isOk())
+        mvc.perform(get("/api/public/items/{slug}", slug).param("regionCode", "310113102")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.title").value("集成测试补贴指南"))
                 .andExpect(jsonPath("$.data.generated.STEP_CARDS[0].title").value("准备材料"))
                 .andExpect(jsonPath("$.data.original_file_available").value(true));

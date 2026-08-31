@@ -448,6 +448,17 @@ class PublicImportIntegrationTest {
                 .andExpect(jsonPath("$.data.imageReviewRequired").value(true))
                 .andReturn().getResponse().getContentAsString();
         long documentId = objectMapper.readTree(imported).path("data").path("documentId").asLong();
+        mvc.perform(put("/api/documents/{id}/region-scope", documentId)
+                        .header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "localScope":"NATIONAL_SHARED",
+                                  "province":"全国",
+                                  "regionCode":"100000"
+                                }
+                                """))
+                .andExpect(status().isOk());
         mvc.perform(get("/api/documents/{id}", documentId).header("Authorization", auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.image_source_name").value("新华网"))
@@ -510,7 +521,7 @@ class PublicImportIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         String slug = objectMapper.readTree(published).path("data").path("slug").asText();
-        mvc.perform(get("/api/public/items/{slug}", slug))
+        mvc.perform(get("/api/public/items/{slug}", slug).param("regionCode", "310113102"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.source_url").value(url))
                 .andExpect(jsonPath("$.data.image_source_url").value(url))
@@ -615,6 +626,18 @@ class PublicImportIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
         long documentId = objectMapper.readTree(imported).path("data").path("documentId").asLong();
 
+        mvc.perform(put("/api/documents/{id}/region-scope", documentId)
+                        .header("Authorization", auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "localScope":"NATIONAL_SHARED",
+                                  "province":"全国",
+                                  "regionCode":"100000"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
         mvc.perform(post("/api/public-sources/import/fixture/{fixtureId}", "anti-fraud-elderly-2026")
                         .header("Authorization", auth)).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409));
@@ -641,13 +664,16 @@ class PublicImportIntegrationTest {
                         .header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"publishChannel\":\"COMMUNITY\"}"))
                 .andExpect(status().isOk());
-        mvc.perform(get("/api/public/items/{slug}", slug)).andExpect(status().isOk())
+        mvc.perform(get("/api/public/items/{slug}", slug).param("regionCode", "310113102"))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.publish_channel").value("COMMUNITY"));
-        mvc.perform(get("/api/public/items/{slug}", slug)).andExpect(status().isOk())
+        mvc.perform(get("/api/public/items/{slug}", slug).param("regionCode", "310113102"))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.generated.RISK_WARNING[0]").value("正规退款不会要求向安全账户转账。"));
         mvc.perform(post("/api/documents/{id}/withdraw", documentId).header("Authorization", auth))
                 .andExpect(status().isOk());
-        mvc.perform(get("/api/public/items/{slug}", slug)).andExpect(status().isNotFound())
+        mvc.perform(get("/api/public/items/{slug}", slug).param("regionCode", "310113102"))
+                .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
     }
 

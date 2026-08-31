@@ -111,7 +111,7 @@ class PublicOrderingIntegrationTest {
     }
 
     @Test
-    void expiredContentLeavesListsButDetailRemainsTraceable() throws Exception {
+    void expiredContentLeavesListsAndPublicDetail() throws Exception {
         jdbc.update("UPDATE published_item SET expires_at=DATEADD('DAY',-1,CURRENT_TIMESTAMP),"
                 + "deadline_at=DATEADD('DAY',-2,CURRENT_TIMESTAMP) WHERE slug='ordering-test-important'");
 
@@ -122,9 +122,7 @@ class PublicOrderingIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[*].slug", not(hasItem("ordering-test-important"))));
         mvc.perform(get("/api/public/items/ordering-test-important"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.slug").value("ordering-test-important"))
-                .andExpect(jsonPath("$.data.expires_at").exists());
+                .andExpect(status().isNotFound());
     }
 
     private void insert(String slug, String category, boolean pinned, int importance,

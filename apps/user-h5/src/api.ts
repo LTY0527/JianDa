@@ -148,6 +148,13 @@ export async function fetchItems(category?: string, regionCode?: string): Promis
   return response.data.data;
 }
 
+export async function searchPublicItems(keyword: string, regionCode: string): Promise<PublicItem[]> {
+  const response = await client.get("/public/search", {
+    params: { keyword: keyword.trim(), regionCode },
+  });
+  return response.data.data;
+}
+
 export interface PublicItemNeighbor {
   id: number;
   slug: string;
@@ -173,8 +180,8 @@ export async function fetchNeighbors(
   return response.data.data;
 }
 
-export async function fetchDetail(slug: string): Promise<Record<string, any>> {
-  const response = await client.get(`/public/items/${slug}`);
+export async function fetchDetail(slug: string, regionCode: string): Promise<Record<string, any>> {
+  const response = await client.get(`/public/items/${slug}`, { params: { regionCode } });
   return response.data.data;
 }
 

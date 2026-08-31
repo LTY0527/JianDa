@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
 import { fetchDetail, publicOriginalFileUrl } from "../api";
+import { activeRegion } from "../region";
 import PdfReader from "@jianda/shared-ui/PdfReader.vue";
 import ImageReader from "@jianda/shared-ui/ImageReader.vue";
 
@@ -15,7 +16,7 @@ const isImage = computed(() => String(item.value?.mime_type || "").startsWith("i
 
 onMounted(async () => {
   try {
-    item.value = await fetchDetail(String(route.params.slug));
+    item.value = await fetchDetail(String(route.params.slug), activeRegion.value.region_code);
     if (item.value.source_type === "WEB_ARTICLE") {
       error.value = "网页文章没有 PDF 或图片原文件，请查看官方原文。";
     } else if (!item.value.original_file_available) {

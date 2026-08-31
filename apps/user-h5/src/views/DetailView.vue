@@ -134,7 +134,7 @@ async function loadDetail(slug: string) {
     conditionalMaterials: [], fees: [], deliveries: [], deadlines: [], amendments: [], whyItMatters: [],
     actionChecklist: [], keyFacts: [], commonMistakes: [], faq: [], scope: {}, uncertainties: [] };
   try {
-    item.value = await fetchDetail(slug);
+    item.value = await fetchDetail(slug, activeRegion.value.region_code);
     if (version !== loadVersion) return;
     void recordContentView(item.value.id).catch(() => undefined);
     fetchNeighbors(slug, preferences.preferSameCategory, activeRegion.value.region_code)

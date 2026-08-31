@@ -186,7 +186,7 @@ async function loadContext() {
   contextUnavailable.value = false;
   if (!contextSlug.value) return;
   try {
-    const detail = await fetchDetail(contextSlug.value);
+    const detail = await fetchDetail(contextSlug.value, activeRegion.value.region_code);
     contextTitle.value = String(detail.title || "");
     contextCategory.value = String(detail.category || "已审核内容");
     contextRegion.value = String(detail.street_or_town || "当前地区");

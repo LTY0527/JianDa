@@ -43,7 +43,7 @@ async function load() {
     const guides = serviceItems.value;
     const resolved = await Promise.all(guides.map(async (item) => {
       try {
-        const detail = await fetchDetail(item.slug);
+        const detail = await fetchDetail(item.slug, activeRegion.value.region_code);
         const steps = Array.isArray(detail.generated?.STEP_CARDS) ? detail.generated.STEP_CARDS.length : 0;
         return [item.id, {
           item,

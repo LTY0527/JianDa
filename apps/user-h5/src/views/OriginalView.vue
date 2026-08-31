@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import AppTopBar from "../components/navigation/AppTopBar.vue";
 import { fetchDetail, type PublicItem } from "../api";
 import { contentKind } from "../content";
+import { activeRegion } from "../region";
 import { Download } from "lucide-vue-next";
 const route = useRoute();
 const title = ref("提取文本");
@@ -39,7 +40,7 @@ function downloadOriginal() {
 }
 onMounted(async () => {
   try {
-    const item = await fetchDetail(String(route.params.slug));
+    const item = await fetchDetail(String(route.params.slug), activeRegion.value.region_code);
     title.value = item.title;
     rawText.value = item.raw_text || "";
     source.value = item.source_name;
